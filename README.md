@@ -1,33 +1,38 @@
 # docsrs-mcp
 
-A minimal, self-hostable Model Context Protocol (MCP) server that lets AI agents query Rust crate documentation without API keys.
+A minimal, self-hostable Model Context Protocol (MCP) server that lets AI agents query Rust crate documentation with vector search capabilities.
 
 ## Overview
 
 docsrs-mcp provides MCP endpoints for:
 - Fetching crate summaries and metadata
-- Semantic search within Rust documentation
-- Retrieving complete rustdoc for any documented item
+- Semantic search within Rust crate descriptions (MVP)
+- Retrieving documentation for specific items
+- Listing available crate versions
 
-Built with FastAPI and sqlite-vss for efficient vector search, it caches documentation locally and serves it through the open MCP standard.
+Built with FastAPI and sqlite-vec for efficient vector search, it caches crate data locally and serves it through the MCP standard.
 
 ## Features
 
 - 🚀 **Zero-install launch** with `uvx`
 - 🔍 **Vector search** powered by BAAI/bge-small-en-v1.5 embeddings
-- 💾 **Smart caching** with automatic LRU eviction (2GB limit)
-- ⚡ **Fast performance** - <500ms search latency, <1GB memory usage
-- 🔒 **Rate limiting** - 30 requests/second per IP
+- 💾 **Local caching** in SQLite with sqlite-vec extension
+- ⚡ **Fast performance** - Low latency search, efficient memory usage
 - 📦 **Self-contained** - Single Python process, file-backed SQLite
+- 🛠️ **Easy development** - UV-based tooling, async/await architecture
 
 ## Quick Start
 
 ```bash
-# Run directly from GitHub (no installation needed)
-uvx --from "git+https://github.com/peterkloiber/docsrs-mcp.git" docsrs-mcp
+# Run directly from the current directory
+uvx --from . docsrs-mcp
 
-# Or from PyPI once published
-uvx docsrs-mcp@latest
+# Or clone and run
+git clone https://github.com/yourusername/docsrs-mcp.git
+cd docsrs-mcp
+uvx --from . docsrs-mcp
+
+# The server will start on http://localhost:8000
 ```
 
 ## MCP Tools
@@ -35,16 +40,39 @@ uvx docsrs-mcp@latest
 The server exposes the following MCP tools:
 
 ### `get_crate_summary`
-Returns crate name, version, description, and module list.
+Returns crate metadata including name, version, description, and repository info.
+
+```json
+{
+  "crate_name": "tokio",
+  "version": "latest"  // optional
+}
+```
 
 ### `search_items`
-Performs vector similarity search across crate documentation.
+Performs vector similarity search on crate descriptions (full rustdoc search planned).
+
+```json
+{
+  "crate_name": "tokio",
+  "query": "async runtime",
+  "k": 5  // optional, number of results
+}
+```
 
 ### `get_item_doc`
-Retrieves complete rustdoc markdown for a specific item.
+Retrieves documentation for a specific item (currently limited to cached content).
 
-### `list_versions`
-Lists all available versions of a crate.
+```json
+{
+  "crate_name": "tokio",
+  "item_path": "crate"
+}
+```
+
+### Resources
+
+- `/mcp/resources/versions` - Lists all cached versions of a crate
 
 ## Development
 
@@ -57,9 +85,12 @@ cd docsrs-mcp
 uv sync --dev
 
 # Run development server
-uv run python -m docsrs_mcp.cli
+uv run docsrs-mcp
 
-# Alternative: run tests
+# Run with background process (avoids terminal hanging)
+nohup uv run docsrs-mcp > server.log 2>&1 & echo $!
+
+# Run tests
 uv run pytest
 
 # Add new dependencies
@@ -70,9 +101,10 @@ uv add --dev package-name        # Development dependency
 ## Architecture
 
 - **Web Layer**: FastAPI with MCP endpoint handlers
-- **Ingestion**: Async pipeline for downloading and processing rustdoc JSON
-- **Storage**: SQLite with vector search extension (sqlite-vss)
+- **Ingestion**: Async pipeline fetching from crates.io API
+- **Storage**: SQLite with vector search extension (sqlite-vec)
 - **Embedding**: FastEmbed with ONNX-optimized BAAI/bge-small-en-v1.5 model
+- **Caching**: File-based SQLite databases in `./cache` directory
 
 See [Architecture.md](Architecture.md) for detailed system design.
 
@@ -90,8 +122,15 @@ MIT License - see LICENSE file for details.
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Current Limitations (MVP)
+
+- Only indexes crate descriptions, not full rustdoc content
+- No rate limiting implemented yet
+- Basic error handling
+- Manual cache management
+
 ## Acknowledgments
 
 - Built on the [Model Context Protocol](https://modelcontextprotocol.io/) standard
-- Documentation sourced from [docs.rs](https://docs.rs/)
-- Vector search powered by [sqlite-vss](https://github.com/asg017/sqlite-vss)
+- Crate data from [crates.io](https://crates.io/)
+- Vector search powered by [sqlite-vec](https://github.com/asg017/sqlite-vec)

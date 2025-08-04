@@ -5,23 +5,92 @@
   "categories": {
     "commonErrors": {
       "description": "Frequently encountered errors and their solutions",
-      "entries": []
+      "entries": [
+        {
+          "error": "SQLite threading error with aiosqlite",
+          "context": "Database operations in async context",
+          "solution": "Use aiosqlite properly with await db.execute() instead of synchronous calls",
+          "prevention": "Always use await with aiosqlite operations, never mix sync/async database calls",
+          "dateEncountered": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "no such function: vec_distance",
+          "context": "Vector similarity search queries in SQLite with vss extension",
+          "solution": "Use MATCH operator instead of vec_distance() function for vector searches",
+          "prevention": "Reference sqlite-vss documentation for correct query syntax",
+          "dateEncountered": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "LIMIT or 'k = ?' constraint required",
+          "context": "Vector similarity search queries without proper constraints",
+          "solution": "Add 'AND k = ?' parameter to MATCH queries to specify result count",
+          "prevention": "Always include k parameter in vector search queries",
+          "dateEncountered": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        }
+      ]
     },
     "performanceIssues": {
       "description": "Performance bottlenecks and optimization strategies",
-      "entries": []
+      "entries": [
+        {
+          "error": "Model loading delay on first request",
+          "context": "Embedding model initialization causes slow first response",
+          "solution": "Model loading happens on first embedding generation - expected behavior",
+          "prevention": "Consider warming up models during server startup for production",
+          "dateEncountered": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        }
+      ]
     },
     "integrationChallenges": {
       "description": "Issues with third-party services and libraries",
-      "entries": []
+      "entries": [
+        {
+          "error": "SQLite extension loading issues",
+          "context": "Loading sqlite-vss extension for vector operations",
+          "solution": "Use SELECT load_extension() SQL command instead of direct Python extension loading",
+          "prevention": "Always use SQL-based extension loading for better compatibility",
+          "dateEncountered": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/database.py"]
+        }
+      ]
     },
     "deploymentIssues": {
       "description": "Problems encountered during deployment",
-      "entries": []
+      "entries": [
+        {
+          "error": "Server startup hanging terminal",
+          "context": "Running development server blocks terminal session",
+          "solution": "Use nohup and background process with PID tracking: 'nohup uv run docsrs-mcp > server.log 2>&1 & echo $!'",
+          "prevention": "Always run servers in background for development, save PID for cleanup",
+          "dateEncountered": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        }
+      ]
     },
     "lessonsLearned": {
       "description": "Important insights gained during development",
-      "entries": []
+      "entries": [
+        {
+          "lesson": "SQLite WAL mode improves concurrency",
+          "context": "Database performance with concurrent access",
+          "details": "WAL mode enabled for better concurrency in multi-user scenarios",
+          "impact": "Reduced database lock contention",
+          "dateLearned": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/database.py"]
+        },
+        {
+          "lesson": "Embeddings caching strategy",
+          "context": "Vector storage and reuse patterns",
+          "details": "Embeddings cached in SQLite for reuse across sessions",
+          "impact": "Significant performance improvement for repeated queries",
+          "dateLearned": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"]
+        }
+      ]
     }
   },
   "errorTemplate": {
@@ -53,17 +122,26 @@
     "vectorSearch": [
       "Check embedding dimensions match (384 for BAAI/bge-small-en-v1.5)",
       "Verify FAISS index is properly initialized with vss_index!",
-      "Monitor memory usage during batch operations"
+      "Monitor memory usage during batch operations",
+      "Use MATCH operator instead of vec_distance() for queries",
+      "Always include 'AND k = ?' parameter in vector search queries"
     ],
     "ingestion": [
       "Check asyncio.Lock is properly acquired/released",
       "Verify URL construction for docs.rs API",
-      "Monitor decompression memory usage for large files"
+      "Monitor decompression memory usage for large files",
+      "Use await with all aiosqlite database operations"
     ],
     "rateLimiting": [
       "Ensure Redis is running for distributed limiting",
       "Check IP extraction middleware ordering",
       "Verify rate limit headers in responses"
+    ],
+    "serverManagement": [
+      "Start server: nohup uv run docsrs-mcp > server.log 2>&1 & echo $!",
+      "Kill server: kill <PID>",
+      "Test endpoints: curl -s http://localhost:8000/endpoint | jq .",
+      "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\""
     ]
   },
   "performanceMetrics": {

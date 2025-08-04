@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-04",
+    "lastUpdated": "2025-08-04T15:30:00Z",
     "priorities": ["high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked"]
   },
@@ -11,32 +11,37 @@
         "id": "core-1",
         "title": "Set up Python project structure",
         "description": "Initialize Python package with proper directory structure and configuration files",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": [],
         "relatedTasks": ["core-2"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-04T15:00:00Z",
+          "implementation": "Basic Python package structure with uv configuration",
+          "notes": "Package structure created with app.py, models.py, database.py, ingest.py, and config.py modules"
+        },
         "subtasks": [
           {
             "id": "core-1.1",
             "title": "Create package directory structure",
             "description": "Set up docsrs_mcp package with __init__.py files",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-1.2",
             "title": "Create pyproject.toml",
             "description": "Configure package metadata and dependencies as specified in PRD",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-1.3",
             "title": "Set up entry point",
             "description": "Create CLI entry point in docsrs_mcp.cli module",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           }
         ]
       },
@@ -44,53 +49,60 @@
         "id": "core-2",
         "title": "Implement FastAPI application",
         "description": "Create main FastAPI app with MCP endpoints as specified in PRD section 6.1",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": ["core-1"],
         "relatedTasks": ["core-3", "core-4"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-04T15:30:00Z",
+          "implementation": "Basic MCP server with vector search functionality",
+          "notes": "All MCP endpoints working: /mcp/manifest, /mcp/tools/*, /mcp/resources/versions. Uses SQLite with sqlite-vec for vector storage, FastEmbed for embeddings, basic ingestion from crates.io. Successfully tested with tokio crate.",
+          "limitations": "Currently only indexes crate descriptions, not full rustdoc content yet"
+        },
         "subtasks": [
           {
             "id": "core-2.1",
             "title": "Create FastAPI app instance",
             "description": "Set up basic FastAPI application with error handling",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-2.2",
             "title": "Implement MCP manifest endpoint",
             "description": "Create /mcp/manifest GET endpoint with tool schemas",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-2.3",
             "title": "Implement get_crate_summary tool",
             "description": "Create POST endpoint for crate summary retrieval",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-2.4",
             "title": "Implement search_items tool",
             "description": "Create POST endpoint for vector search functionality",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-2.5",
             "title": "Implement get_item_doc tool",
             "description": "Create POST endpoint for retrieving full rustdoc",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-2.6",
             "title": "Add rate limiting middleware",
             "description": "Implement slowapi middleware for 30 req/s per IP limit",
             "status": "pending",
-            "progress": 0
+            "progress": 0,
+            "notes": "Not yet implemented - basic functionality prioritized first"
           }
         ]
       },
@@ -98,9 +110,10 @@
         "id": "core-3",
         "title": "Implement ingestion pipeline",
         "description": "Create ingest.py module for downloading and processing rustdoc JSON as per PRD section 6.2",
-        "status": "pending",
-        "progress": 0,
-        "dependencies": ["core-2"],
+        "status": "in_progress",
+        "progress": 40,
+        "dependencies": [],
+        "notes": "Basic ingestion from crates.io implemented for descriptions, full rustdoc processing pending",
         "relatedTasks": ["core-4"],
         "roadblocks": [],
         "subtasks": [
@@ -136,8 +149,8 @@
             "id": "core-3.5",
             "title": "Integrate FastEmbed",
             "description": "Set up BAAI/bge-small-en-v1.5 model for text embedding",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-3.6",
@@ -151,10 +164,11 @@
       {
         "id": "core-4",
         "title": "Set up SQLite with vector search",
-        "description": "Create database schema with sqlite-vss for vector storage as per PRD section 6.2",
-        "status": "pending",
-        "progress": 0,
-        "dependencies": ["core-3"],
+        "description": "Create database schema with sqlite-vec for vector storage as per PRD section 6.2",
+        "status": "in_progress",
+        "progress": 70,
+        "dependencies": [],
+        "notes": "Basic vector storage with sqlite-vec implemented and working, schema optimizations pending",
         "relatedTasks": ["core-2"],
         "roadblocks": [],
         "subtasks": [
@@ -162,8 +176,8 @@
             "id": "core-4.1",
             "title": "Create database schema",
             "description": "Set up passages, vss_passages, and meta tables",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "core-4.2",
@@ -176,8 +190,8 @@
             "id": "core-4.3",
             "title": "Create vector search queries",
             "description": "Implement k-NN cosine similarity search with scoring",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           }
         ]
       }

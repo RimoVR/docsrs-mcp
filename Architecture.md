@@ -157,22 +157,16 @@ erDiagram
 
 ```mermaid
 graph TD
-    subgraph "MCP Tools"
-        MANIFEST[GET /mcp/manifest<br/>Tool definitions]
-        SUMMARY[POST /mcp/tools/get_crate_summary<br/>Crate overview]
-        SEARCH[POST /mcp/tools/search_items<br/>Vector search]
-        DOC[POST /mcp/tools/get_item_doc<br/>Full rustdoc]
-        VERSIONS[GET /mcp/resources/versions<br/>List versions]
+    subgraph "MCP Tools (MVP)"
+        SEARCH[search_crates<br/>Vector similarity search<br/>Input: query text<br/>Output: ranked crate list]
     end
     
     subgraph "Support Endpoints"
         HEALTH[GET /health<br/>Liveness probe]
+        TOOLS[GET /tools<br/>MCP tool definitions]
     end
     
-    MANIFEST --> SUMMARY
-    MANIFEST --> SEARCH
-    MANIFEST --> DOC
-    MANIFEST --> VERSIONS
+    TOOLS --> SEARCH
 ```
 
 ## Technology Stack
@@ -204,8 +198,9 @@ mindmap
       
     Storage
       SQLite
-      sqlite-vss (vector extension)
-      FAISS (vector index backend)
+      sqlite-vec (vector extension)
+      aiosqlite (async SQLite)
+      File-based cache (./cache)
       
     ML/Embedding
       FastEmbed
@@ -213,9 +208,9 @@ mindmap
       BAAI/bge-small-en-v1.5
       
     HTTP Client
-      aiohttp
-      zstandard (decompression)
+      aiohttp 3.9.5 (pinned for memory leak fix)
       orjson (JSON parsing)
+      crates.io API integration
       
     Deployment
       uvx (zero-install)
@@ -311,42 +306,77 @@ graph TB
 
 | Component | Target | Notes |
 |-----------|--------|-------|
-| Warm search latency | < 500ms P95 | Vector search + result formatting |
-| Cold ingest | < 3s | For crates up to 10 MiB compressed |
-| Memory usage | < 1 GiB RSS | Including ONNX model + FAISS indices |
-| Cache size | < 2 GiB | Auto-evicted LRU |
-| Rate limit | 30 req/s per IP | Via slowapi middleware |
-| Concurrent ingests | 1 per crate@version | asyncio.Lock prevents duplicates |
+| Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH |
+| Ingest latency | < 1s | Crate description only (MVP) |
+| Memory usage | < 512 MiB RSS | Including FastEmbed model |
+| Cache storage | ./cache directory | File-based, persistent |
+| Embedding model | BAAI/bge-small-en-v1.5 | 384 dimensions, optimized for retrieval |
+| Async architecture | aiosqlite + asyncio | Non-blocking I/O operations |
 
 ## Security Model
 
 ```mermaid
 graph LR
     subgraph "Input Validation"
-        IV[Pydantic Models<br/>extra=forbid]
+        IV[Pydantic Models<br/>Type safety & validation]
     end
     
     subgraph "Origin Control"
-        OC[HTTPS only<br/>docs.rs domain]
+        OC[HTTPS only<br/>crates.io API domain]
     end
     
-    subgraph "Size Limits"
-        SL[30 MiB compressed<br/>100 MiB decompressed]
+    subgraph "Cache Safety"
+        CS[File-based cache<br/>./cache directory<br/>Sanitized filenames]
     end
     
-    subgraph "Path Safety"
-        PS[Sanitized filenames<br/>cache/{crate}/{version}.db]
-    end
-    
-    subgraph "Rate Limiting"
-        RL[30 req/s per IP<br/>slowapi middleware]
+    subgraph "Memory Management"
+        MM[aiohttp 3.9.5<br/>Fixed memory leaks<br/>Async resource cleanup]
     end
     
     IV --> OC
-    OC --> SL
-    SL --> PS
-    PS --> RL
+    OC --> CS
+    CS --> MM
 ```
+
+## Implementation Decisions
+
+### Key Architectural Choices Made
+
+**Vector Storage: sqlite-vec over sqlite-vss**
+- sqlite-vss is deprecated, sqlite-vec is the modern successor
+- Better performance and active maintenance
+- Native SQLite integration with MATCH operator for similarity search
+
+**HTTP Client: aiohttp 3.9.5 (Pinned)**
+- Memory leaks discovered in aiohttp 3.10+ versions
+- Version pinning ensures stability in production deployments
+- Async architecture maintained with proven stable version
+
+**Embedding Model: FastEmbed + BAAI/bge-small-en-v1.5**
+- Optimized for retrieval tasks with 384-dimensional vectors
+- Good balance of accuracy and performance for crate descriptions
+- ONNX runtime for efficient inference without GPU requirements
+
+**Simple Module Structure**
+- Five core modules: app.py, config.py, models.py, database.py, ingest.py
+- Minimal complexity, easy to understand and maintain
+- Direct async/await patterns throughout
+
+**MVP Focus: Crate Descriptions Only**
+- Basic ingestion pipeline processes crate metadata from crates.io API
+- Embeddings generated from crate descriptions for semantic search
+- Future expansion to full documentation planned for v2
+
+**File-Based Caching**
+- ./cache directory for persistent storage
+- SQLite databases per crate for efficient organization
+- Simple filesystem-based cache management
+
+### Data Flow Architecture
+
+1. **Ingestion**: Client requests → Check cache → Fetch from crates.io API → Generate embeddings → Store in SQLite
+2. **Search**: Query → Vector similarity search using sqlite-vec MATCH → Return ranked results
+3. **Caching**: Persistent file-based cache in ./cache directory for fast subsequent access
 
 ## Future Considerations (Out of Scope v1)
 

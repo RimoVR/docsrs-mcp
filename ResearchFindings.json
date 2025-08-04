@@ -22,21 +22,49 @@
     },
     "vectorSearch": {
       "sqliteVss": {
-        "status": "Deprecated but functional",
+        "status": "DEPRECATED - DO NOT USE",
         "backend": "FAISS",
         "limitations": [
           "1GB index size limit",
           "No GPU support",
-          "CPU-only operations"
+          "CPU-only operations",
+          "No longer maintained",
+          "Incompatible with modern SQLite versions"
         ],
-        "alternative": "sqlite-vec (recommended for new projects)"
+        "replacement": "sqlite-vec (REQUIRED for new projects)"
+      },
+      "sqliteVec": {
+        "status": "Current standard for SQLite vector search",
+        "version": "0.1.6",
+        "backend": "Native SQLite extension",
+        "features": [
+          "Production-ready vector search",
+          "MATCH operator for vector queries",
+          "KNN search with k constraint",
+          "Better performance than sqlite-vss",
+          "Active maintenance and development"
+        ],
+        "syntax": {
+          "searchOperator": "MATCH (not vec_distance)",
+          "knnConstraint": "Requires 'k = ?' parameter for KNN queries",
+          "example": "SELECT * FROM embeddings WHERE vec MATCH ? AND k = 10"
+        },
+        "installation": "pip install sqlite-vec"
       },
       "embedding": {
         "library": "FastEmbed",
+        "version": "<0.7.0",
+        "versionConstraint": "Required for onnxruntime compatibility",
         "model": "BAAI/bge-small-en-v1.5",
         "dimensions": 384,
         "optimization": "ONNX for CPU inference",
         "performance": "2-4x faster than PyTorch",
+        "modelDownload": "Automatic on first use - no manual download needed",
+        "onnxruntimeCompatibility": {
+          "issue": "FastEmbed newer versions incompatible with onnxruntime >=1.20",
+          "solution": "Pin onnxruntime <1.20 OR use FastEmbed <0.7.0",
+          "recommendation": "Use FastEmbed <0.7.0 for better stability"
+        },
         "requirements": [
           "libgomp1",
           "libatlas-base-dev",
@@ -46,8 +74,13 @@
       "implementation": {
         "batchSize": 32,
         "insertBatchSize": 1000,
-        "indexCommand": "vss_index!",
-        "searchMethod": "k-NN cosine similarity"
+        "indexCommand": "CREATE INDEX (for sqlite-vec)",
+        "searchMethod": "k-NN cosine similarity with MATCH operator",
+        "asyncDatabase": {
+          "library": "aiosqlite",
+          "purpose": "Async SQLite operations for better performance",
+          "installation": "pip install aiosqlite"
+        }
       }
     },
     "docsRsIntegration": {
@@ -56,7 +89,13 @@
         "formats": [".json", ".json.zst", ".json.gz"],
         "urlPattern": "/crate/{name}/{version}/{target}/json.zst",
         "compressionPreference": ".zst (zstandard)",
-        "parsingLibrary": "rustdoc-types crate"
+        "parsingLibrary": "rustdoc-types crate",
+        "parsingComplexity": {
+          "status": "Complex nested JSON structure",
+          "mvpApproach": "Use only crate descriptions for initial implementation",
+          "fullParsing": "Requires significant effort for complete documentation extraction",
+          "recommendation": "Start simple, expand incrementally based on user needs"
+        }
       },
       "apiEndpoints": {
         "latestVersion": "/crate/{crate}/latest/json",
@@ -88,11 +127,19 @@
       },
       "httpClient": {
         "library": "aiohttp",
-        "version": ">=3.9",
+        "version": "3.9.5",
+        "versionConstraint": "CRITICAL: Pin to 3.9.5 - versions 3.10+ have severe memory leaks",
+        "memoryLeakIssue": {
+          "affectedVersions": "3.10.0 and higher",
+          "severity": "Severe memory leaks in production",
+          "solution": "Pin to aiohttp==3.9.5 until issue resolved",
+          "tracking": "Monitor aiohttp releases for fix"
+        },
         "bestPractices": [
           "Single ClientSession per app",
           "Connection pooling",
-          "Proper cleanup on shutdown"
+          "Proper cleanup on shutdown",
+          "Monitor memory usage in production"
         ]
       },
       "rateLimiting": {
@@ -208,17 +255,25 @@
   "recommendations": {
     "implementation": [
       "Start with FastMCP for quick MCP server setup",
-      "Use sqlite-vss initially, plan migration to sqlite-vec",
+      "MANDATORY: Use sqlite-vec 0.1.6 (sqlite-vss is deprecated)",
+      "CRITICAL: Pin aiohttp to 3.9.5 to avoid memory leaks",
+      "Use FastEmbed <0.7.0 for onnxruntime compatibility",
+      "Implement aiosqlite for async database operations",
+      "Use MATCH operator syntax for sqlite-vec queries",
       "Implement connection pooling for aiohttp from start",
       "Set up proper asyncio task management",
-      "Use streaming decompression for large rustdoc files"
+      "Use streaming decompression for large rustdoc files",
+      "Start with simple crate description parsing for MVP"
     ],
     "performance": [
       "Batch embeddings in groups of 32",
       "Batch database inserts in groups of 1000",
       "Use uvloop for event loop optimization",
       "Implement caching at multiple levels",
-      "Profile memory usage early and often"
+      "Profile memory usage early and often",
+      "Monitor aiohttp memory usage closely due to version constraints",
+      "Use sqlite-vec MATCH operator for optimal query performance",
+      "Include k constraint in all KNN queries for sqlite-vec"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

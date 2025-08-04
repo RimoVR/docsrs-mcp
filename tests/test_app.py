@@ -1,7 +1,7 @@
 """Tests for the FastAPI application."""
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from docsrs_mcp.app import app
 

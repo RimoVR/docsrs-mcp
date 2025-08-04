@@ -41,9 +41,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Principles
 
+### Core Philosophy
+- **Don't let perfect be the enemy of good** - Ship working solutions, iterate based on real usage
+- **Be as efficient and effective as reasonably achievable** - Balance optimization with development speed
+- **Keep it simple, stupid (KISS)** - Complexity is the enemy of reliability
+
+### Implementation Guidelines
+
 1. **Early Error Detection**
    - Use assertions liberally to catch issues during development
    - Fail fast with clear error messages
+   - But don't over-engineer error handling - handle what matters
 
 2. **No Silent Failures**
    - Never use fallbacks or TODOs that hide errors. Never replace existing implementations with todo markers.
@@ -63,6 +71,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - Follow language idioms and conventions
    - Prioritize simplicity and maintainability
    - Optimize for readability over cleverness
+   - Start with the simplest solution that works
+   - Add complexity only when proven necessary
 
 ## Key Implementation Details
 
@@ -125,3 +135,24 @@ uv run ruff check --diff .   # Show what would change
 ```
 
 **Never use**: black, flake8, pylint, isort, autopep8, or any other formatters/linters. Ruff replaces all of them with a single, fast, Rust-based tool.
+
+## Server Testing Best Practices
+
+### Background Process Management
+When testing servers with `uv run`, use background processes to avoid terminal hanging:
+
+```bash
+# Start server in background and capture PID
+nohup uv run docsrs-mcp > server.log 2>&1 & echo $!
+
+# Store PID for later use
+SERVER_PID=$(nohup uv run docsrs-mcp > server.log 2>&1 & echo $!)
+
+# Check server logs
+tail -f server.log
+
+# Kill server when done
+kill $SERVER_PID
+```
+
+**Important**: Never use bare `uv run docsrs-mcp &` as it requires manual interruption which can crash the terminal. Always use `nohup` with output redirection and PID capture for clean process management.
