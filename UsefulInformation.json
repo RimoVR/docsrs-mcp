@@ -79,5 +79,47 @@
       "caching": "LRU eviction when > 2GB",
       "asyncio": "Use asyncio.gather for concurrent operations"
     }
+  },
+  "codeQuality": {
+    "ruff": {
+      "description": "Exclusive linting and formatting tool for this project",
+      "replacesTools": ["black", "flake8", "isort", "pylint", "pycodestyle", "autopep8"],
+      "commonCommands": {
+        "lint": "uv run ruff check .",
+        "lintFix": "uv run ruff check --fix .",
+        "format": "uv run ruff format .",
+        "formatCheck": "uv run ruff format --check .",
+        "showDiff": "uv run ruff check --diff ."
+      },
+      "configurationTips": {
+        "location": "pyproject.toml under [tool.ruff]",
+        "basicSetup": {
+          "lineLength": 88,
+          "target-version": "py310",
+          "selectRules": "Most rules enabled by default",
+          "ignorePatterns": "Use 'exclude' for directories"
+        },
+        "commonRules": {
+          "E": "pycodestyle errors",
+          "W": "pycodestyle warnings", 
+          "F": "Pyflakes",
+          "I": "isort import sorting",
+          "N": "pep8-naming",
+          "UP": "pyupgrade"
+        }
+      },
+      "integrationTips": [
+        "Add ruff extension to VS Code for real-time feedback",
+        "Configure pre-commit hook: 'uv run ruff check --fix && uv run ruff format'",
+        "CI should run both 'ruff check' and 'ruff format --check'",
+        "Use --fix flag in development, never in CI",
+        "Ruff auto-fixes are safe and preserve code semantics"
+      ],
+      "performanceNotes": [
+        "10-100x faster than traditional Python tools",
+        "Processes entire codebase in milliseconds",
+        "No need for separate tools or complex configuration"
+      ]
+    }
   }
 }

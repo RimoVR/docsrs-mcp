@@ -53,15 +53,18 @@ Lists all available versions of a crate.
 git clone https://github.com/peterkloiber/docsrs-mcp.git
 cd docsrs-mcp
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -e .
+# Install dependencies (uv automatically manages virtual environment)
+uv sync --dev
 
 # Run development server
-python -m docsrs_mcp.cli
+uv run python -m docsrs_mcp.cli
+
+# Alternative: run tests
+uv run pytest
+
+# Add new dependencies
+uv add package-name              # Production dependency
+uv add --dev package-name        # Development dependency
 ```
 
 ## Architecture

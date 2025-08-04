@@ -125,6 +125,84 @@
         "Render",
         "Generic VPS"
       ]
+    },
+    "pythonTooling": {
+      "uv": {
+        "version": ">=0.4.0",
+        "description": "Exclusive Python infrastructure tool for this project",
+        "capabilities": [
+          "Package management (replaces pip)",
+          "Virtual environment management (replaces venv)",
+          "Project execution (uvx for zero-install)",
+          "Dependency resolution and locking",
+          "Build system integration"
+        ],
+        "commands": {
+          "development": [
+            "uv sync --dev (install all dependencies)",
+            "uv run python -m module (execute with project env)",
+            "uv run pytest (run tests)",
+            "uv add package (add dependency)",
+            "uv remove package (remove dependency)"
+          ],
+          "distribution": [
+            "uvx --from . docsrs-mcp (test local install)",
+            "uvx --from git+URL docsrs-mcp (test from git)",
+            "uv build (create distribution packages)"
+          ]
+        },
+        "advantages": [
+          "10-100x faster than pip for dependency resolution",
+          "Built-in virtual environment management",
+          "Zero-install execution with uvx",
+          "Consistent lockfile management",
+          "No mixing with other package managers needed"
+        ],
+        "projectStructure": {
+          "configFile": "pyproject.toml",
+          "lockFile": "uv.lock",
+          "noRequirementsTxt": "All dependencies managed through pyproject.toml"
+        }
+      },
+      "ruff": {
+        "version": ">=0.1.0",
+        "description": "Exclusive code quality tool - replaces multiple Python linters/formatters",
+        "capabilities": [
+          "Linting (replaces flake8, pylint, pycodestyle)",
+          "Code formatting (replaces black, autopep8)",
+          "Import sorting (replaces isort)",
+          "Fast Rust-based implementation",
+          "Single configuration in pyproject.toml"
+        ],
+        "commands": {
+          "linting": [
+            "uv run ruff check . (lint all files)",
+            "uv run ruff check --fix . (lint and auto-fix)",
+            "uv run ruff check --diff . (show potential changes)",
+            "uv run ruff check path/to/file.py (lint specific file)"
+          ],
+          "formatting": [
+            "uv run ruff format . (format all files)",
+            "uv run ruff format --check . (check formatting without changes)",
+            "uv run ruff format --diff . (show formatting changes)"
+          ]
+        },
+        "advantages": [
+          "10-100x faster than traditional Python tools",
+          "Single tool replaces black + isort + flake8 + more",
+          "Built-in auto-fix for many lint violations",
+          "Comprehensive rule set with sensible defaults",
+          "Excellent editor integration and LSP support"
+        ],
+        "configuration": {
+          "location": "pyproject.toml under [tool.ruff]",
+          "sections": [
+            "[tool.ruff] - general settings",
+            "[tool.ruff.lint] - linting rules",
+            "[tool.ruff.format] - formatting options"
+          ]
+        }
+      }
     }
   },
   "recommendations": {

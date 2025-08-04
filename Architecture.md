@@ -180,8 +180,19 @@ graph TD
 ```mermaid
 mindmap
   root((docsrs-mcp))
-    Runtime
+    Python Infrastructure
+      uv (exclusive package manager)
       Python 3.10+
+      pyproject.toml config
+      uv.lock lockfile
+      
+    Code Quality
+      Ruff (linting & formatting)
+      Replaces black/flake8/isort/pylint
+      Single Rust-based tool
+      pyproject.toml configuration
+      
+    Runtime
       uvicorn[standard]
       uvloop (event loop)
       httptools (HTTP parser)
@@ -208,6 +219,7 @@ mindmap
       
     Deployment
       uvx (zero-install)
+      uv build (packaging)
       Docker (optional)
       PyPI distribution
 ```
@@ -257,13 +269,14 @@ stateDiagram-v2
 
 ```mermaid
 graph TB
-    subgraph "Development"
-        DEV[uvx docsrs-mcp]
+    subgraph "Development (uv-native)"
+        DEV[uv sync --dev<br/>uv run python -m docsrs_mcp.cli]
+        TEST[uvx --from . docsrs-mcp]
     end
     
     subgraph "Production Options"
-        subgraph "Container"
-            DOCKER[Docker Container<br/>FROM python:slim]
+        subgraph "Container (uv-based)"
+            DOCKER[Docker Container<br/>FROM python:slim<br/>RUN pip install uv<br/>COPY . .<br/>RUN uv sync --frozen]
         end
         
         subgraph "PaaS"
@@ -273,7 +286,7 @@ graph TB
         end
         
         subgraph "VPS"
-            VPS[Any VPS<br/>≥256 MiB RAM]
+            VPS[Any VPS<br/>≥256 MiB RAM<br/>uv-managed]
         end
     end
     
@@ -281,7 +294,8 @@ graph TB
         VOL[Volume Mount<br/>./cache]
     end
     
-    DEV --> DOCKER
+    DEV --> TEST
+    TEST --> DOCKER
     DOCKER --> FLY
     DOCKER --> RAIL
     DOCKER --> RENDER

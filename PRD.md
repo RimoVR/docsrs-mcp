@@ -183,7 +183,7 @@ def main() -> None:
     )
 ```
 
-### 6.7 Packaging
+### 6.7 Packaging (uv-native)
 
 ```toml
 [project]
@@ -202,7 +202,23 @@ dependencies = [
 
 [project.scripts]
 docsrs-mcp = "docsrs_mcp.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+  "pytest>=7.0",
+  "ruff>=0.1.0"
+]
 ```
+
+**Package Management**: All dependencies managed exclusively through `uv`:
+- `uv add package` - Add production dependency
+- `uv add --dev package` - Add development dependency  
+- `uv sync` - Install locked dependencies
+- `uv build` - Create wheel/sdist for PyPI
 
 ### 6.8 Zero-install launch
 
@@ -233,22 +249,24 @@ uvx docsrs-mcp@latest
 
 | Stage             | Action                                                                          |
 | ----------------- | ------------------------------------------------------------------------------- |
-| PR checks         | `uvx docsrs-mcp --help`; `pytest -q`; `ruff check ..`                           |
-| Release           | `git tag vX.Y.Z` triggers GH Action → build sdist/wheels → upload to PyPI.      |
-| Docker (optional) | `FROM python:slim` → `pip install docsrs-mcp==$VERSION` → `CMD ["docsrs-mcp"]`. |
-| Runtime targets   | Fly.io, Railway, Render, or any VPS ≥ 256 MiB RAM.                              |
+| PR checks         | `uv sync --dev`; `uv run ruff check`; `uv run ruff format --check`; `uv run pytest -q`; `uvx --from . docsrs-mcp --help` |
+| Release           | `git tag vX.Y.Z` triggers GH Action → `uv build` → upload to PyPI.      |
+| Docker (uv-based) | `FROM python:slim` → `RUN pip install uv` → `COPY . .` → `RUN uv sync --frozen` → `CMD ["uv", "run", "docsrs-mcp"]`. |
+| Runtime targets   | Fly.io, Railway, Render, or any VPS ≥ 256 MiB RAM (all uv-compatible).                              |
 
 ---
 
 ## 9 · Acceptance criteria
 
-1. `uvx … docsrs-mcp` starts on Linux, macOS, and Windows.
-2. `POST /mcp/tools/get_crate_summary` for crate **tokio** (version omitted) returns latest version & overview.
-3. `POST /mcp/tools/search_items` with query `"spawn task"` returns ≥ 1 passage containing `tokio::spawn`.
-4. `POST /mcp/tools/get_item_doc` with `item_path="tokio::spawn"` returns markdown including a runnable example.
-5. Cold ingest of crate **serde** (< 5 MiB compressed) completes in ≤ 2 s on an M1/Ryzen 5; crates up to 10 MiB complete in ≤ 3 s.
-6. After ingesting 50 average crates, `cache/` ≤ 2 GiB and server RSS ≤ 1 GiB.
-7. A single IP exceeding 30 requests/s receives HTTP 429.
+1. `uvx docsrs-mcp` starts on Linux, macOS, and Windows (zero-install).
+2. `uv sync --dev && uv run python -m docsrs_mcp.cli` works for development.
+3. `POST /mcp/tools/get_crate_summary` for crate **tokio** (version omitted) returns latest version & overview.
+4. `POST /mcp/tools/search_items` with query `"spawn task"` returns ≥ 1 passage containing `tokio::spawn`.
+5. `POST /mcp/tools/get_item_doc` with `item_path="tokio::spawn"` returns markdown including a runnable example.
+6. Cold ingest of crate **serde** (< 5 MiB compressed) completes in ≤ 2 s on an M1/Ryzen 5; crates up to 10 MiB complete in ≤ 3 s.
+7. After ingesting 50 average crates, `cache/` ≤ 2 GiB and server RSS ≤ 1 GiB.
+8. A single IP exceeding 30 requests/s receives HTTP 429.
+9. All package management operations use `uv` exclusively (no pip/conda mixing).
 
 ---
 
@@ -260,7 +278,8 @@ uvx docsrs-mcp@latest
 | **FastEmbed**    | Minimal Python wrapper shipping small ONNX embedding models.                                 |
 | **sqlite-vss**   | SQLite extension that embeds a FAISS vector index inside SQLite tables.                      |
 | **rustdoc JSON** | Structured docs emitted by `cargo +nightly rustdoc --output-format json`; hosted by docs.rs. |
-| **uvx**          | `uv` tool’s *run* sub-command: executes console-scripts directly from PyPI or Git.           |
+| **uv**           | Fast Python package installer and resolver - exclusive infrastructure tool for this project. |
+| **uvx**          | `uv` tool's *run* sub-command: executes console-scripts directly from PyPI or Git (zero-install). |
 
 ---
 

@@ -78,3 +78,50 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Token Management**: Use Probe's session caching, limit results
 - **Failure Handling**: If Serena LSP crashes, fallback to Probe
 - **Search Strategy**: Exact queries over wildcards when possible
+
+## Python Tooling
+
+### UV-First Infrastructure
+This project exclusively uses `uv` as the Python infrastructure tool:
+
+- **Package Management**: `uv add`, `uv remove`, `uv sync` (NO pip/conda)
+- **Virtual Environments**: `uv venv`, `uv run` (NO python -m venv)
+- **Project Initialization**: `uv init` (NO setup.py/pip install -e)
+- **Execution**: `uv run`, `uvx` for tools (NO direct python commands)
+- **Development**: `uv sync --dev` for dev dependencies
+- **CI/CD**: Use `uv` commands in all automation scripts
+
+### UV Command Patterns
+```bash
+# Development setup
+uv sync --dev                    # Install all dependencies
+uv run python -m module         # Run module
+uv run pytest                   # Run tests
+uv add package                   # Add production dependency
+uv add --dev package             # Add development dependency
+
+# Distribution
+uvx --from . docsrs-mcp         # Test local install
+uvx --from git+URL docsrs-mcp   # Test from git
+```
+
+**Critical**: Never mix uv with pip, conda, or other package managers. All Python tooling must go through uv to maintain consistency and leverage its performance benefits.
+
+### Code Quality & Formatting
+This project exclusively uses **Ruff** for all linting and code formatting needs:
+
+- **Linting**: `uv run ruff check` (replaces flake8, pylint, etc.)
+- **Formatting**: `uv run ruff format` (replaces black, autopep8, etc.)
+- **Import Sorting**: Built into Ruff (replaces isort)
+- **Configuration**: All settings in `pyproject.toml` under `[tool.ruff]`
+- **Performance**: Single Rust-based tool instead of multiple Python tools
+
+```bash
+# Code quality commands
+uv run ruff check .          # Lint code
+uv run ruff check --fix .    # Lint and auto-fix
+uv run ruff format .         # Format code
+uv run ruff check --diff .   # Show what would change
+```
+
+**Never use**: black, flake8, pylint, isort, autopep8, or any other formatters/linters. Ruff replaces all of them with a single, fast, Rust-based tool.
