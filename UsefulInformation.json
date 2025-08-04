@@ -1,0 +1,83 @@
+{
+  "projectName": "docsrs-mcp",
+  "lastUpdated": "2025-08-04",
+  "purpose": "Track errors, solutions, and lessons learned during development",
+  "categories": {
+    "commonErrors": {
+      "description": "Frequently encountered errors and their solutions",
+      "entries": []
+    },
+    "performanceIssues": {
+      "description": "Performance bottlenecks and optimization strategies",
+      "entries": []
+    },
+    "integrationChallenges": {
+      "description": "Issues with third-party services and libraries",
+      "entries": []
+    },
+    "deploymentIssues": {
+      "description": "Problems encountered during deployment",
+      "entries": []
+    },
+    "lessonsLearned": {
+      "description": "Important insights gained during development",
+      "entries": []
+    }
+  },
+  "errorTemplate": {
+    "error": "Error message or description",
+    "context": "When/where the error occurred",
+    "solution": "How the error was resolved",
+    "prevention": "How to avoid this error in the future",
+    "dateEncountered": "YYYY-MM-DD",
+    "relatedFiles": ["file1.py", "file2.py"]
+  },
+  "knownLimitations": {
+    "sqliteVss": {
+      "issue": "1GB index size limit",
+      "impact": "Cannot index very large crates",
+      "workaround": "Implement chunking or use alternative vector DB for large crates"
+    },
+    "rustdocJson": {
+      "issue": "Not all crates have rustdoc JSON available",
+      "impact": "Cannot provide documentation for older crates",
+      "workaround": "Return graceful error message without attempting local build"
+    },
+    "windowsCompatibility": {
+      "issue": "uvloop not compatible with Windows",
+      "impact": "Performance degradation on Windows",
+      "workaround": "Fallback to standard asyncio event loop on Windows"
+    }
+  },
+  "debuggingTips": {
+    "vectorSearch": [
+      "Check embedding dimensions match (384 for BAAI/bge-small-en-v1.5)",
+      "Verify FAISS index is properly initialized with vss_index!",
+      "Monitor memory usage during batch operations"
+    ],
+    "ingestion": [
+      "Check asyncio.Lock is properly acquired/released",
+      "Verify URL construction for docs.rs API",
+      "Monitor decompression memory usage for large files"
+    ],
+    "rateLimiting": [
+      "Ensure Redis is running for distributed limiting",
+      "Check IP extraction middleware ordering",
+      "Verify rate limit headers in responses"
+    ]
+  },
+  "performanceMetrics": {
+    "targets": {
+      "warmSearchLatency": "< 500ms P95",
+      "coldIngestTime": "< 3s for 10MB crates",
+      "memoryUsage": "< 1GB RSS",
+      "cacheSize": "< 2GB total"
+    },
+    "optimizationStrategies": {
+      "embedding": "Batch size 32 for optimal CPU utilization",
+      "database": "Insert batches of 1000 rows",
+      "caching": "LRU eviction when > 2GB",
+      "asyncio": "Use asyncio.gather for concurrent operations"
+    }
+  }
+}

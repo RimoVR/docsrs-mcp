@@ -1,0 +1,153 @@
+{
+  "projectName": "docsrs-mcp",
+  "lastUpdated": "2025-08-04",
+  "research": {
+    "modelContextProtocol": {
+      "overview": "Open standard by Anthropic for LLM-tool communication",
+      "version": "2025-06-18 specification",
+      "pythonSupport": {
+        "officialSDK": "Available via MCP Python SDK",
+        "fastAPIIntegration": {
+          "library": "FastMCP",
+          "method": "FastMCP.from_fastapi()",
+          "features": "Automatic REST to MCP conversion"
+        }
+      },
+      "bestPractices": [
+        "Use descriptive operation_ids",
+        "Provide comprehensive docstrings",
+        "Implement proper error handling",
+        "Follow MCP manifest structure"
+      ]
+    },
+    "vectorSearch": {
+      "sqliteVss": {
+        "status": "Deprecated but functional",
+        "backend": "FAISS",
+        "limitations": [
+          "1GB index size limit",
+          "No GPU support",
+          "CPU-only operations"
+        ],
+        "alternative": "sqlite-vec (recommended for new projects)"
+      },
+      "embedding": {
+        "library": "FastEmbed",
+        "model": "BAAI/bge-small-en-v1.5",
+        "dimensions": 384,
+        "optimization": "ONNX for CPU inference",
+        "performance": "2-4x faster than PyTorch",
+        "requirements": [
+          "libgomp1",
+          "libatlas-base-dev",
+          "liblapack-dev"
+        ]
+      },
+      "implementation": {
+        "batchSize": 32,
+        "insertBatchSize": 1000,
+        "indexCommand": "vss_index!",
+        "searchMethod": "k-NN cosine similarity"
+      }
+    },
+    "docsRsIntegration": {
+      "rustdocJson": {
+        "availability": "Started 2025-05-23",
+        "formats": [".json", ".json.zst", ".json.gz"],
+        "urlPattern": "/crate/{name}/{version}/{target}/json.zst",
+        "compressionPreference": ".zst (zstandard)",
+        "parsingLibrary": "rustdoc-types crate"
+      },
+      "apiEndpoints": {
+        "latestVersion": "/crate/{crate}/latest/json",
+        "specificVersion": "/crate/{crate}/{version}/json",
+        "versionList": "/crate/{crate}/versions.json"
+      },
+      "limitations": [
+        "Not all crates have rustdoc JSON",
+        "Older crates may lack JSON docs",
+        "Format varies by rustdoc version"
+      ]
+    },
+    "serverInfrastructure": {
+      "fastAPI": {
+        "version": ">=0.111",
+        "features": [
+          "Async support",
+          "Pydantic validation",
+          "OpenAPI generation",
+          "Middleware support"
+        ]
+      },
+      "uvicorn": {
+        "version": ">=0.30",
+        "eventLoop": "uvloop",
+        "httpParser": "httptools",
+        "workerFormula": "(2 × CPU cores + 1)",
+        "performanceGain": "2-4x over standard"
+      },
+      "httpClient": {
+        "library": "aiohttp",
+        "version": ">=3.9",
+        "bestPractices": [
+          "Single ClientSession per app",
+          "Connection pooling",
+          "Proper cleanup on shutdown"
+        ]
+      },
+      "rateLimiting": {
+        "library": "slowapi",
+        "version": ">=0.1",
+        "backend": "Redis for distributed",
+        "limit": "30 requests/second per IP"
+      },
+      "compression": {
+        "library": "zstandard",
+        "version": ">=0.22",
+        "method": "ZstdDecompressor().copy_stream()",
+        "features": "Streaming decompression"
+      }
+    },
+    "deployment": {
+      "zeroInstall": {
+        "tool": "uvx",
+        "command": "uvx docsrs-mcp@latest",
+        "gitSupport": "uvx --from git+https://..."
+      },
+      "containerization": {
+        "baseImage": "python:slim",
+        "minMemory": "256 MiB",
+        "recommendedMemory": "1 GiB"
+      },
+      "platforms": [
+        "Fly.io",
+        "Railway",
+        "Render",
+        "Generic VPS"
+      ]
+    }
+  },
+  "recommendations": {
+    "implementation": [
+      "Start with FastMCP for quick MCP server setup",
+      "Use sqlite-vss initially, plan migration to sqlite-vec",
+      "Implement connection pooling for aiohttp from start",
+      "Set up proper asyncio task management",
+      "Use streaming decompression for large rustdoc files"
+    ],
+    "performance": [
+      "Batch embeddings in groups of 32",
+      "Batch database inserts in groups of 1000",
+      "Use uvloop for event loop optimization",
+      "Implement caching at multiple levels",
+      "Profile memory usage early and often"
+    ],
+    "production": [
+      "Configure proper worker count for uvicorn",
+      "Set up distributed rate limiting with Redis",
+      "Implement health checks and monitoring",
+      "Use volume mounts for cache persistence",
+      "Plan for horizontal scaling if needed"
+    ]
+  }
+}

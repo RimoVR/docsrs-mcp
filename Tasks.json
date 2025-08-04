@@ -1,0 +1,327 @@
+{
+  "taskManagement": {
+    "description": "Task tracking for docsrs-mcp development",
+    "lastUpdated": "2025-08-04",
+    "priorities": ["high", "medium", "low"],
+    "statuses": ["pending", "in_progress", "completed", "blocked"]
+  },
+  "tasks": {
+    "high": [
+      {
+        "id": "core-1",
+        "title": "Set up Python project structure",
+        "description": "Initialize Python package with proper directory structure and configuration files",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "relatedTasks": ["core-2"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "core-1.1",
+            "title": "Create package directory structure",
+            "description": "Set up docsrs_mcp package with __init__.py files",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-1.2",
+            "title": "Create pyproject.toml",
+            "description": "Configure package metadata and dependencies as specified in PRD",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-1.3",
+            "title": "Set up entry point",
+            "description": "Create CLI entry point in docsrs_mcp.cli module",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "core-2",
+        "title": "Implement FastAPI application",
+        "description": "Create main FastAPI app with MCP endpoints as specified in PRD section 6.1",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["core-1"],
+        "relatedTasks": ["core-3", "core-4"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "core-2.1",
+            "title": "Create FastAPI app instance",
+            "description": "Set up basic FastAPI application with error handling",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-2.2",
+            "title": "Implement MCP manifest endpoint",
+            "description": "Create /mcp/manifest GET endpoint with tool schemas",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-2.3",
+            "title": "Implement get_crate_summary tool",
+            "description": "Create POST endpoint for crate summary retrieval",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-2.4",
+            "title": "Implement search_items tool",
+            "description": "Create POST endpoint for vector search functionality",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-2.5",
+            "title": "Implement get_item_doc tool",
+            "description": "Create POST endpoint for retrieving full rustdoc",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-2.6",
+            "title": "Add rate limiting middleware",
+            "description": "Implement slowapi middleware for 30 req/s per IP limit",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "core-3",
+        "title": "Implement ingestion pipeline",
+        "description": "Create ingest.py module for downloading and processing rustdoc JSON as per PRD section 6.2",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["core-2"],
+        "relatedTasks": ["core-4"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "core-3.1",
+            "title": "Create per-crate lock mechanism",
+            "description": "Implement asyncio.Lock keyed by crate@version",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-3.2",
+            "title": "Implement version resolution",
+            "description": "Query docs.rs API to resolve versions and get rustdoc JSON URLs",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-3.3",
+            "title": "Implement download and decompression",
+            "description": "Support .json, .json.zst, and .json.gz formats with size limits",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-3.4",
+            "title": "Create chunking logic",
+            "description": "Extract items from rustdoc JSON and prepare for embedding",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-3.5",
+            "title": "Integrate FastEmbed",
+            "description": "Set up BAAI/bge-small-en-v1.5 model for text embedding",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-3.6",
+            "title": "Implement cache eviction",
+            "description": "Delete oldest DBs when cache exceeds 2 GiB",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "core-4",
+        "title": "Set up SQLite with vector search",
+        "description": "Create database schema with sqlite-vss for vector storage as per PRD section 6.2",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["core-3"],
+        "relatedTasks": ["core-2"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "core-4.1",
+            "title": "Create database schema",
+            "description": "Set up passages, vss_passages, and meta tables",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-4.2",
+            "title": "Implement batch insert logic",
+            "description": "Insert vectors in batches of 1000 to control memory usage",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "core-4.3",
+            "title": "Create vector search queries",
+            "description": "Implement k-NN cosine similarity search with scoring",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      }
+    ],
+    "medium": [
+      {
+        "id": "test-1",
+        "title": "Create comprehensive test suite",
+        "description": "Implement unit and integration tests for all components",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["core-1", "core-2", "core-3", "core-4"],
+        "relatedTasks": [],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "test-1.1",
+            "title": "Test MCP endpoints",
+            "description": "Create tests for all API endpoints with various scenarios",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "test-1.2",
+            "title": "Test ingestion pipeline",
+            "description": "Test download, chunk, embed, and persist logic",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "test-1.3",
+            "title": "Test vector search",
+            "description": "Verify search results and scoring accuracy",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "docs-1",
+        "title": "Create documentation",
+        "description": "Write README.md and API documentation",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["core-1"],
+        "relatedTasks": [],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "docs-1.1",
+            "title": "Write README.md",
+            "description": "Create user-facing documentation with usage examples",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "docs-1.2",
+            "title": "Document API endpoints",
+            "description": "Create OpenAPI/Swagger documentation",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "ci-1",
+        "title": "Set up CI/CD pipeline",
+        "description": "Configure GitHub Actions for testing and deployment as per PRD section 8",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["test-1"],
+        "relatedTasks": [],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "ci-1.1",
+            "title": "Create PR checks workflow",
+            "description": "Run tests, linting, and basic functionality checks",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "ci-1.2",
+            "title": "Create release workflow",
+            "description": "Build and publish to PyPI on version tags",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      }
+    ],
+    "low": [
+      {
+        "id": "opt-1",
+        "title": "Performance optimizations",
+        "description": "Fine-tune for target latency and memory requirements",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["core-1", "core-2", "core-3", "core-4"],
+        "relatedTasks": [],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "opt-1.1",
+            "title": "Profile memory usage",
+            "description": "Ensure RSS stays under 1 GiB with 10k vectors",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "opt-1.2",
+            "title": "Optimize search latency",
+            "description": "Achieve <500ms P95 warm search latency",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "opt-2",
+        "title": "Create Docker image",
+        "description": "Optional containerization for deployment flexibility",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["ci-1"],
+        "relatedTasks": [],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "opt-2.1",
+            "title": "Write Dockerfile",
+            "description": "Create minimal Python slim-based image",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "opt-2.2",
+            "title": "Add to CI pipeline",
+            "description": "Build and push image on releases",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/peterkloiber/cccc/.claude/hooks/post_search_research.py",
+            "description": "Check if search findings should be added to ResearchFindings.json"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/peterkloiber/cccc/.claude/hooks/post_command_bugfix.py",
+            "description": "Suggest web searches when bug fixes fail"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|MultiEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/peterkloiber/cccc/.claude/hooks/post_edit_lint.py",
+            "description": "Run linters immediately after file edits"
+          },
+          {
+            "type": "command",
+            "command": "/Users/peterkloiber/cccc/.claude/hooks/post_edit_docs.py",
+            "description": "Suggest documentation updates for significant changes"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/peterkloiber/cccc/.claude/hooks/stop_documentation.py",
+            "description": "Check if documentation files need updates after session"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/peterkloiber/cccc/.claude/hooks/subagent_stop_filter.py",
+            "description": "Filter subagent output to convey only relevant information"
+          }
+        ]
+      }
+    ]
+  }
+}

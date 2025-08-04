@@ -1,0 +1,153 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# FastAPI specific
+*.db
+*.sqlite
+*.sqlite3
+
+# Project specific
+cache/
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+*.temp
+
+# Editor swap files
+*.swp
+*.swo
+*.swn
+
+# Distribution / packaging
+.Python
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+.coverage
+.coverage.*
+nosetests.xml
+test-results/
+
+# Profiling data
+.prof
+*.pstats
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# Cache directories (project specific)
+# Note: The cache/ directory contains SQLite databases
+# and should not be committed to version control
+cache/
+
+# Temporary files
+tmp/
+temp/
+
+# Lock files (except package lock files)
+*.lock
+!poetry.lock
+!Pipfile.lock
+!yarn.lock
+!package-lock.json
+
+# Model files (if downloaded locally)
+models/
+*.onnx
+*.bin
+
+# Redis dump
+dump.rdb
+
+# AsyncIO debug
+asyncio-debug.log
