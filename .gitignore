@@ -160,3 +160,17 @@ dump.rdb
 
 # AsyncIO debug
 asyncio-debug.log
+
+# Server logs
+server.log
+nohup.out
+
+# FastEmbed model cache
+.cache/
+*.cache/
+
+# Temporary planning files
+TemporaryPlan.md
+
+# Serena MCP server files
+.serena/
