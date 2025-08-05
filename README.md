@@ -106,6 +106,56 @@ open http://localhost:8000/docs
 curl http://localhost:8000/mcp/manifest
 ```
 
+## MCP Configuration
+
+### Claude Desktop Configuration
+
+Add the following to your Claude Desktop configuration file:
+
+**Location:**
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+**Configuration:**
+```json
+{
+  "mcpServers": {
+    "docsrs-mcp": {
+      "command": "uvx",
+      "args": ["docsrs-mcp"],
+      "env": {
+        "PORT": "8000",
+        "MAX_CACHE_SIZE_GB": "2"
+      }
+    }
+  }
+}
+```
+
+### Claude Code CLI
+
+To add this server to Claude Code:
+
+```bash
+# Add the server from PyPI (when published)
+claude mcp add docsrs -- uvx docsrs-mcp
+
+# Or add from GitHub
+claude mcp add docsrs -- uvx --from git+https://github.com/peterkloiber/docsrs-mcp.git docsrs-mcp
+
+# Add with custom environment variables
+claude mcp add docsrs --env PORT=8080 --env MAX_CACHE_SIZE_GB=5 -- uvx docsrs-mcp
+
+# List configured servers
+claude mcp list
+
+# Remove the server
+claude mcp remove docsrs
+```
+
+After configuration, restart Claude Desktop or use the `/mcp` command in Claude Code to verify the server is connected.
+
 ## MCP Tools
 
 The server exposes the following MCP tools through the `/mcp/tools/{tool_name}` endpoint:
