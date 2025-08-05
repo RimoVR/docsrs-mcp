@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-05T14:00:00Z",
+    "lastUpdated": "2025-08-05T16:00:00Z",
     "priorities": ["high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked"]
   },
@@ -52,13 +52,13 @@
         "status": "completed",
         "progress": 100,
         "dependencies": ["core-1"],
-        "relatedTasks": ["core-3", "core-4"],
+        "relatedTasks": ["core-3", "core-4", "mcp-1"],
         "roadblocks": [],
         "completionDetails": {
           "completedDate": "2025-08-04T15:30:00Z",
           "implementation": "Basic MCP server with vector search functionality",
           "notes": "All MCP endpoints working: /mcp/manifest, /mcp/tools/*, /mcp/resources/versions. Uses SQLite with sqlite-vec for vector storage, FastEmbed for embeddings, basic ingestion from crates.io. Successfully tested with tokio crate.",
-          "limitations": "Currently only indexes crate descriptions, not full rustdoc content yet"
+          "limitations": "Initially implemented as REST API, later converted to proper MCP protocol via task mcp-1"
         },
         "subtasks": [
           {
@@ -203,6 +203,58 @@
             "id": "core-4.3",
             "title": "Create vector search queries",
             "description": "Implement k-NN cosine similarity search with scoring",
+            "status": "completed",
+            "progress": 100
+          }
+        ]
+      },
+      {
+        "id": "mcp-1",
+        "title": "Implement proper MCP protocol support",
+        "description": "Convert REST API to proper MCP protocol using FastMCP library with STDIO transport for Claude Desktop compatibility",
+        "status": "completed",
+        "progress": 100,
+        "dependencies": ["core-2"],
+        "relatedTasks": ["core-3", "core-4"],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-05T16:00:00Z",
+          "implementation": "Successfully implemented MCP protocol support using FastMCP library with dual-mode operation",
+          "notes": "Added FastMCP.from_fastapi() for automatic endpoint conversion, configured STDIO transport for Claude Desktop compatibility, implemented dual-mode operation (REST and MCP modes), all tests pass and code quality checks complete"
+        },
+        "subtasks": [
+          {
+            "id": "mcp-1.1",
+            "title": "Integrate FastMCP library",
+            "description": "Add FastMCP dependency and implement MCP server wrapper",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-1.2",
+            "title": "Configure STDIO transport",
+            "description": "Set up STDIO transport for Claude Desktop integration",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-1.3",
+            "title": "Implement dual-mode operation",
+            "description": "Support both REST API and MCP protocol modes",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-1.4",
+            "title": "Add automatic endpoint conversion",
+            "description": "Use FastMCP.from_fastapi() to convert FastAPI endpoints to MCP tools",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-1.5",
+            "title": "Validate MCP protocol compliance",
+            "description": "Ensure full compatibility with MCP specification and Claude Desktop",
             "status": "completed",
             "progress": 100
           }

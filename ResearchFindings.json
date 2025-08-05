@@ -9,8 +9,35 @@
         "officialSDK": "Available via MCP Python SDK",
         "fastAPIIntegration": {
           "library": "FastMCP",
+          "version": "2.11.1",
           "method": "FastMCP.from_fastapi()",
-          "features": "Automatic REST to MCP conversion"
+          "features": "Automatic REST to MCP conversion",
+          "integrationStatus": "Successfully integrated",
+          "transport": {
+            "required": "STDIO transport for Claude Desktop integration",
+            "critical": "All logging must go to stderr to avoid STDIO corruption",
+            "reason": "Claude Desktop communicates via STDIN/STDOUT - any stdout pollution breaks MCP protocol"
+          },
+          "operationalModes": {
+            "rest": {
+              "purpose": "Debugging and direct API access",
+              "endpoint": "Standard FastAPI HTTP endpoints"
+            },
+            "mcp": {
+              "purpose": "Claude Desktop integration",
+              "protocol": "Model Context Protocol over STDIO",
+              "activation": "Automatic when using FastMCP.from_fastapi()"
+            }
+          },
+          "compatibility": {
+            "pydanticModels": "No modifications needed to existing Pydantic models",
+            "businessLogic": "No changes required to existing FastAPI business logic",
+            "conversionProcess": "Seamless automatic conversion from REST to MCP"
+          },
+          "documentation": {
+            "official": "https://gofastmcp.com",
+            "description": "Comprehensive FastMCP documentation and integration guides"
+          }
         }
       },
       "documentationRequirements": {
@@ -485,7 +512,9 @@
   },
   "recommendations": {
     "implementation": [
-      "Start with FastMCP for quick MCP server setup",
+      "Start with FastMCP 2.11.1 for quick MCP server setup",
+      "CRITICAL: Route all logging to stderr when using STDIO transport to prevent Claude Desktop communication corruption",
+      "Leverage FastMCP dual-mode operation: REST for debugging, MCP for Claude integration",
       "MANDATORY: Use sqlite-vec 0.1.6 (sqlite-vss is deprecated)",
       "CRITICAL: Pin aiohttp to 3.9.5 to avoid memory leaks",
       "Use FastEmbed <0.7.0 for onnxruntime compatibility",

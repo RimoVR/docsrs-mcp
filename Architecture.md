@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The docsrs-mcp server provides Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It consists of a FastAPI web layer, a comprehensive asynchronous ingestion pipeline with full rustdoc JSON processing, and a SQLite-based vector storage system with intelligent caching.
+The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a dual-mode architecture with a FastAPI web layer that can operate in either REST mode (default) or MCP mode using STDIO transport. The system includes a comprehensive asynchronous ingestion pipeline with full rustdoc JSON processing, and a SQLite-based vector storage system with intelligent caching.
 
 ## High-Level Architecture
 
@@ -12,8 +12,10 @@ graph TB
         AI[AI Agent/LLM]
     end
     
-    subgraph "MCP Server"
+    subgraph "Dual-Mode Server"
+        CLI[CLI Entry Point<br/>--mode flag]
         API[FastAPI Application]
+        MCP[MCP Server Module<br/>FastMCP wrapper]
         RL[Rate Limiter<br/>30 req/s per IP]
         IW[Ingest Worker]
         Queue[asyncio.Queue]
@@ -32,7 +34,10 @@ graph TB
         EMB[FastEmbed<br/>BAAI/bge-small-en-v1.5<br/>384 dimensions]
     end
     
-    AI -->|MCP POST| RL
+    AI -->|MCP STDIO/REST POST| CLI
+    CLI -->|REST mode| RL
+    CLI -->|MCP mode| MCP
+    MCP --> API
     RL --> API
     API -->|enqueue| Queue
     Queue -->|dequeue| IW
@@ -70,8 +75,12 @@ graph LR
             CACHE[cache_manager.py<br/>LRU eviction]
         end
         
+        subgraph "Server Layer"
+            MCP_SERVER[mcp_server.py<br/>FastMCP wrapper<br/>STDIO transport<br/>stderr logging]
+        end
+        
         subgraph "Utilities"
-            CLI[cli.py<br/>Entry point]
+            CLI[cli.py<br/>Entry point<br/>--mode flag<br/>REST/MCP selection]
             CONFIG[config.py<br/>Settings]
             ERRORS[errors.py<br/>Custom exceptions]
         end
@@ -87,6 +96,8 @@ graph LR
     DB --> VSS
     DB --> CACHE
     CLI --> APP
+    CLI --> MCP_SERVER
+    MCP_SERVER --> APP
 ```
 
 ## Data Flow
@@ -159,20 +170,78 @@ erDiagram
     META ||--|| PASSAGES : "describes"
 ```
 
+## Dual-Mode Architecture
+
+```mermaid
+graph TB
+    subgraph "Client Interface"
+        CLI_CLIENT[Claude/AI Client]
+        REST_CLIENT[REST API Client]
+    end
+    
+    subgraph "Server Modes"
+        CLI_ENTRY[CLI Entry Point<br/>--mode flag]
+        
+        subgraph "MCP Mode"
+            MCP_SERVER[mcp_server.py<br/>FastMCP wrapper]
+            STDIO[STDIO Transport]
+            STDERR_LOG[stderr-only logging]
+        end
+        
+        subgraph "REST Mode (Default)"
+            FASTAPI[FastAPI Server<br/>HTTP transport]
+            STDOUT_LOG[standard logging]
+        end
+    end
+    
+    subgraph "Shared Business Logic"
+        CORE[Core FastAPI App<br/>Routes, Models, Services]
+        INGEST[Ingestion Pipeline]
+        STORAGE[Vector Storage]
+    end
+    
+    CLI_CLIENT -->|STDIO| CLI_ENTRY
+    REST_CLIENT -->|HTTP| CLI_ENTRY
+    
+    CLI_ENTRY -->|--mode mcp| MCP_SERVER
+    CLI_ENTRY -->|--mode rest| FASTAPI
+    
+    MCP_SERVER --> STDIO
+    MCP_SERVER --> STDERR_LOG
+    FASTAPI --> STDOUT_LOG
+    
+    MCP_SERVER -->|FastMCP.from_fastapi()| CORE
+    FASTAPI --> CORE
+    
+    CORE --> INGEST
+    CORE --> STORAGE
+```
+
 ## MCP Tool Endpoints
 
 ```mermaid
 graph TD
-    subgraph "MCP Tools (MVP)"
+    subgraph "Auto-Generated MCP Tools"
         SEARCH[search_crates<br/>Vector similarity search<br/>Input: query text<br/>Output: ranked crate list]
+        INGEST_TOOL[ingest_crate<br/>Manual crate ingestion<br/>Input: crate name/version<br/>Output: ingestion status]
     end
     
-    subgraph "Support Endpoints"
+    subgraph "MCP Protocol"
+        FASTMCP[FastMCP.from_fastapi()<br/>Automatic REST → MCP conversion]
+        STDIO_TRANSPORT[STDIO Transport<br/>JSON-RPC messages]
+    end
+    
+    subgraph "Original REST Endpoints"
+        REST_SEARCH[POST /search<br/>FastAPI endpoint]
+        REST_INGEST[POST /ingest<br/>FastAPI endpoint]
         HEALTH[GET /health<br/>Liveness probe]
-        TOOLS[GET /tools<br/>MCP tool definitions]
     end
     
-    TOOLS --> SEARCH
+    FASTMCP --> SEARCH
+    FASTMCP --> INGEST_TOOL
+    SEARCH -->|converts| REST_SEARCH
+    INGEST_TOOL -->|converts| REST_INGEST
+    STDIO_TRANSPORT --> FASTMCP
 ```
 
 ## Documentation Architecture
@@ -257,6 +326,12 @@ mindmap
       Pydantic (validation)
       slowapi (rate limiting)
       OpenAPI auto-generation
+      
+    MCP Integration
+      FastMCP (REST to MCP conversion)
+      STDIO transport
+      JSON-RPC protocol
+      stderr-only logging
       
     Storage
       SQLite
@@ -457,6 +532,49 @@ graph LR
     OC --> CS
     CS --> MM
 ```
+
+## Dual-Mode Server Implementation
+
+### Architecture Overview
+
+The docsrs-mcp server implements a dual-mode architecture that allows the same FastAPI application to operate in two distinct modes:
+
+**REST Mode (Default)**
+- Standard FastAPI HTTP server with uvicorn
+- Full HTTP transport with standard logging to stdout/stderr
+- Compatible with web browsers, curl, and HTTP clients
+- Automatic OpenAPI documentation at `/docs` and `/redoc`
+
+**MCP Mode**
+- Model Context Protocol server using STDIO transport
+- JSON-RPC messaging over stdin/stdout
+- stderr-only logging to prevent protocol corruption
+- Automatic tool generation from FastAPI endpoints via FastMCP
+
+### Key Implementation Details
+
+**CLI Mode Selection**
+- `--mode rest`: Launches HTTP server (default behavior)
+- `--mode mcp`: Launches MCP server with STDIO transport
+- Single entry point in cli.py handles mode dispatch
+
+**FastMCP Integration**
+- `FastMCP.from_fastapi()` automatically converts REST endpoints to MCP tools
+- No changes required to existing FastAPI route handlers
+- Preserves all business logic, validation, and error handling
+- Maintains compatibility with existing FastAPI middleware
+
+**Protocol Isolation**
+- MCP mode uses stderr exclusively for logging to avoid stdout contamination
+- REST mode uses standard logging configuration
+- Business logic remains completely unchanged between modes
+- Same ingestion pipeline, storage, and search functionality
+
+**Zero Duplication Architecture**
+- Single FastAPI application serves both modes
+- All route handlers, models, and services shared
+- Configuration and error handling unified
+- Maintenance overhead minimized through code reuse
 
 ## Implementation Decisions
 

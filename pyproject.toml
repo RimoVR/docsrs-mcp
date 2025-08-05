@@ -32,6 +32,7 @@ dependencies = [
     "fastembed<0.7.0",
     "ijson>=3.2",
     "tenacity>=8.0",
+    "fastmcp==2.11.1",
 ]
 
 [project.scripts]
