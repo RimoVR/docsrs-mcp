@@ -39,6 +39,34 @@
           "documentation": {
             "official": "https://gofastmcp.com",
             "description": "Comprehensive FastMCP documentation and integration guides"
+          },
+          "knownIssues": {
+            "typeCoercion": {
+              "issue": "FastMCP has known issues with automatic string-to-int conversion",
+              "cause": "MCP clients (Claude Code) serialize numeric parameters as strings in protocol communication",
+              "symptoms": [
+                "Pydantic validation errors for integer fields receiving string values",
+                "Type mismatch errors in tool parameter validation",
+                "Failed tool invocations due to parameter type conversion failures"
+              ],
+              "solution": {
+                "approach": "Pydantic field validators with mode='before'",
+                "implementation": "@field_validator('field_name', mode='before') with custom type conversion logic",
+                "reason": "Field validators run before Pydantic's type validation, allowing custom coercion",
+                "example": "Convert string representations of numbers to appropriate numeric types before validation"
+              },
+              "sources": [
+                "GitHub Issue #381 - modelcontextprotocol/python-sdk",
+                "Pydantic v2 documentation on field validators",
+                "FastMCP documentation limitations"
+              ],
+              "workaround": {
+                "description": "Use Pydantic v2 field validators to handle string-to-numeric conversion",
+                "pattern": "@field_validator('numeric_field', mode='before') decorator with type conversion",
+                "timing": "Validators with mode='before' execute before Pydantic's built-in type validation",
+                "benefit": "Allows seamless conversion of MCP string parameters to expected Python types"
+              }
+            }
           }
         }
       },
@@ -517,6 +545,7 @@
       "Start with FastMCP 2.11.1 for quick MCP server setup",
       "CRITICAL: Route all logging to stderr when using STDIO transport to prevent Claude Desktop communication corruption",
       "Leverage FastMCP dual-mode operation: REST for debugging, MCP for Claude integration",
+      "Use Pydantic field validators with mode='before' to handle FastMCP string-to-numeric type coercion issues",
       "MANDATORY: Use sqlite-vec 0.1.6 (sqlite-vss is deprecated)",
       "CRITICAL: Pin aiohttp to 3.9.5 to avoid memory leaks",
       "Use FastEmbed <0.7.0 for onnxruntime compatibility",

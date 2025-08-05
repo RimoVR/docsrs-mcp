@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-05T16:00:00Z",
+    "lastUpdated": "2025-08-05T17:00:00Z",
     "priorities": ["high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked"]
   },
@@ -215,7 +215,7 @@
         "status": "completed",
         "progress": 100,
         "dependencies": ["core-2"],
-        "relatedTasks": ["core-3", "core-4"],
+        "relatedTasks": ["core-3", "core-4", "mcp-2"],
         "roadblocks": [],
         "completionDetails": {
           "completedDate": "2025-08-05T16:00:00Z",
@@ -255,6 +255,51 @@
             "id": "mcp-1.5",
             "title": "Validate MCP protocol compliance",
             "description": "Ensure full compatibility with MCP specification and Claude Desktop",
+            "status": "completed",
+            "progress": 100
+          }
+        ]
+      },
+      {
+        "id": "mcp-2",
+        "title": "Fix MCP parameter type conversion issues",
+        "description": "Handle MCP client string-to-int conversion for k parameter in SearchItemsRequest",
+        "status": "completed",
+        "progress": 100,
+        "dependencies": ["mcp-1"],
+        "relatedTasks": ["core-2"],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-05T17:00:00Z",
+          "implementation": "Added Pydantic field validator with mode='before' to convert string numbers to integers",
+          "notes": "Fixed issue where MCP clients (Claude Code) send k parameter as string \"3\" instead of integer 3, causing Pydantic validation errors. Solution: @field_validator('k', mode='before') with proper error handling for invalid string values."
+        },
+        "subtasks": [
+          {
+            "id": "mcp-2.1",
+            "title": "Identify MCP parameter validation issue",
+            "description": "Diagnose why MCP clients send numeric parameters as strings",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-2.2",
+            "title": "Implement Pydantic field validator",
+            "description": "Add field_validator with mode='before' to SearchItemsRequest.k parameter",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-2.3",
+            "title": "Add error handling for invalid values",
+            "description": "Handle cases where string cannot be converted to integer",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-2.4",
+            "title": "Test parameter validation",
+            "description": "Verify that both string and integer k parameters work correctly",
             "status": "completed",
             "progress": 100
           }

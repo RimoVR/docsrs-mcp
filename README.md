@@ -226,6 +226,12 @@ Performs vector similarity search across complete rustdoc documentation.
 - `query` (string, required): Search query for semantic similarity
 - `k` (integer, optional): Number of results to return (default: 5, max: 20)
 
+**Parameter Validation:**
+The `k` parameter accepts both integers and numeric strings:
+- `k=5` (integer) - Direct integer values are accepted
+- `k="5"` (numeric string) - Automatically converted to integer
+- `k="abc"` (invalid string) - Returns HTTP 422 validation error
+
 **Example Request:**
 ```bash
 curl -X POST http://localhost:8000/mcp/tools/search_items \

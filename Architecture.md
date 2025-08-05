@@ -56,7 +56,7 @@ graph LR
         subgraph "Web Layer"
             APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata]
             ROUTES[routes.py<br/>MCP endpoints<br/>Comprehensive docstrings]
-            MODELS[models.py<br/>Pydantic schemas<br/>Auto-generated docs]
+            MODELS[models.py<br/>Pydantic schemas<br/>Field validators<br/>MCP compatibility<br/>Auto-generated docs]
             MW[middleware.py<br/>Rate limiting]
         end
         
@@ -508,12 +508,85 @@ graph TB
 | Compression ratio | ~10:1 typical | .zst format for bandwidth efficiency |
 | Batch sizes | 32 embed, 999 DB | Optimized for throughput vs memory |
 
+## Parameter Validation Architecture
+
+```mermaid
+graph TD
+    subgraph "MCP Client Parameter Handling"
+        CLIENT[MCP Client<br/>May send strings for integers]
+        SERIALIZE[JSON Serialization<br/>Type coercion needed]
+    end
+    
+    subgraph "Pydantic Validation Pipeline"
+        FIELD_VAL[Field Validators<br/>@field_validator(mode='before')]
+        TYPE_COERCE[Type Coercion<br/>String → Integer conversion]
+        CONSTRAINT[Constraint Validation<br/>ge=1, le=20 bounds]
+        MODEL_VAL[Model Validation<br/>extra='forbid' strict mode]
+    end
+    
+    subgraph "Error Handling"
+        VALUE_ERR[ValueError<br/>Invalid conversion]
+        VALID_ERR[ValidationError<br/>Constraint violations]
+        ERROR_RESP[ErrorResponse<br/>Standardized error format]
+    end
+    
+    CLIENT --> SERIALIZE
+    SERIALIZE --> FIELD_VAL
+    FIELD_VAL --> TYPE_COERCE
+    TYPE_COERCE --> CONSTRAINT
+    CONSTRAINT --> MODEL_VAL
+    
+    TYPE_COERCE -.->|Invalid conversion| VALUE_ERR
+    CONSTRAINT -.->|Bounds check fails| VALID_ERR
+    VALUE_ERR --> ERROR_RESP
+    VALID_ERR --> ERROR_RESP
+```
+
+### Parameter Validation Patterns
+
+**MCP Client Compatibility**
+- MCP clients may serialize all parameters as strings due to JSON-RPC transport limitations
+- Field validators with `mode='before'` handle type coercion before constraint validation
+- Critical for integer parameters like `k` (result count) that have numeric constraints
+
+**Implementation Example (SearchItemsRequest.k field)**
+```python
+@field_validator("k", mode="before")
+@classmethod
+def coerce_k_to_int(cls, v):
+    """Convert string numbers to int for MCP client compatibility."""
+    if v is None:
+        return v
+    if isinstance(v, str):
+        try:
+            return int(v)
+        except ValueError as err:
+            raise ValueError(
+                f"k parameter must be a valid integer, got '{v}'"
+            ) from err
+    return v
+```
+
+**Key Design Principles**
+- **mode='before'**: Runs before Pydantic's built-in type validation
+- **Type Coercion**: Handles string-to-int conversion transparently
+- **Error Chaining**: Preserves original error context with `from err`
+- **Null Safety**: Explicit None handling for optional parameters
+- **Graceful Degradation**: Allows both native types and string representations
+
+**Validation Flow**
+1. **Pre-validation**: Field validators with `mode='before'` handle type coercion
+2. **Type Checking**: Pydantic validates coerced values against expected types
+3. **Constraint Validation**: Field constraints (ge, le, etc.) applied to typed values
+4. **Model Validation**: `extra='forbid'` prevents injection of unknown parameters
+5. **Error Standardization**: All validation errors converted to consistent ErrorResponse format
+
 ## Security Model
 
 ```mermaid
 graph LR
     subgraph "Input Validation"
-        IV[Pydantic Models<br/>Type safety & validation]
+        IV[Pydantic Models<br/>Type safety & validation<br/>Field validators for coercion]
     end
     
     subgraph "Origin Control"
@@ -601,6 +674,13 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - FastAPI metadata configuration for enhanced API discoverability
 - Minimal complexity, easy to understand and maintain
 - Direct async/await patterns throughout
+
+**Robust Parameter Validation with MCP Compatibility**
+- Pydantic field validators with `mode='before'` for type coercion
+- Handles MCP client parameter serialization differences (string-to-int conversion)
+- Maintains strict validation with `extra='forbid'` to prevent parameter injection
+- Graceful error handling with detailed error messages for debugging
+- Supports both native types and string representations for maximum compatibility
 
 **MVP Focus: Crate Descriptions Only**
 - Basic ingestion pipeline processes crate metadata from crates.io API
