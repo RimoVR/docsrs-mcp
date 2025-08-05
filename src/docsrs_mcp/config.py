@@ -32,3 +32,14 @@ DB_BATCH_SIZE = int(os.getenv("DOCSRS_DB_BATCH_SIZE", "1000"))
 
 # Rate limiting
 RATE_LIMIT_PER_SECOND = int(os.getenv("DOCSRS_RATE_LIMIT", "30"))
+
+# Cache management
+CACHE_MAX_SIZE_BYTES = int(
+    os.getenv("DOCSRS_CACHE_MAX_SIZE_BYTES", str(2 * 1024**3))
+)  # 2GB
+
+# Rustdoc processing
+RUSTDOC_CHUNK_MAX_SIZE = int(os.getenv("DOCSRS_RUSTDOC_CHUNK_MAX_SIZE", "4096"))
+
+# Download configuration
+DOWNLOAD_CHUNK_SIZE = int(os.getenv("DOCSRS_DOWNLOAD_CHUNK_SIZE", "8192"))

@@ -30,6 +30,8 @@ dependencies = [
     "sqlite-vec>=0.1.6",
     "aiosqlite>=0.21.0",
     "fastembed<0.7.0",
+    "ijson>=3.2",
+    "tenacity>=8.0",
 ]
 
 [project.scripts]
