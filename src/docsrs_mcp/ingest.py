@@ -19,6 +19,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from .config import (
     CACHE_DIR,
     CACHE_MAX_SIZE_BYTES,
+    DB_BATCH_SIZE,
     DOWNLOAD_CHUNK_SIZE,
     EMBEDDING_BATCH_SIZE,
     HTTP_TIMEOUT,
@@ -499,9 +500,17 @@ async def generate_embeddings(chunks: list[dict[str, str]]) -> list[list[float]]
 async def store_embeddings(
     db_path: Path, chunks: list[dict[str, str]], embeddings: list[list[float]]
 ) -> None:
-    """Store chunks and their embeddings in the database."""
+    """Store chunks and their embeddings in the database using batch processing."""
     if not chunks or not embeddings:
         return
+
+    total_items = len(chunks)
+    logger.info(f"Storing {total_items} embeddings in batches of {DB_BATCH_SIZE}")
+
+    # Pre-serialize all vectors to reduce per-batch overhead
+    serialized_embeddings = [
+        bytes(sqlite_vec.serialize_float32(embedding)) for embedding in embeddings
+    ]
 
     async with aiosqlite.connect(db_path) as db:
         # Enable extension
@@ -509,29 +518,74 @@ async def store_embeddings(
         await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
         await db.enable_load_extension(False)
 
-        # Insert embeddings
-        for chunk, embedding in zip(chunks, embeddings, strict=False):
-            # Insert into main table
-            cursor = await db.execute(
-                """
-                INSERT INTO embeddings (item_path, header, content, embedding)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    chunk["item_path"],
-                    chunk["header"],
-                    chunk["content"],
-                    bytes(sqlite_vec.serialize_float32(embedding)),
-                ),
-            )
+        # Process in batches
+        for batch_start in range(0, total_items, DB_BATCH_SIZE):
+            batch_end = min(batch_start + DB_BATCH_SIZE, total_items)
+            batch_chunks = chunks[batch_start:batch_end]
+            batch_embeddings = serialized_embeddings[batch_start:batch_end]
 
-            # Insert into vector table
-            await db.execute(
-                "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
-                (cursor.lastrowid, bytes(sqlite_vec.serialize_float32(embedding))),
-            )
+            try:
+                # Begin transaction for this batch
+                await db.execute("BEGIN TRANSACTION")
 
-        await db.commit()
+                # Prepare batch data for embeddings table
+                embeddings_data = [
+                    (
+                        chunk["item_path"],
+                        chunk["header"],
+                        chunk["content"],
+                        embedding,
+                    )
+                    for chunk, embedding in zip(batch_chunks, batch_embeddings, strict=False)
+                ]
+
+                # Batch insert into embeddings table
+                await db.executemany(
+                    """
+                    INSERT INTO embeddings (item_path, header, content, embedding)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    embeddings_data,
+                )
+
+                # Get the rowids for the inserted records
+                # SQLite's last_insert_rowid() gives us the last rowid
+                cursor = await db.execute("SELECT last_insert_rowid()")
+                last_rowid = (await cursor.fetchone())[0]
+                first_rowid = last_rowid - len(batch_chunks) + 1
+
+                # Prepare batch data for vec_embeddings table
+                vec_data = [
+                    (rowid, embedding)
+                    for rowid, embedding in zip(
+                        range(first_rowid, last_rowid + 1), batch_embeddings, strict=False
+                    )
+                ]
+
+                # Batch insert into vec_embeddings table
+                await db.executemany(
+                    "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
+                    vec_data,
+                )
+
+                # Commit this batch
+                await db.commit()
+
+                # Log progress for large datasets
+                if total_items > DB_BATCH_SIZE:
+                    progress = (batch_end / total_items) * 100
+                    logger.info(
+                        f"Batch {batch_start // DB_BATCH_SIZE + 1}: "
+                        f"Processed {batch_end}/{total_items} items ({progress:.1f}%)"
+                    )
+
+            except Exception as e:
+                # Rollback on error
+                await db.execute("ROLLBACK")
+                logger.error(f"Error in batch {batch_start}-{batch_end}: {e}")
+                raise
+
+        logger.info(f"Successfully stored {total_items} embeddings")
 
 
 async def ingest_crate(crate_name: str, version: str | None = None) -> Path:

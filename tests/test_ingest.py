@@ -4,9 +4,13 @@ import gzip
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiosqlite
 import pytest
+import sqlite_vec
 import zstandard
 
+from docsrs_mcp.config import DB_BATCH_SIZE
+from docsrs_mcp.database import init_database
 from docsrs_mcp.ingest import (
     calculate_cache_size,
     decompress_content,
@@ -15,6 +19,7 @@ from docsrs_mcp.ingest import (
     get_crate_lock,
     parse_rustdoc_items,
     resolve_version,
+    store_embeddings,
 )
 
 
@@ -349,3 +354,109 @@ async def test_download_rustdoc_not_found():
         await download_rustdoc(mock_session, "test-crate", "1.0.0")
 
     assert "not found" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_store_embeddings_batch_processing(tmp_path):
+    """Test batch insert behavior with >1000 items."""
+    # Create a test database
+    db_path = tmp_path / "test.db"
+    await init_database(db_path)
+
+    # Create test data with >1000 items (e.g., 2500 items)
+    num_items = 2500
+    chunks = []
+    embeddings = []
+
+    for i in range(num_items):
+        chunks.append(
+            {
+                "item_path": f"test::item_{i}",
+                "header": f"Item {i}",
+                "content": f"Content for item {i}",
+            }
+        )
+        # Create a simple embedding (384 dimensions as per config)
+        embeddings.append([float(i % 10) / 10.0] * 384)
+
+    # Store embeddings using batch processing
+    await store_embeddings(db_path, chunks, embeddings)
+
+    # Verify all items were stored correctly
+    async with aiosqlite.connect(db_path) as db:
+        # Enable extension
+        await db.enable_load_extension(True)
+        await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
+        await db.enable_load_extension(False)
+
+        # Check embeddings table
+        cursor = await db.execute("SELECT COUNT(*) FROM embeddings")
+        count = await cursor.fetchone()
+        assert count[0] == num_items
+
+        # Check vec_embeddings table
+        cursor = await db.execute("SELECT COUNT(*) FROM vec_embeddings")
+        count = await cursor.fetchone()
+        assert count[0] == num_items
+
+        # Verify some sample data
+        cursor = await db.execute(
+            "SELECT item_path, header, content FROM embeddings WHERE item_path = ?",
+            ("test::item_999",),
+        )
+        row = await cursor.fetchone()
+        assert row[0] == "test::item_999"
+        assert row[1] == "Item 999"
+        assert row[2] == "Content for item 999"
+
+        # Verify rowid relationships are maintained
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*) FROM embeddings e
+            JOIN vec_embeddings v ON e.id = v.rowid
+            """
+        )
+        count = await cursor.fetchone()
+        assert count[0] == num_items
+
+    # Verify batching behavior
+    # With 2500 items and batch size of 999, we should have 3 batches:
+    # Batch 1: 0-998 (999 items)
+    # Batch 2: 999-1997 (999 items)
+    # Batch 3: 1998-2499 (502 items)
+    expected_batches = (num_items + DB_BATCH_SIZE - 1) // DB_BATCH_SIZE
+    assert expected_batches == 3
+
+
+@pytest.mark.asyncio
+async def test_store_embeddings_empty_data(tmp_path):
+    """Test handling of empty data."""
+    # Create a test database
+    db_path = tmp_path / "test.db"
+    await init_database(db_path)
+
+    # Test with empty lists
+    await store_embeddings(db_path, [], [])
+
+    # Verify no data was inserted
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM embeddings")
+        count = await cursor.fetchone()
+        assert count[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_store_embeddings_error_handling(tmp_path):
+    """Test error handling during batch insert."""
+    # Create a test database
+    db_path = tmp_path / "test.db"
+    await init_database(db_path)
+
+    # Create test data with invalid embedding dimensions
+    chunks = [{"item_path": "test::item", "header": "Item", "content": "Content"}]
+    # Invalid: only 10 dimensions instead of 384
+    embeddings = [[1.0] * 10]
+
+    # This should raise an error due to dimension mismatch
+    with pytest.raises(Exception):
+        await store_embeddings(db_path, chunks, embeddings)

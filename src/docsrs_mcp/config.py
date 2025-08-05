@@ -28,7 +28,7 @@ DEFAULT_K = int(os.getenv("DOCSRS_DEFAULT_K", "5"))
 
 # Batch processing
 EMBEDDING_BATCH_SIZE = int(os.getenv("DOCSRS_EMBEDDING_BATCH_SIZE", "32"))
-DB_BATCH_SIZE = int(os.getenv("DOCSRS_DB_BATCH_SIZE", "1000"))
+DB_BATCH_SIZE = int(os.getenv("DOCSRS_DB_BATCH_SIZE", "999"))  # SQLite parameter limit
 
 # Rate limiting
 RATE_LIMIT_PER_SECOND = int(os.getenv("DOCSRS_RATE_LIMIT", "30"))
