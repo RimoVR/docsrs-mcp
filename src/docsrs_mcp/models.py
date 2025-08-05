@@ -8,7 +8,7 @@ strict validation with `extra="forbid"` to prevent injection attacks.
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # MCP Manifest Models
@@ -132,6 +132,21 @@ class SearchItemsRequest(BaseModel):
     k: int | None = Field(
         5, description="Number of results to return (1-20)", ge=1, le=20
     )
+
+    @field_validator("k", mode="before")
+    @classmethod
+    def coerce_k_to_int(cls, v):
+        """Convert string numbers to int for MCP client compatibility."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError as err:
+                raise ValueError(
+                    f"k parameter must be a valid integer, got '{v}'"
+                ) from err
+        return v
 
     model_config = ConfigDict(extra="forbid")
 

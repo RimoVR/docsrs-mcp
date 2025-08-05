@@ -161,6 +161,14 @@
           "prevention": "Use REST mode (--mode rest) for development debugging since MCP is now default",
           "dateEncountered": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "MCP parameter type coercion: string numerics not converted to integers",
+          "context": "MCP clients (Claude Code) send k parameter as string \"3\" instead of integer 3, causing Pydantic validation error",
+          "solution": "Add Pydantic field validator with mode='before' to convert string numbers to integers: @field_validator('k', mode='before')",
+          "prevention": "FastMCP's automatic type conversion has known issues with string-to-int conversion. Always use Pydantic field validators with mode='before' for numeric parameters that MCP clients might send as strings",
+          "dateEncountered": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
         }
       ]
     },
@@ -335,7 +343,8 @@
       "Claude Desktop config: Use simplified args: [\"docsrs-mcp\"]",
       "Kill MCP server: kill <PID> (use captured PID from nohup)",
       "Verify MCP protocol: Check that STDIO is clean, no stdout pollution",
-      "FastMCP conversion: Use FastMCP.from_fastapi() for automatic REST-to-MCP conversion"
+      "FastMCP conversion: Use FastMCP.from_fastapi() for automatic REST-to-MCP conversion",
+      "Parameter type issues: MCP clients may send numeric parameters as strings - use Pydantic field validators with mode='before' for type coercion"
     ]
   },
   "performanceMetrics": {
