@@ -149,16 +149,16 @@
         {
           "error": "Claude Desktop MCP configuration",
           "context": "Configuring MCP server in Claude Desktop client",
-          "solution": "Must use args: [\"docsrs-mcp\", \"--\", \"--mode\", \"mcp\"] in Claude Desktop config",
-          "prevention": "Follow exact argument format with double dash separator for proper mode switching",
+          "solution": "Use simplified args: [\"docsrs-mcp\"] since MCP is now the default mode",
+          "prevention": "MCP mode is default, no need for explicit --mode mcp flag in Claude Desktop config",
           "dateEncountered": "2025-08-05",
           "relatedFiles": ["claude_desktop_config.json"]
         },
         {
           "error": "MCP server debugging challenges",
           "context": "Debugging issues with MCP protocol communication",
-          "solution": "Check server logs in stderr, use REST mode for easier debugging",
-          "prevention": "Implement dual-mode server (REST/MCP) for easier development and debugging",
+          "solution": "Check server logs in stderr, use --mode rest flag for easier debugging",
+          "prevention": "Use REST mode (--mode rest) for development debugging since MCP is now default",
           "dateEncountered": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
         }
@@ -319,18 +319,20 @@
       "Verify rate limit headers in responses"
     ],
     "serverManagement": [
-      "Start server: nohup uv run docsrs-mcp > server.log 2>&1 & echo $!",
-      "Alternative start pattern: nohup uvx docsrs-mcp > server.log 2>&1 & echo $!",
+      "Start MCP server (default): nohup uv run docsrs-mcp > server.log 2>&1 & echo $!",
+      "Start REST server: nohup uv run docsrs-mcp --mode rest > server.log 2>&1 & echo $!",
+      "Alternative MCP: nohup uvx docsrs-mcp > server.log 2>&1 & echo $!",
+      "Alternative REST: nohup uvx docsrs-mcp --mode rest > server.log 2>&1 & echo $!",
       "Kill server: kill <PID>",
-      "Test endpoints: curl -s http://localhost:8000/endpoint | jq .",
+      "Test REST endpoints: curl -s http://localhost:8000/endpoint | jq .",
       "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\""
     ],
     "mcpServer": [
-      "Run MCP mode: uvx docsrs-mcp -- --mode mcp",
-      "Test MCP server: nohup uvx docsrs-mcp -- --mode mcp > mcp.log 2>&1 & echo $!",
-      "Debug with REST mode: uvx docsrs-mcp -- --mode rest (easier debugging)",
+      "Run MCP mode (default): uvx docsrs-mcp",
+      "Test MCP server: nohup uvx docsrs-mcp > mcp.log 2>&1 & echo $!",
+      "Debug with REST mode: uvx docsrs-mcp --mode rest (easier debugging)",
       "Check MCP logs: tail -f mcp.log (logs go to stderr in MCP mode)",
-      "Claude Desktop config: Use args: [\"docsrs-mcp\", \"--\", \"--mode\", \"mcp\"]",
+      "Claude Desktop config: Use simplified args: [\"docsrs-mcp\"]",
       "Kill MCP server: kill <PID> (use captured PID from nohup)",
       "Verify MCP protocol: Check that STDIO is clean, no stdout pollution",
       "FastMCP conversion: Use FastMCP.from_fastapi() for automatic REST-to-MCP conversion"

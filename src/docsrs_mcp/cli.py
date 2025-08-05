@@ -16,8 +16,8 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         choices=["rest", "mcp"],
-        default="rest",
-        help="Server mode: 'rest' for HTTP API, 'mcp' for MCP protocol via STDIO (default: rest)",
+        default="mcp",
+        help="Server mode: 'rest' for HTTP API, 'mcp' for MCP protocol via STDIO (default: mcp)",
     )
     args = parser.parse_args()
 

@@ -43,7 +43,7 @@ uvx --from git+https://github.com/RimoVR/docsrs-mcp.git@main docsrs-mcp
 # Run from local directory
 uvx --from . docsrs-mcp
 
-# The server will start on http://localhost:8000
+# The server will start in MCP mode by default (use --mode rest for HTTP API)
 ```
 
 ### Platform-Specific Instructions
@@ -112,18 +112,18 @@ curl http://localhost:8000/mcp/manifest
 
 docsrs-mcp supports two operation modes:
 
-1. **REST mode** (default): Traditional HTTP API server for debugging and direct API access
-2. **MCP mode**: Model Context Protocol server using STDIO transport for Claude Desktop integration
+1. **MCP mode** (default): Model Context Protocol server using STDIO transport for Claude Desktop integration
+2. **REST mode**: Traditional HTTP API server for debugging and direct API access
 
-To run in MCP mode:
+To run the server:
 ```bash
-# Run with MCP protocol via STDIO
+# Run with MCP protocol via STDIO (default)
+uvx docsrs-mcp
+# or explicitly
 uvx docsrs-mcp -- --mode mcp
 
-# Run in REST mode (default)
+# Run in REST mode for HTTP API
 uvx docsrs-mcp -- --mode rest
-# or simply
-uvx docsrs-mcp
 ```
 
 ### Claude Desktop Configuration
@@ -141,7 +141,7 @@ Add the following to your Claude Desktop configuration file:
   "mcpServers": {
     "docsrs-mcp": {
       "command": "uvx",
-      "args": ["docsrs-mcp", "--", "--mode", "mcp"],
+      "args": ["docsrs-mcp"],
       "env": {
         "MAX_CACHE_SIZE_GB": "2"
       }
@@ -150,7 +150,7 @@ Add the following to your Claude Desktop configuration file:
 }
 ```
 
-**Note:** In MCP mode, the server uses STDIO transport and all logs are sent to stderr to avoid protocol corruption. The PORT environment variable is ignored in MCP mode.
+**Note:** The server runs in MCP mode by default, using STDIO transport with all logs sent to stderr to avoid protocol corruption. To run in REST mode for debugging, use `--mode rest`.
 
 ### Claude Code CLI
 
@@ -158,13 +158,13 @@ To add this server to Claude Code:
 
 ```bash
 # Add the server from PyPI (when published)
-claude mcp add docsrs -- uvx docsrs-mcp -- --mode mcp
+claude mcp add docsrs -- uvx docsrs-mcp
 
 # Or add from GitHub
-claude mcp add docsrs -- uvx --from git+https://github.com/RimoVR/docsrs-mcp.git docsrs-mcp -- --mode mcp
+claude mcp add docsrs -- uvx --from git+https://github.com/RimoVR/docsrs-mcp.git docsrs-mcp
 
 # Add with custom environment variables
-claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx docsrs-mcp -- --mode mcp
+claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx docsrs-mcp
 
 # List configured servers
 claude mcp list

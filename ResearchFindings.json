@@ -19,14 +19,16 @@
             "reason": "Claude Desktop communicates via STDIN/STDOUT - any stdout pollution breaks MCP protocol"
           },
           "operationalModes": {
-            "rest": {
-              "purpose": "Debugging and direct API access",
-              "endpoint": "Standard FastAPI HTTP endpoints"
-            },
             "mcp": {
               "purpose": "Claude Desktop integration",
               "protocol": "Model Context Protocol over STDIO",
-              "activation": "Automatic when using FastMCP.from_fastapi()"
+              "activation": "Default mode when running the server",
+              "isDefault": true
+            },
+            "rest": {
+              "purpose": "Debugging and direct API access",
+              "endpoint": "Standard FastAPI HTTP endpoints",
+              "activation": "Requires explicit --mode rest flag"
             }
           },
           "compatibility": {

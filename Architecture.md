@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a dual-mode architecture with a FastAPI web layer that can operate in either REST mode (default) or MCP mode using STDIO transport. The system includes a comprehensive asynchronous ingestion pipeline with full rustdoc JSON processing, and a SQLite-based vector storage system with intelligent caching.
+The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a dual-mode architecture with a FastAPI web layer that can operate in either MCP mode (default) or REST mode. The MCP mode uses STDIO transport for AI clients, while REST mode requires an explicit flag. The system includes a comprehensive asynchronous ingestion pipeline with full rustdoc JSON processing, and a SQLite-based vector storage system with intelligent caching.
 
 ## High-Level Architecture
 
@@ -35,8 +35,8 @@ graph TB
     end
     
     AI -->|MCP STDIO/REST POST| CLI
-    CLI -->|REST mode| RL
-    CLI -->|MCP mode| MCP
+    CLI -->|--mode rest| RL
+    CLI -->|MCP mode (default)| MCP
     MCP --> API
     RL --> API
     API -->|enqueue| Queue
@@ -80,7 +80,7 @@ graph LR
         end
         
         subgraph "Utilities"
-            CLI[cli.py<br/>Entry point<br/>--mode flag<br/>REST/MCP selection]
+            CLI[cli.py<br/>Entry point<br/>--mode flag (defaults to mcp)<br/>MCP/REST selection]
             CONFIG[config.py<br/>Settings]
             ERRORS[errors.py<br/>Custom exceptions]
         end
@@ -182,13 +182,13 @@ graph TB
     subgraph "Server Modes"
         CLI_ENTRY[CLI Entry Point<br/>--mode flag]
         
-        subgraph "MCP Mode"
+        subgraph "MCP Mode (Default)"
             MCP_SERVER[mcp_server.py<br/>FastMCP wrapper]
             STDIO[STDIO Transport]
             STDERR_LOG[stderr-only logging]
         end
         
-        subgraph "REST Mode (Default)"
+        subgraph "REST Mode (--mode rest)"
             FASTAPI[FastAPI Server<br/>HTTP transport]
             STDOUT_LOG[standard logging]
         end
@@ -203,7 +203,7 @@ graph TB
     CLI_CLIENT -->|STDIO| CLI_ENTRY
     REST_CLIENT -->|HTTP| CLI_ENTRY
     
-    CLI_ENTRY -->|--mode mcp| MCP_SERVER
+    CLI_ENTRY -->|default/--mode mcp| MCP_SERVER
     CLI_ENTRY -->|--mode rest| FASTAPI
     
     MCP_SERVER --> STDIO
@@ -423,8 +423,8 @@ stateDiagram-v2
 ```mermaid
 graph TB
     subgraph "Development (uv-native)"
-        DEV[uv sync --dev<br/>uv run python -m docsrs_mcp.cli]
-        TEST[uvx --from . docsrs-mcp]
+        DEV[uv sync --dev<br/>uv run python -m docsrs_mcp.cli<br/>(MCP mode default)]
+        TEST[uvx --from . docsrs-mcp<br/>uvx --from . docsrs-mcp --mode rest]
     end
     
     subgraph "Production Options"
@@ -539,23 +539,23 @@ graph LR
 
 The docsrs-mcp server implements a dual-mode architecture that allows the same FastAPI application to operate in two distinct modes:
 
-**REST Mode (Default)**
-- Standard FastAPI HTTP server with uvicorn
-- Full HTTP transport with standard logging to stdout/stderr
-- Compatible with web browsers, curl, and HTTP clients
-- Automatic OpenAPI documentation at `/docs` and `/redoc`
-
-**MCP Mode**
+**MCP Mode (Default)**
 - Model Context Protocol server using STDIO transport
 - JSON-RPC messaging over stdin/stdout
 - stderr-only logging to prevent protocol corruption
 - Automatic tool generation from FastAPI endpoints via FastMCP
 
+**REST Mode (--mode rest)**
+- Standard FastAPI HTTP server with uvicorn
+- Full HTTP transport with standard logging to stdout/stderr
+- Compatible with web browsers, curl, and HTTP clients
+- Automatic OpenAPI documentation at `/docs` and `/redoc`
+
 ### Key Implementation Details
 
 **CLI Mode Selection**
-- `--mode rest`: Launches HTTP server (default behavior)
-- `--mode mcp`: Launches MCP server with STDIO transport
+- `--mode mcp`: Launches MCP server with STDIO transport (default behavior)
+- `--mode rest`: Launches HTTP server
 - Single entry point in cli.py handles mode dispatch
 
 **FastMCP Integration**
