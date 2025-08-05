@@ -13,11 +13,22 @@
           "features": "Automatic REST to MCP conversion"
         }
       },
+      "documentationRequirements": {
+        "specification": "MCP specification mandates comprehensive tool and resource documentation",
+        "importance": "Critical for LLM understanding and proper tool invocation",
+        "components": [
+          "Tool descriptions with clear purpose",
+          "Parameter specifications with types and constraints",
+          "Resource descriptions and access patterns",
+          "Error conditions and responses"
+        ]
+      },
       "bestPractices": [
         "Use descriptive operation_ids",
         "Provide comprehensive docstrings",
         "Implement proper error handling",
-        "Follow MCP manifest structure"
+        "Follow MCP manifest structure",
+        "Document all tools and resources comprehensively per MCP spec"
       ]
     },
     "vectorSearch": {
@@ -80,6 +91,50 @@
           "library": "aiosqlite",
           "purpose": "Async SQLite operations for better performance",
           "installation": "pip install aiosqlite"
+        },
+        "batchInsertion": {
+          "sqliteParameterLimit": {
+            "constant": "SQLITE_MAX_VARIABLE_NUMBER",
+            "value": 999,
+            "description": "Maximum parameters per SQL statement",
+            "implication": "Limits maximum batch size for single INSERT statement"
+          },
+          "virtualTableHandling": {
+            "library": "sqlite-vec",
+            "tableType": "vec0 virtual table",
+            "indexing": "Automatic - no explicit vss_index! call needed",
+            "note": "sqlite-vss is deprecated and required explicit indexing calls"
+          },
+          "lastrowIdBehavior": {
+            "method": "aiosqlite.executemany()",
+            "returnValue": "None",
+            "solution": "Use SELECT last_insert_rowid() after batch insert",
+            "reason": "executemany() does not return lastrowid for batch operations"
+          },
+          "optimalBatchSize": {
+            "research": "10,000 rows per transaction showed best performance",
+            "prdRequirement": 1000,
+            "rationale": "PRD requirement takes precedence over optimal performance",
+            "note": "Balance between performance and memory usage"
+          },
+          "performanceOptimizations": {
+            "vectorPreSerialization": {
+              "technique": "Serialize vectors before batch processing",
+              "benefit": "Reduces per-batch overhead significantly",
+              "implementation": "Convert numpy arrays to bytes before INSERT"
+            },
+            "transactionPerBatch": {
+              "approach": "One transaction per batch of 1000 records",
+              "benefit": "Prevents memory accumulation during large ingestion",
+              "rationale": "Balances performance with memory efficiency"
+            }
+          },
+          "sqliteVecPerformance": {
+            "version": "v0.1.0",
+            "vectorDimensions": 384,
+            "performance": "Excellent for 384-dimensional vectors",
+            "benchmarkResult": "Significant improvement over sqlite-vss"
+          }
         }
       }
     },
@@ -149,7 +204,28 @@
           "Pydantic validation",
           "OpenAPI generation",
           "Middleware support"
-        ]
+        ],
+        "automaticDocumentation": {
+          "openAPI": {
+            "endpoint": "/docs",
+            "description": "Interactive Swagger UI for API exploration and testing",
+            "generation": "Automatic based on FastAPI route definitions and Pydantic models"
+          },
+          "redoc": {
+            "endpoint": "/redoc",
+            "description": "Alternative documentation interface with clean, three-panel layout",
+            "advantages": "Better for reference documentation and complex APIs"
+          },
+          "enhancementTechniques": {
+            "pydanticFields": {
+              "descriptions": "Use Field(description='...') to document model fields",
+              "examples": "Use Field(example='...') to provide usage examples",
+              "benefit": "Enhances automatic API documentation quality significantly"
+            },
+            "routeDocstrings": "FastAPI extracts route function docstrings for operation descriptions",
+            "responseModels": "Define response_model parameter for complete API documentation"
+          }
+        }
       },
       "uvicorn": {
         "version": ">=0.30",
@@ -267,6 +343,28 @@
           "configFile": "pyproject.toml",
           "lockFile": "uv.lock",
           "noRequirementsTxt": "All dependencies managed through pyproject.toml"
+        },
+        "deployment": {
+          "uvx": {
+            "description": "UV's zero-install execution tool for modern Python deployment",
+            "capabilities": [
+              "Execute packages without local installation",
+              "Support for PyPI, Git URLs, and local paths",
+              "Automatic virtual environment management",
+              "Version pinning and dependency resolution"
+            ],
+            "commands": {
+              "pypi": "uvx package@version",
+              "git": "uvx --from git+https://repo.git package",
+              "local": "uvx --from . package"
+            },
+            "advantages": [
+              "No global package pollution",
+              "Consistent execution environments",
+              "Simplified distribution and deployment",
+              "Eliminates 'works on my machine' issues"
+            ]
+          }
         }
       },
       "ruff": {
@@ -306,6 +404,81 @@
             "[tool.ruff.lint] - linting rules",
             "[tool.ruff.format] - formatting options"
           ]
+        },
+        "consolidation": {
+          "replaces": [
+            "black (code formatting)",
+            "isort (import sorting)",
+            "flake8 (linting)",
+            "pylint (advanced linting)",
+            "pycodestyle (style checking)",
+            "autopep8 (auto-formatting)",
+            "bandit (some security checks)"
+          ],
+          "benefit": "Single tool reduces complexity, dependency conflicts, and configuration overhead",
+          "performance": "Rust implementation provides 10-100x speed improvement over Python alternatives"
+        }
+      }
+    },
+    "bestPractices": {
+      "projectConfiguration": {
+        "pyprojectToml": {
+          "role": "Single source of truth for all project configuration",
+          "sections": [
+            "[build-system] - Build requirements and backend",
+            "[project] - Package metadata and dependencies",
+            "[tool.uv] - UV-specific settings",
+            "[tool.ruff] - Code quality configuration",
+            "[tool.pytest] - Testing configuration"
+          ],
+          "advantages": [
+            "Eliminates configuration file sprawl",
+            "Standardized format across Python ecosystem",
+            "Tool interoperability and consistency",
+            "Simplified project setup and maintenance"
+          ]
+        },
+        "semanticVersioning": {
+          "importance": "Critical for dependency management and API evolution",
+          "format": "MAJOR.MINOR.PATCH",
+          "rules": [
+            "MAJOR: Breaking changes",
+            "MINOR: New features, backward compatible",
+            "PATCH: Bug fixes, backward compatible"
+          ],
+          "automation": "Use tools like bump2version for consistent version management"
+        }
+      },
+      "operationalDocumentation": {
+        "performance": {
+          "importance": "Critical for operational clarity and troubleshooting",
+          "components": [
+            "Expected response times under normal load",
+            "Resource utilization patterns (CPU, memory, disk)",
+            "Scaling characteristics and bottlenecks",
+            "Performance degradation indicators",
+            "Monitoring and alerting recommendations"
+          ],
+          "audience": "Operations teams, SREs, and production support staff"
+        }
+      }
+    },
+    "knownIssues": {
+      "packageDistribution": {
+        "pypiReadmeRendering": {
+          "issue": "README rendering on PyPI requires careful markdown validation",
+          "symptoms": [
+            "Broken formatting in PyPI package description",
+            "Missing or malformed content display",
+            "HTML rendering issues in package metadata"
+          ],
+          "solutions": [
+            "Validate markdown syntax with strict parsers",
+            "Test README rendering with twine check before upload",
+            "Use PyPI-compatible markdown subset",
+            "Avoid complex HTML or non-standard markdown extensions"
+          ],
+          "prevention": "Include README validation in CI/CD pipeline"
         }
       }
     }
@@ -326,7 +499,11 @@
       "Implement per-crate locking to prevent duplicate ingestion",
       "Use tenacity for robust HTTP request retry mechanisms",
       "Set reasonable size limits for downloads and decompression",
-      "Prefer .zst compressed format over .gz for rustdoc JSON files"
+      "Prefer .zst compressed format over .gz for rustdoc JSON files",
+      "Pre-serialize vectors before batch insertion to reduce overhead",
+      "Use SELECT last_insert_rowid() after aiosqlite.executemany() calls",
+      "Respect SQLite's 999 parameter limit when designing batch operations",
+      "Rely on sqlite-vec automatic indexing - no manual vss_index! calls needed"
     ],
     "performance": [
       "Batch embeddings in groups of 32",
@@ -339,7 +516,10 @@
       "Include k constraint in all KNN queries for sqlite-vec",
       "Use streaming decompression to avoid memory spikes",
       "Implement LRU eviction based on file modification time",
-      "Monitor download and decompression size limits"
+      "Monitor download and decompression size limits",
+      "Use one transaction per batch of 1000 records to prevent memory accumulation",
+      "Pre-serialize vectors to bytes before batch processing for significant overhead reduction",
+      "Leverage sqlite-vec v0.1.0 excellent performance for 384-dimensional vectors"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

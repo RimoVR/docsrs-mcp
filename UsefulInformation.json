@@ -53,6 +53,22 @@
           "prevention": "Initialize variables before try blocks or check existence in except blocks",
           "dateEncountered": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "cursor.lastrowid returns None when using executemany() in aiosqlite",
+          "context": "Batch insert operations needing to track inserted row IDs",
+          "solution": "Use 'SELECT last_insert_rowid()' after executemany() to get the last inserted rowid",
+          "prevention": "Never rely on cursor.lastrowid with executemany(), always use SQL query for rowid",
+          "dateEncountered": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "SQLite parameter limit exceeded in batch operations",
+          "context": "Inserting large batches with multiple parameters per row",
+          "solution": "SQLite parameter limit is 999, not 1000 - calculate batch size as 999 // params_per_row",
+          "prevention": "Always account for SQLite's 999 parameter limit when batching operations",
+          "dateEncountered": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"]
         }
       ]
     },
@@ -137,6 +153,70 @@
           "impact": "Prevents test failures due to shared state between test runs",
           "dateLearned": "2025-08-05",
           "relatedFiles": ["tests/test_ingest.py", "tests/test_app.py"]
+        },
+        {
+          "lesson": "Batch insert rowid relationship management",
+          "context": "Maintaining foreign key relationships in batch database operations",
+          "details": "When batch inserting related data, calculate rowid range using last_rowid - batch_size + 1 to map parent-child relationships",
+          "impact": "Enables efficient batch processing while maintaining referential integrity",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Pre-serialize data before batch processing",
+          "context": "Optimizing batch insert performance with repeated serialization",
+          "details": "Pre-serialize vectors and other complex data structures before batching to avoid repeated serialization overhead",
+          "impact": "Reduces CPU usage and improves batch processing performance",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Batch processing maintains constant memory usage",
+          "context": "Memory optimization for large dataset processing",
+          "details": "Proper batch processing keeps memory usage constant regardless of total dataset size, preventing OOM errors",
+          "impact": "Enables processing of arbitrarily large datasets within memory constraints",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Test with >2x batch size for comprehensive validation",
+          "context": "Ensuring batch processing logic handles multiple batches correctly",
+          "details": "Create tests with datasets larger than 2x batch size to verify multiple batch handling and edge cases",
+          "impact": "Catches off-by-one errors and batch boundary issues during development",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["tests/test_ingest.py"]
+        },
+        {
+          "lesson": "Ruff formatting automatically fixes whitespace issues in docstrings",
+          "context": "Code quality and documentation formatting",
+          "details": "Ruff's formatting automatically handles whitespace and indentation issues in docstrings, maintaining consistent documentation format",
+          "impact": "Reduces manual formatting work and ensures consistent documentation style",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["pyproject.toml"]
+        },
+        {
+          "lesson": "FastAPI metadata supports markdown in description field",
+          "context": "API documentation and OpenAPI schema generation",
+          "details": "FastAPI's app description field supports full markdown syntax for rich API documentation that appears in OpenAPI schema",
+          "impact": "Enables better API documentation with formatted text, links, and examples",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Pydantic examples parameter provides inline examples in OpenAPI schema",
+          "context": "API request/response documentation",
+          "details": "Using 'examples' parameter in Pydantic models automatically generates example data in OpenAPI schema for better API documentation",
+          "impact": "Improves API usability by providing clear examples in generated documentation",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Rate limiting documentation prevents user confusion with 429 errors",
+          "context": "API error handling and user experience",
+          "details": "Clear documentation of rate limits and proper HTTP 429 responses with retry headers helps users understand and handle rate limiting gracefully",
+          "impact": "Reduces support requests and improves API adoption by making rate limits transparent",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
         }
       ]
     }
@@ -182,7 +262,11 @@
       "Ensure ijson receives bytes input using io.BytesIO(content.encode())",
       "Set reasonable limits: MAX_DOWNLOAD_SIZE=100MB, MAX_DECOMPRESSED_SIZE=100MB",
       "Use DOWNLOAD_CHUNK_SIZE=8KB for streaming downloads",
-      "Clean up test databases between runs to avoid state pollution"
+      "Clean up test databases between runs to avoid state pollution",
+      "Use 'SELECT last_insert_rowid()' after executemany() to get last inserted ID",
+      "Calculate batch sizes as 999 // params_per_row to respect SQLite parameter limits",
+      "Pre-serialize complex data before batching to avoid repeated serialization overhead",
+      "Test batch logic with datasets >2x batch size to verify multiple batch handling"
     ],
     "rateLimiting": [
       "Ensure Redis is running for distributed limiting",
@@ -191,6 +275,7 @@
     ],
     "serverManagement": [
       "Start server: nohup uv run docsrs-mcp > server.log 2>&1 & echo $!",
+      "Alternative start pattern: nohup uvx docsrs-mcp > server.log 2>&1 & echo $!",
       "Kill server: kill <PID>",
       "Test endpoints: curl -s http://localhost:8000/endpoint | jq .",
       "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\""
@@ -205,9 +290,10 @@
     },
     "optimizationStrategies": {
       "embedding": "Batch size 32 (EMBEDDING_BATCH_SIZE) for optimal CPU utilization",
-      "database": "Insert batches of 1000 rows",
+      "database": "Insert batches respecting SQLite's 999 parameter limit, pre-serialize data",
       "caching": "LRU eviction when > 2GB",
-      "asyncio": "Use asyncio.gather for concurrent operations"
+      "asyncio": "Use asyncio.gather for concurrent operations",
+      "batchProcessing": "Maintains constant memory usage regardless of dataset size"
     }
   },
   "codeQuality": {
@@ -243,13 +329,28 @@
         "Configure pre-commit hook: 'uv run ruff check --fix && uv run ruff format'",
         "CI should run both 'ruff check' and 'ruff format --check'",
         "Use --fix flag in development, never in CI",
-        "Ruff auto-fixes are safe and preserve code semantics"
+        "Ruff auto-fixes are safe and preserve code semantics",
+        "Ruff formatting automatically fixes whitespace issues in docstrings"
+      ],
+      "ignorableWarnings": [
+        "PLR0912 (too-many-branches): Can be ignored for documentation processing tasks",
+        "PLR0915 (too-many-statements): Can be ignored for documentation processing tasks"
       ],
       "performanceNotes": [
         "10-100x faster than traditional Python tools",
         "Processes entire codebase in milliseconds",
         "No need for separate tools or complex configuration"
       ]
+    }
+  },
+  "securityConsiderations": {
+    "placeholders": {
+      "securityEmail": {
+        "issue": "Security contact placeholder (security@example.com) should be updated",
+        "impact": "Users cannot report security issues properly",
+        "action": "Replace security@example.com with actual security contact email",
+        "relatedFiles": ["src/docsrs_mcp/app.py"]
+      }
     }
   }
 }

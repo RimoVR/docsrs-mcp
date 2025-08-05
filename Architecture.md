@@ -49,9 +49,9 @@ graph TB
 graph LR
     subgraph "docsrs_mcp Package"
         subgraph "Web Layer"
-            APP[app.py<br/>FastAPI instance]
-            ROUTES[routes.py<br/>MCP endpoints]
-            MODELS[models.py<br/>Pydantic schemas]
+            APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata]
+            ROUTES[routes.py<br/>MCP endpoints<br/>Comprehensive docstrings]
+            MODELS[models.py<br/>Pydantic schemas<br/>Auto-generated docs]
             MW[middleware.py<br/>Rate limiting]
         end
         
@@ -117,7 +117,7 @@ sequenceDiagram
         Worker->>Worker: Chunk into items
         Worker->>Embed: Batch embed (size=32)
         Embed-->>Worker: 384-dim vectors
-        Worker->>DB: Batch insert (size=1000)
+        Worker->>DB: Batch insert (size=999 with transactions)
         Worker->>DB: Index with vss_index!
         Worker->>Worker: Check cache size (2GB limit)
         alt Cache > 2 GiB
@@ -175,6 +175,61 @@ graph TD
     TOOLS --> SEARCH
 ```
 
+## Documentation Architecture
+
+```mermaid
+graph TD
+    subgraph "API Documentation Strategy"
+        OPENAPI[FastAPI Automatic OpenAPI<br/>Swagger UI + ReDoc]
+        META[Enhanced Metadata<br/>Title, version, description]
+        PYDANTIC[Pydantic Models<br/>Automatic schema generation]
+    end
+    
+    subgraph "Documentation Structure"
+        README[Single README.md<br/>Comprehensive documentation]
+        INLINE[Comprehensive Docstrings<br/>Functions, classes, modules]
+        SECURITY[Security Documentation<br/>Integrated into README]
+    end
+    
+    subgraph "Operational Documentation"
+        PERF[Performance Metrics<br/>Benchmarks and targets]
+        DEPLOY[Deployment Instructions<br/>Multiple environment options]
+        API_REF[API Reference<br/>Auto-generated from code]
+    end
+    
+    OPENAPI --> README
+    META --> OPENAPI
+    PYDANTIC --> OPENAPI
+    INLINE --> API_REF
+    README --> PERF
+    README --> DEPLOY
+    README --> SECURITY
+```
+
+### Documentation Architecture Decisions
+
+**Single-File Approach**
+- Consolidated README.md avoids documentation fragmentation
+- Reduces maintenance overhead compared to multi-file documentation systems
+- Improves discoverability for developers and operators
+- Maintains consistency across installation, usage, and deployment sections
+
+**Auto-Generated API Documentation**
+- FastAPI's automatic OpenAPI schema generation eliminates manual API documentation
+- Pydantic models provide comprehensive request/response schemas
+- Enhanced metadata configuration improves API discoverability
+- Swagger UI and ReDoc interfaces generated automatically at `/docs` and `/redoc`
+
+**Integrated Security Documentation**
+- Security considerations documented within main README for visibility
+- Rate limiting, input validation, and data safety covered comprehensively
+- Avoids separate security documents that may become outdated
+
+**Performance and Operational Clarity**
+- Documented performance targets and benchmarks for operational planning
+- Clear deployment options with resource requirements
+- Troubleshooting guidance integrated into main documentation flow
+
 ## Technology Stack
 
 ```mermaid
@@ -201,6 +256,7 @@ mindmap
       FastAPI
       Pydantic (validation)
       slowapi (rate limiting)
+      OpenAPI auto-generation
       
     Storage
       SQLite
@@ -232,6 +288,12 @@ mindmap
       uv build (packaging)
       Docker (optional)
       PyPI distribution
+      
+    Documentation
+      FastAPI OpenAPI generation
+      Comprehensive docstrings
+      Single README.md approach
+      Integrated security docs
 ```
 
 ## Error Handling Flow
@@ -369,7 +431,7 @@ graph TB
 | Embedding model | BAAI/bge-small-en-v1.5 | 384 dimensions, batch processing |
 | Async architecture | aiosqlite + asyncio | Non-blocking I/O with per-crate locks |
 | Compression ratio | ~10:1 typical | .zst format for bandwidth efficiency |
-| Batch sizes | 32 embed, 1000 DB | Optimized for throughput vs memory |
+| Batch sizes | 32 embed, 999 DB | Optimized for throughput vs memory |
 
 ## Security Model
 
@@ -415,8 +477,10 @@ graph LR
 - Good balance of accuracy and performance for crate descriptions
 - ONNX runtime for efficient inference without GPU requirements
 
-**Simple Module Structure**
+**Simple Module Structure with Documentation Integration**
 - Five core modules: app.py, config.py, models.py, database.py, ingest.py
+- Comprehensive docstrings in all modules for auto-generated documentation
+- FastAPI metadata configuration for enhanced API discoverability
 - Minimal complexity, easy to understand and maintain
 - Direct async/await patterns throughout
 
@@ -429,6 +493,14 @@ graph LR
 - ./cache directory for persistent storage
 - SQLite databases per crate for efficient organization
 - Simple filesystem-based cache management
+
+**Documentation Architecture**
+- FastAPI automatic OpenAPI documentation for comprehensive API reference
+- Enhanced metadata configuration for improved API discoverability
+- Single README.md approach chosen over multi-file documentation for simplicity
+- Comprehensive docstrings throughout codebase enable auto-generated documentation
+- Security documentation integrated into main README to prevent fragmentation
+- Performance metrics and benchmarks documented for operational clarity
 
 ### Data Flow Architecture
 
@@ -456,6 +528,52 @@ graph LR
 - **Global Lock Registry**: Maintains locks across async task lifecycle
 - **Batch Processing**: Optimizes database operations and embedding generation
 - **Resource Management**: Proper cleanup of connections and file handles
+
+### Database Batch Processing
+
+The store_embeddings() function implements efficient batch processing for large datasets:
+
+```mermaid
+sequenceDiagram
+    participant Worker as Ingest Worker
+    participant Serialize as sqlite_vec.serialize_float32()
+    participant DB as SQLite Database
+    participant Embeddings as embeddings table
+    participant VecEmbed as vec_embeddings table
+    
+    Worker->>Serialize: Pre-serialize all vectors
+    Serialize-->>Worker: Serialized vector blobs
+    
+    loop For each batch of 999 items
+        Worker->>DB: BEGIN TRANSACTION
+        Worker->>Embeddings: executemany() batch insert
+        Embeddings-->>Worker: Batch inserted
+        Worker->>DB: last_insert_rowid() - get rowid range
+        DB-->>Worker: Starting rowid for batch
+        Worker->>VecEmbed: executemany() with calculated rowids
+        VecEmbed-->>Worker: Vector index batch inserted
+        Worker->>DB: COMMIT TRANSACTION
+        
+        alt Progress Logging (>999 total items)
+            Worker->>Worker: Log batch progress
+        end
+        
+        alt Error in batch
+            Worker->>DB: ROLLBACK TRANSACTION
+            Worker->>Worker: Log error, continue next batch
+        end
+    end
+```
+
+**Key Implementation Details:**
+- **Batch Size**: 999 items per transaction (SQLite parameter limit)
+- **Vector Pre-serialization**: All vectors serialized with sqlite_vec.serialize_float32() before processing
+- **Two-table Strategy**: Coordinated inserts into embeddings and vec_embeddings tables
+- **Transaction Management**: Begin/commit per batch with rollback on errors
+- **Rowid Synchronization**: Uses last_insert_rowid() to maintain relationships between tables
+- **Memory Optimization**: O(batch_size) memory usage instead of O(total_items)
+- **Progress Logging**: Tracks progress for large datasets (>999 items)
+- **Error Isolation**: Per-batch error handling prevents complete ingestion failure
 
 ### Cache Management Strategy
 - **LRU Algorithm**: Based on file system modification time (mtime)

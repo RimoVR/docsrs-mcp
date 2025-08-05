@@ -536,7 +536,9 @@ async def store_embeddings(
                         chunk["content"],
                         embedding,
                     )
-                    for chunk, embedding in zip(batch_chunks, batch_embeddings, strict=False)
+                    for chunk, embedding in zip(
+                        batch_chunks, batch_embeddings, strict=False
+                    )
                 ]
 
                 # Batch insert into embeddings table
@@ -558,7 +560,9 @@ async def store_embeddings(
                 vec_data = [
                     (rowid, embedding)
                     for rowid, embedding in zip(
-                        range(first_rowid, last_rowid + 1), batch_embeddings, strict=False
+                        range(first_rowid, last_rowid + 1),
+                        batch_embeddings,
+                        strict=False,
                     )
                 ]
 

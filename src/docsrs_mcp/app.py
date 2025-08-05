@@ -26,20 +26,89 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="docsrs-mcp",
-    description="MCP server for querying Rust crate documentation with vector search",
+    description="""
+## docsrs-mcp API
+
+A Model Context Protocol (MCP) server that provides AI agents with semantic search capabilities
+over Rust crate documentation from docs.rs.
+
+### Features:
+- 🔍 **Vector search** using BAAI/bge-small-en-v1.5 embeddings
+- 📚 **Complete rustdoc ingestion** from docs.rs JSON files
+- 💾 **Local caching** with automatic LRU eviction
+- ⚡ **Fast performance** with sub-500ms warm search latency
+- 🔒 **Secure** with rate limiting and input validation
+
+### MCP Tools Available:
+- `get_crate_summary` - Fetch crate metadata and module structure
+- `search_items` - Semantic search within crate documentation
+- `get_item_doc` - Retrieve complete documentation for specific items
+
+For more information, see the [GitHub repository](https://github.com/peterkloiber/docsrs-mcp).
+    """.strip(),
     version="0.1.0",
+    contact={
+        "name": "docsrs-mcp maintainers",
+        "url": "https://github.com/peterkloiber/docsrs-mcp",
+        "email": "security@example.com",
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    openapi_tags=[
+        {
+            "name": "health",
+            "description": "Health check and service status endpoints",
+        },
+        {
+            "name": "mcp",
+            "description": "Model Context Protocol endpoints for AI agent integration",
+        },
+        {
+            "name": "tools",
+            "description": "MCP tool implementations for crate documentation queries",
+        },
+        {
+            "name": "resources",
+            "description": "MCP resource endpoints for listing available data",
+        },
+    ],
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
 )
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["health"],
+    summary="Health Check",
+    response_description="Service health status",
+)
 async def health_check():
-    """Health check endpoint."""
+    """
+    Check service health status.
+
+    Returns a simple status object indicating the service is operational.
+    Useful for monitoring and load balancer health checks.
+    """
     return {"status": "ok", "service": "docsrs-mcp"}
 
 
-@app.get("/")
+@app.get(
+    "/",
+    tags=["health"],
+    summary="Service Information",
+    response_description="Basic service metadata",
+)
 async def root():
-    """Root endpoint with service information."""
+    """
+    Get basic service information.
+
+    Returns service name, version, and links to documentation.
+    This is the root endpoint that provides an overview of the API.
+    """
     return {
         "service": "docsrs-mcp",
         "version": "0.1.0",
@@ -48,9 +117,21 @@ async def root():
     }
 
 
-@app.get("/mcp/manifest", response_model=MCPManifest)
+@app.get(
+    "/mcp/manifest",
+    response_model=MCPManifest,
+    tags=["mcp"],
+    summary="Get MCP Manifest",
+    response_description="Complete MCP server manifest",
+)
 async def get_mcp_manifest():
-    """Return MCP server manifest with available tools and resources."""
+    """
+    Get the Model Context Protocol server manifest.
+
+    Returns a complete manifest describing all available MCP tools and resources,
+    including their input schemas and descriptions. This endpoint is used by
+    MCP clients to discover server capabilities.
+    """
     return MCPManifest(
         tools=[
             MCPTool(
@@ -130,9 +211,24 @@ async def get_mcp_manifest():
     )
 
 
-@app.post("/mcp/tools/get_crate_summary", response_model=GetCrateSummaryResponse)
+@app.post(
+    "/mcp/tools/get_crate_summary",
+    response_model=GetCrateSummaryResponse,
+    tags=["tools"],
+    summary="Get Crate Summary",
+    response_description="Crate metadata and module structure",
+    operation_id="getCrateSummary",
+)
 async def get_crate_summary(request: GetCrateSummaryRequest):
-    """Get summary information about a Rust crate."""
+    """
+    Get summary information about a Rust crate.
+
+    Fetches crate metadata including name, version, description, repository URL,
+    and module structure. If the crate hasn't been ingested yet, it will be
+    downloaded and processed automatically.
+
+    **Note**: First-time ingestion may take 1-10 seconds depending on crate size.
+    """
     try:
         # Ingest crate if not already done
         db_path = await ingest_crate(request.crate_name, request.version)
@@ -173,9 +269,25 @@ async def get_crate_summary(request: GetCrateSummaryRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.post("/mcp/tools/search_items", response_model=SearchItemsResponse)
+@app.post(
+    "/mcp/tools/search_items",
+    response_model=SearchItemsResponse,
+    tags=["tools"],
+    summary="Search Documentation",
+    response_description="Ranked search results",
+    operation_id="searchItems",
+)
 async def search_items(request: SearchItemsRequest):
-    """Search for items in a crate's documentation."""
+    """
+    Search for items in a crate's documentation using semantic similarity.
+
+    Performs vector similarity search across all documentation in the specified crate.
+    Results are ranked by semantic similarity to the query using BAAI/bge-small-en-v1.5
+    embeddings.
+
+    **Performance**: Warm searches typically complete in < 50ms.
+    **Rate limit**: 30 requests/second per IP address.
+    """
     try:
         # Ingest crate if not already done
         db_path = await ingest_crate(request.crate_name, request.version)
@@ -205,9 +317,23 @@ async def search_items(request: SearchItemsRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.post("/mcp/tools/get_item_doc")
+@app.post(
+    "/mcp/tools/get_item_doc",
+    tags=["tools"],
+    summary="Get Item Documentation",
+    response_description="Complete item documentation",
+    operation_id="getItemDoc",
+)
 async def get_item_doc(request: GetItemDocRequest):
-    """Get complete documentation for a specific item."""
+    """
+    Get complete documentation for a specific item in a crate.
+
+    Retrieves the full documentation for a specific item identified by its path
+    (e.g., 'tokio::spawn', 'serde::Deserialize'). Returns markdown-formatted
+    documentation including examples and detailed descriptions.
+
+    **Tip**: Use search_items first if you're unsure of the exact item path.
+    """
     try:
         # Ingest crate if not already done
         db_path = await ingest_crate(request.crate_name, request.version)
@@ -234,9 +360,23 @@ async def get_item_doc(request: GetItemDocRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/mcp/resources/versions")
+@app.get(
+    "/mcp/resources/versions",
+    tags=["resources"],
+    summary="List Crate Versions",
+    response_description="Available crate versions",
+    operation_id="listVersions",
+)
 async def list_versions(crate_name: str):
-    """List all available versions of a crate."""
+    """
+    List all locally cached versions of a crate.
+
+    Returns a list of all versions that have been previously ingested and cached.
+    Note that this only shows cached versions, not all versions available on crates.io.
+
+    **Parameters**:
+    - `crate_name`: Name of the Rust crate to query
+    """
     try:
         # For now, just return the current version from the database if it exists
         # In a full implementation, this would query crates.io API
