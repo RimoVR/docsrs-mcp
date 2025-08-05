@@ -168,11 +168,9 @@ async def get_mcp_manifest():
                             "description": "Specific version (default: latest)",
                         },
                         "k": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Number of results to return",
                             "default": 5,
-                            "minimum": 1,
-                            "maximum": 20,
                         },
                     },
                     "required": ["crate_name", "query"],

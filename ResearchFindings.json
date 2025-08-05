@@ -66,6 +66,62 @@
                 "timing": "Validators with mode='before' execute before Pydantic's built-in type validation",
                 "benefit": "Allows seamless conversion of MCP string parameters to expected Python types"
               }
+            },
+            "parameterValidation": {
+              "issue": "MCP clients inconsistently send parameters - sometimes as proper JSON objects, sometimes as stringified values",
+              "findings": {
+                "fastMCPUnionSupport": {
+                  "description": "FastMCP supports Union types (str | int) which automatically generates anyOf schemas",
+                  "benefit": "Provides flexible parameter type definitions in MCP manifest",
+                  "implementation": "Use Union[str, int] in Pydantic models for flexible parameter acceptance"
+                },
+                "doubleValidation": {
+                  "description": "FastMCP has double validation - MCP manifest JSON Schema validates before Pydantic models",
+                  "process": [
+                    "1. MCP manifest JSON Schema validation occurs first",
+                    "2. Pydantic model validation occurs second",
+                    "3. Field validators with mode='before' can handle type coercion between these steps"
+                  ],
+                  "implication": "Need to handle type mismatches at both validation layers"
+                },
+                "clientInconsistency": {
+                  "description": "MCP clients inconsistently send parameters",
+                  "patterns": [
+                    "Sometimes send proper JSON objects with correct types",
+                    "Sometimes send stringified values for numeric parameters",
+                    "Behavior may vary by client implementation or parameter context"
+                  ],
+                  "impact": "Requires defensive programming for parameter handling"
+                }
+              },
+              "bestPractices": {
+                "manifestDesign": {
+                  "approach": "Use anyOf patterns in MCP manifest for flexible parameter types",
+                  "example": "anyOf: [{type: 'string'}, {type: 'integer'}] for flexible numeric parameters",
+                  "reason": "Accommodates client inconsistencies in parameter serialization"
+                },
+                "pydanticValidation": {
+                  "approach": "Pydantic field validators with mode='before' handle type coercion after schema validation",
+                  "timing": "Validators execute after MCP manifest validation but before Pydantic type checking",
+                  "pattern": "@field_validator('field_name', mode='before') with Union type support",
+                  "benefit": "Seamless handling of both string and native type parameters"
+                },
+                "robustImplementation": {
+                  "principle": "Design for parameter type flexibility from the start",
+                  "techniques": [
+                    "Use Union types in Pydantic models",
+                    "Implement field validators for type coercion",
+                    "Design MCP manifest with anyOf schemas",
+                    "Test with both string and native parameter types"
+                  ]
+                }
+              },
+              "sources": [
+                "FastMCP searchItems k parameter validation fix",
+                "MCP protocol specification analysis",
+                "Claude Code client behavior observation",
+                "FastMCP library source code review"
+              ]
             }
           }
         }
@@ -546,6 +602,9 @@
       "CRITICAL: Route all logging to stderr when using STDIO transport to prevent Claude Desktop communication corruption",
       "Leverage FastMCP dual-mode operation: REST for debugging, MCP for Claude integration",
       "Use Pydantic field validators with mode='before' to handle FastMCP string-to-numeric type coercion issues",
+      "Design MCP manifests with anyOf patterns for flexible parameter types to accommodate client inconsistencies",
+      "Use Union types in Pydantic models (e.g., Union[str, int]) to support flexible parameter acceptance",
+      "Implement defensive parameter validation that handles both string and native type inputs",
       "MANDATORY: Use sqlite-vec 0.1.6 (sqlite-vss is deprecated)",
       "CRITICAL: Pin aiohttp to 3.9.5 to avoid memory leaks",
       "Use FastEmbed <0.7.0 for onnxruntime compatibility",

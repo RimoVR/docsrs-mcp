@@ -227,7 +227,7 @@ graph TD
     end
     
     subgraph "MCP Protocol"
-        FASTMCP[FastMCP.from_fastapi()<br/>Automatic REST → MCP conversion]
+        FASTMCP[FastMCP.from_fastapi()<br/>Automatic REST → MCP conversion<br/>anyOf schema generation]
         STDIO_TRANSPORT[STDIO Transport<br/>JSON-RPC messages]
     end
     
@@ -549,6 +549,13 @@ graph TD
 - Field validators with `mode='before'` handle type coercion before constraint validation
 - Critical for integer parameters like `k` (result count) that have numeric constraints
 
+**MCP Manifest Schema Pattern**
+- MCP tool manifests require `anyOf` schema pattern for parameters that may arrive as different types
+- JSON Schema validation must pass to allow Pydantic validators to handle type coercion
+- Pattern: `'anyOf': [{'type': 'integer'}, {'type': 'string'}]` for integer parameters
+- This allows MCP clients to send either native integers or string representations
+- FastMCP automatically generates proper schemas from Pydantic field definitions
+
 **Implementation Example (SearchItemsRequest.k field)**
 ```python
 @field_validator("k", mode="before")
@@ -636,6 +643,7 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - No changes required to existing FastAPI route handlers
 - Preserves all business logic, validation, and error handling
 - Maintains compatibility with existing FastAPI middleware
+- Generates MCP-compatible JSON schemas with `anyOf` patterns for flexible parameter types
 
 **Protocol Isolation**
 - MCP mode uses stderr exclusively for logging to avoid stdout contamination
@@ -681,6 +689,8 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - Maintains strict validation with `extra='forbid'` to prevent parameter injection
 - Graceful error handling with detailed error messages for debugging
 - Supports both native types and string representations for maximum compatibility
+- MCP manifest schemas use `anyOf` pattern to allow flexible parameter types while maintaining validation
+- Critical pattern: `'anyOf': [{'type': 'integer'}, {'type': 'string'}]` enables JSON Schema validation to pass so Pydantic can handle type coercion
 
 **MVP Focus: Crate Descriptions Only**
 - Basic ingestion pipeline processes crate metadata from crates.io API

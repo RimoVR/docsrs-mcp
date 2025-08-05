@@ -227,10 +227,12 @@ Performs vector similarity search across complete rustdoc documentation.
 - `k` (integer, optional): Number of results to return (default: 5, max: 20)
 
 **Parameter Validation:**
-The `k` parameter accepts both integers and numeric strings:
+The `k` parameter accepts both integers and numeric strings for enhanced MCP client compatibility:
 - `k=5` (integer) - Direct integer values are accepted
 - `k="5"` (numeric string) - Automatically converted to integer
 - `k="abc"` (invalid string) - Returns HTTP 422 validation error
+
+This flexible validation ensures compatibility with different MCP client implementations that may pass parameters as strings or native types. The server internally converts valid numeric strings to integers while rejecting non-numeric strings with a clear validation error.
 
 **Example Request:**
 ```bash

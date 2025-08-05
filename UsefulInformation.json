@@ -169,6 +169,15 @@
           "prevention": "FastMCP's automatic type conversion has known issues with string-to-int conversion. Always use Pydantic field validators with mode='before' for numeric parameters that MCP clients might send as strings",
           "dateEncountered": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "error": "MCP tool schema validation preventing field validator execution",
+          "context": "searchItems tool fails with validation error when k parameter provided as string '5' by MCP clients. Error: \"'5' is not valid under any of the given schemas\"",
+          "solution": "Update MCP manifest schema to use anyOf pattern accepting both string and integer types: 'anyOf': [{'type': 'integer'}, {'type': 'string'}]. This allows JSON Schema validation to pass so Pydantic field validator can perform type coercion",
+          "prevention": "When FastMCP tools need to accept parameters that might come as different types, use anyOf schema pattern to handle double validation. MCP JSON Schema validates before Pydantic field validators can run, creating conflicts between type constraints and coercion logic",
+          "dateEncountered": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "resolutionStatus": "Fixed and tested on 2025-08-05. Solution confirmed working with both integer and string k parameters"
         }
       ]
     },
@@ -270,6 +279,14 @@
           "impact": "Reduces support requests and improves API adoption by making rate limits transparent",
           "dateLearned": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "MCP manifest schemas need anyOf pattern for mixed-type parameters",
+          "context": "MCP clients send parameters with inconsistent types (strings vs integers)",
+          "details": "FastMCP has double validation - JSON Schema validation occurs before Pydantic field validators. Use anyOf: [{type: 'integer'}, {type: 'string'}] in MCP manifest to allow both types through schema validation, then handle type conversion in Pydantic with mode='before' field validators",
+          "impact": "Enables robust parameter handling that works across different MCP client implementations",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"]
         }
       ]
     }
@@ -344,7 +361,8 @@
       "Kill MCP server: kill <PID> (use captured PID from nohup)",
       "Verify MCP protocol: Check that STDIO is clean, no stdout pollution",
       "FastMCP conversion: Use FastMCP.from_fastapi() for automatic REST-to-MCP conversion",
-      "Parameter type issues: MCP clients may send numeric parameters as strings - use Pydantic field validators with mode='before' for type coercion"
+      "Parameter type issues: MCP clients may send numeric parameters as strings - use Pydantic field validators with mode='before' for type coercion",
+      "Double validation conflicts: When MCP manifest schema is too restrictive, it prevents Pydantic field validators from running - use anyOf schema patterns for flexible type acceptance"
     ]
   },
   "performanceMetrics": {
