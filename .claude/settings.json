@@ -1,12 +1,46 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/session_start_workflow.py",
+            "description": "Initialize workflow guidance for session"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/prompt_workflow_validator.py",
+            "description": "Validate and enhance user prompts with workflow suggestions"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__serena__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pre_mcp_enforcer.py",
+            "description": "Enforce MCP usage patterns - Probe first, Serena for precision"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "WebSearch",
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/peterkloiber/cccc/.claude/hooks/post_search_research.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/post_search_research.py",
             "description": "Check if search findings should be added to ResearchFindings.json"
           }
         ]
@@ -16,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/peterkloiber/cccc/.claude/hooks/post_command_bugfix.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/post_command_bugfix.py",
             "description": "Suggest web searches when bug fixes fail"
           }
         ]
@@ -26,13 +60,35 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/peterkloiber/cccc/.claude/hooks/post_edit_lint.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/post_edit_lint.py",
             "description": "Run linters immediately after file edits"
           },
           {
             "type": "command",
-            "command": "/Users/peterkloiber/cccc/.claude/hooks/post_edit_docs.py",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/post_edit_docs.py",
             "description": "Suggest documentation updates for significant changes"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/notification_workflow_guide.py",
+            "description": "Guide tool permission decisions with workflow context"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pre_compact_memory_saver.py",
+            "description": "Save important context to living memory before compaction"
           }
         ]
       }
@@ -42,8 +98,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/peterkloiber/cccc/.claude/hooks/stop_documentation.py",
-            "description": "Check if documentation files need updates after session"
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop_documentation.py",
+            "description": "Comprehensive session wrap-up and documentation check"
           }
         ]
       }
@@ -53,8 +109,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/peterkloiber/cccc/.claude/hooks/subagent_stop_filter.py",
-            "description": "Filter subagent output to convey only relevant information"
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/subagent_stop_filter.py",
+            "description": "Validate and filter subagent outputs"
           }
         ]
       }

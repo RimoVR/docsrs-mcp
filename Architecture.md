@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The docsrs-mcp server provides Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It consists of a FastAPI web layer, an asynchronous ingestion pipeline, and a SQLite-based vector storage system.
+The docsrs-mcp server provides Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It consists of a FastAPI web layer, a comprehensive asynchronous ingestion pipeline with full rustdoc JSON processing, and a SQLite-based vector storage system with intelligent caching.
 
 ## High-Level Architecture
 
@@ -36,7 +36,7 @@ graph TB
     RL --> API
     API -->|enqueue| Queue
     Queue -->|dequeue| IW
-    IW -->|fetch rustdoc JSON| DOCS
+    IW -->|version resolve + download| DOCS
     IW -->|embed text| EMB
     IW -->|store vectors| CACHE
     API -->|query| CACHE
@@ -56,9 +56,12 @@ graph LR
         end
         
         subgraph "Ingestion Layer"
-            ING[ingest.py<br/>Download & process]
-            CHUNK[chunker.py<br/>Extract items]
-            EMBED[embedder.py<br/>Text to vectors]
+            ING[ingest.py<br/>Full rustdoc pipeline]
+            VER[Version Resolution<br/>docs.rs redirects]
+            DL[Compression Support<br/>zst, gzip, json]
+            PARSE[ijson Parser<br/>Memory-efficient streaming]
+            EMBED[FastEmbed<br/>Batch processing]
+            LOCK[Per-crate Locks<br/>Prevent duplicates]
         end
         
         subgraph "Storage Layer"
@@ -105,17 +108,20 @@ sequenceDiagram
         API->>Queue: Enqueue ingest task
         Queue->>Worker: Dequeue task
         Worker->>Worker: Acquire per-crate lock
-        Worker->>DocsRS: GET /crate/{name}/{version}/json.zst
+        Worker->>DocsRS: Resolve version via redirect
+        DocsRS-->>Worker: Actual version + rustdoc URL
+        Worker->>DocsRS: GET compressed rustdoc (.zst/.gz/.json)
         DocsRS-->>Worker: Compressed rustdoc JSON
-        Worker->>Worker: Decompress & parse
+        Worker->>Worker: Stream decompress with size limits
+        Worker->>Worker: Parse with ijson (memory-efficient)
         Worker->>Worker: Chunk into items
         Worker->>Embed: Batch embed (size=32)
         Embed-->>Worker: 384-dim vectors
         Worker->>DB: Batch insert (size=1000)
         Worker->>DB: Index with vss_index!
-        Worker->>Worker: Check cache size
+        Worker->>Worker: Check cache size (2GB limit)
         alt Cache > 2 GiB
-            Worker->>DB: Delete oldest DBs
+            Worker->>DB: LRU eviction by file mtime
         end
     end
     
@@ -210,7 +216,16 @@ mindmap
     HTTP Client
       aiohttp 3.9.5 (pinned for memory leak fix)
       orjson (JSON parsing)
-      crates.io API integration
+      crates.io + docs.rs API integration
+      
+    JSON Processing
+      ijson (streaming parser)
+      Memory-efficient large file handling
+      
+    Compression
+      zstandard (zst decompression)
+      gzip (gz decompression)
+      Size limits and streaming
       
     Deployment
       uvx (zero-install)
@@ -243,9 +258,15 @@ stateDiagram-v2
     VersionResolve --> Error404: Not found
     VersionResolve --> Error410: Yanked
     
-    Download --> Decompress: Success
+    Download --> FormatCheck: Success
+    FormatCheck --> TryZst: Check .json.zst
+    TryZst --> TryGz: 404 Not Found
+    TryZst --> Decompress: Found
+    TryGz --> TryJson: 404 Not Found  
+    TryGz --> Decompress: Found
+    TryJson --> Decompress: Found
+    TryJson --> Error404: All formats 404
     Download --> Error504: Timeout
-    Download --> Error404: No rustdoc JSON
     
     Decompress --> Chunk
     Chunk --> Embed
@@ -302,16 +323,53 @@ graph TB
     VPS --> VOL
 ```
 
+## System Components
+
+### Ingestion Layer Details
+
+**Version Resolution System**
+- Uses docs.rs redirect mechanism to resolve version strings
+- Supports "latest" and specific version identifiers
+- Handles version disambiguation and canonicalization
+- Constructs proper rustdoc JSON URLs with crate name transformations
+
+**Compression Support**
+- **Zstandard (.json.zst)**: Primary format, best compression ratio
+- **Gzip (.json.gz)**: Secondary format, universal support
+- **Uncompressed (.json)**: Fallback format for compatibility
+- Streaming decompression with configurable memory limits
+- Automatic format detection and selection
+
+**Per-Crate Locking Mechanism**
+- Global asyncio.Lock registry indexed by crate@version
+- Prevents duplicate ingestion across concurrent requests
+- Maintains lock state throughout application lifetime
+- Ensures data consistency during parallel processing
+
+**Memory-Efficient Parsing**
+- ijson streaming parser for large rustdoc JSON files
+- Two-pass parsing: paths mapping + item extraction
+- Filters relevant item types (functions, structs, traits, modules)
+- Processes items incrementally without loading full JSON into memory
+
+**LRU Cache Eviction**
+- File modification time (mtime) based eviction strategy
+- Configurable size limits (default 2GB total cache)
+- Automatic cleanup when cache size exceeds limits
+- Preserves most recently accessed crate documentation
+
 ## Performance Characteristics
 
 | Component | Target | Notes |
 |-----------|--------|-------|
 | Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH |
-| Ingest latency | < 1s | Crate description only (MVP) |
-| Memory usage | < 512 MiB RSS | Including FastEmbed model |
-| Cache storage | ./cache directory | File-based, persistent |
-| Embedding model | BAAI/bge-small-en-v1.5 | 384 dimensions, optimized for retrieval |
-| Async architecture | aiosqlite + asyncio | Non-blocking I/O operations |
+| Ingest latency | < 30s | Full rustdoc processing with compression |
+| Memory usage | < 512 MiB RSS | Including FastEmbed model and streaming |
+| Cache storage | ./cache directory | File-based, LRU eviction |
+| Embedding model | BAAI/bge-small-en-v1.5 | 384 dimensions, batch processing |
+| Async architecture | aiosqlite + asyncio | Non-blocking I/O with per-crate locks |
+| Compression ratio | ~10:1 typical | .zst format for bandwidth efficiency |
+| Batch sizes | 32 embed, 1000 DB | Optimized for throughput vs memory |
 
 ## Security Model
 
@@ -378,13 +436,40 @@ graph LR
 2. **Search**: Query → Vector similarity search using sqlite-vec MATCH → Return ranked results
 3. **Caching**: Persistent file-based cache in ./cache directory for fast subsequent access
 
+## Technical Implementation Details
+
+### Compression Implementation
+- **zstandard**: Uses `zstandard` library with streaming decompression
+- **gzip**: Uses standard library `gzip.decompress()` with size checking
+- **Size Limits**: 30MB compressed, 100MB decompressed (configurable)
+- **Memory Management**: Chunked reading to prevent memory exhaustion
+
+### JSON Processing with ijson
+- **Streaming Parser**: Processes large files without full memory load
+- **Path Extraction**: First pass builds ID-to-path mapping from "paths" section
+- **Item Processing**: Second pass extracts documentation from "index" section
+- **Type Filtering**: Focuses on functions, structs, traits, modules, enums, constants
+- **Memory Efficiency**: Processes items incrementally, not all at once
+
+### Concurrency Architecture
+- **Per-Crate Locks**: Prevents race conditions during ingestion
+- **Global Lock Registry**: Maintains locks across async task lifecycle
+- **Batch Processing**: Optimizes database operations and embedding generation
+- **Resource Management**: Proper cleanup of connections and file handles
+
+### Cache Management Strategy
+- **LRU Algorithm**: Based on file system modification time (mtime)
+- **Size Monitoring**: Uses `os.walk()` and `os.stat()` for efficient calculation
+- **Eviction Process**: Removes oldest files first until under size limit
+- **Error Handling**: Graceful handling of file system errors during cleanup
+
 ## Future Considerations (Out of Scope v1)
 
-- Cross-crate search capabilities
-- GPU acceleration for embeddings
-- Multi-tenant quota management
-- Distributed caching with Redis
-- Analytics and usage tracking
-- Authentication and authorization
-- Popularity-based ranking
-- Real-time updates via webhooks
+- Cross-crate dependency search capabilities
+- GPU acceleration for embedding generation
+- Multi-tenant quota management and rate limiting
+- Distributed caching with Redis for horizontal scaling
+- Real-time incremental updates via docs.rs webhooks
+- Advanced search features (semantic similarity, code examples)
+- Analytics and usage tracking for optimization
+- Authentication and authorization for enterprise deployments

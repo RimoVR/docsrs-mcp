@@ -6,7 +6,7 @@ A minimal, self-hostable Model Context Protocol (MCP) server that lets AI agents
 
 docsrs-mcp provides MCP endpoints for:
 - Fetching crate summaries and metadata
-- Semantic search within Rust crate descriptions (MVP)
+- Semantic search within Rust crate documentation
 - Retrieving documentation for specific items
 - Listing available crate versions
 
@@ -16,8 +16,11 @@ Built with FastAPI and sqlite-vec for efficient vector search, it caches crate d
 
 - 🚀 **Zero-install launch** with `uvx`
 - 🔍 **Vector search** powered by BAAI/bge-small-en-v1.5 embeddings
-- 💾 **Local caching** in SQLite with sqlite-vec extension
+- 📚 **Full rustdoc ingestion** - Complete documentation from docs.rs JSON files
+- 🗜️ **Compression support** - Handles .json.zst (Zstandard) and .json.gz (Gzip) formats
+- 💾 **Local caching** in SQLite with sqlite-vec extension and LRU eviction
 - ⚡ **Fast performance** - Low latency search, efficient memory usage
+- 🔒 **Concurrent safety** - Per-crate locking prevents duplicate ingestion
 - 📦 **Self-contained** - Single Python process, file-backed SQLite
 - 🛠️ **Easy development** - UV-based tooling, async/await architecture
 
@@ -50,7 +53,7 @@ Returns crate metadata including name, version, description, and repository info
 ```
 
 ### `search_items`
-Performs vector similarity search on crate descriptions (full rustdoc search planned).
+Performs vector similarity search across complete rustdoc documentation.
 
 ```json
 {
@@ -61,7 +64,7 @@ Performs vector similarity search on crate descriptions (full rustdoc search pla
 ```
 
 ### `get_item_doc`
-Retrieves documentation for a specific item (currently limited to cached content).
+Retrieves documentation for a specific item from ingested rustdoc data.
 
 ```json
 {
@@ -90,7 +93,7 @@ uv run docsrs-mcp
 # Run with background process (avoids terminal hanging)
 nohup uv run docsrs-mcp > server.log 2>&1 & echo $!
 
-# Run tests
+# Run tests (25 comprehensive tests covering all pipeline components)
 uv run pytest
 
 # Add new dependencies
@@ -101,10 +104,17 @@ uv add --dev package-name        # Development dependency
 ## Architecture
 
 - **Web Layer**: FastAPI with MCP endpoint handlers
-- **Ingestion**: Async pipeline fetching from crates.io API
+- **Ingestion Pipeline**: 
+  - Downloads complete rustdoc JSON files from docs.rs
+  - Supports compressed formats (.json.zst, .json.gz) with automatic detection
+  - Memory-efficient streaming JSON parsing with ijson
+  - Per-crate locking mechanism prevents duplicate concurrent ingestion
+  - Version resolution via docs.rs redirects (supports "latest" version)
+  - Streaming decompression with configurable size limits (100MB default)
+  - Graceful fallback to crate description embedding when rustdoc unavailable
 - **Storage**: SQLite with vector search extension (sqlite-vec)
 - **Embedding**: FastEmbed with ONNX-optimized BAAI/bge-small-en-v1.5 model
-- **Caching**: File-based SQLite databases in `./cache` directory
+- **Caching**: File-based SQLite databases in `./cache` directory with LRU eviction (2GB limit)
 
 See [Architecture.md](Architecture.md) for detailed system design.
 
@@ -122,12 +132,16 @@ MIT License - see LICENSE file for details.
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## Current Limitations (MVP)
+## Testing
 
-- Only indexes crate descriptions, not full rustdoc content
-- No rate limiting implemented yet
-- Basic error handling
-- Manual cache management
+The project includes comprehensive test coverage with 25 tests covering:
+
+- **Unit Tests**: All pipeline components individually tested
+- **Integration Tests**: End-to-end ingestion scenarios
+- **Compression Tests**: Support for .json.zst and .json.gz formats
+- **Concurrency Tests**: Per-crate locking and concurrent access
+- **Cache Tests**: LRU eviction and size limit enforcement
+- **Error Handling**: Graceful fallbacks and error recovery
 
 ## Acknowledgments
 

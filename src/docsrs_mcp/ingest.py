@@ -158,12 +158,17 @@ async def download_rustdoc(
     # Try different compression formats in order of preference
     urls_to_try = []
 
-    # If URL already has an extension, try it first
-    if rustdoc_url.endswith((".json", ".json.zst", ".json.gz")):
+    # If URL already has a compressed extension, use it as-is
+    if rustdoc_url.endswith((".json.zst", ".json.gz")):
         urls_to_try.append(rustdoc_url)
     else:
-        # Try compressed formats first (preferred for size)
-        base_url = rustdoc_url.rstrip(".json")
+        # Remove .json extension if present to get base URL
+        base_url = (
+            rustdoc_url.rstrip(".json")
+            if rustdoc_url.endswith(".json")
+            else rustdoc_url
+        )
+        # Try compressed formats first (preferred for size), then uncompressed
         urls_to_try.extend(
             [f"{base_url}.json.zst", f"{base_url}.json.gz", f"{base_url}.json"]
         )
@@ -221,7 +226,8 @@ async def download_rustdoc(
 
         except Exception as e:
             last_error = e
-            if "404" not in str(e) and resp.status != 404:
+            # Only log non-404 errors
+            if "404" not in str(e):
                 logger.warning(f"Failed to download from {url}: {e}")
 
     # All formats failed
@@ -304,7 +310,7 @@ async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
     id_to_path = {}
     try:
         # Use items() for efficient iteration over dict items
-        parser = ijson.kvitems(io.StringIO(json_content), "paths")
+        parser = ijson.kvitems(io.BytesIO(json_content.encode()), "paths")
         for item_id, path_info in parser:
             if isinstance(path_info, dict) and "path" in path_info:
                 id_to_path[item_id] = "::".join(path_info["path"])
@@ -313,7 +319,7 @@ async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
 
     # Second pass: collect items from index
     try:
-        parser = ijson.kvitems(io.StringIO(json_content), "index")
+        parser = ijson.kvitems(io.BytesIO(json_content.encode()), "index")
         for item_id, item_info in parser:
             if not isinstance(item_info, dict):
                 continue
@@ -640,6 +646,7 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     )
                 else:
                     logger.warning("No items found in rustdoc JSON")
+                    raise Exception("No items found in rustdoc JSON")
 
             except Exception as e:
                 logger.warning(f"Failed to process rustdoc JSON: {e}")

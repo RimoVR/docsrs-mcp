@@ -60,7 +60,8 @@ def run_linter(file_path, file_type):
                 # Run cargo fmt check
                 fmt_result = subprocess.run(
                     ["cargo", "fmt", "--", "--check"],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     text=True,
                     cwd=workspace_root,
                 )
@@ -76,7 +77,8 @@ def run_linter(file_path, file_type):
                 # Run clippy with all targets
                 clippy_result = subprocess.run(
                     ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     text=True,
                     cwd=workspace_root,
                     timeout=30,
@@ -95,7 +97,8 @@ def run_linter(file_path, file_type):
                 # Run cargo check for type errors
                 check_result = subprocess.run(
                     ["cargo", "check", "--all-targets"],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     text=True,
                     cwd=workspace_root,
                     timeout=30,
@@ -161,7 +164,8 @@ def run_linter(file_path, file_type):
                     # Run eslint with --max-warnings 0 for strict checking
                     lint_result = subprocess.run(
                         ["npx", "eslint", "--max-warnings", "0", str(file_path)],
-                        check=False, capture_output=True,
+                        check=False,
+                        capture_output=True,
                         text=True,
                         cwd=project_root,
                         timeout=20,
@@ -184,7 +188,8 @@ def run_linter(file_path, file_type):
                 ):
                     tsc_result = subprocess.run(
                         ["npx", "tsc", "--noEmit", "--pretty", "false"],
-                        check=False, capture_output=True,
+                        check=False,
+                        capture_output=True,
                         text=True,
                         cwd=project_root,
                         timeout=20,
@@ -214,7 +219,8 @@ def run_linter(file_path, file_type):
                 if prettier_config_exists:
                     prettier_result = subprocess.run(
                         ["npx", "prettier", "--check", str(file_path)],
-                        check=False, capture_output=True,
+                        check=False,
+                        capture_output=True,
                         text=True,
                         cwd=project_root,
                         timeout=10,
@@ -259,7 +265,8 @@ def run_linter(file_path, file_type):
                 # Run ruff check
                 ruff_result = subprocess.run(
                     ["ruff", "check", str(file_path)],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     text=True,
                     timeout=10,
                 )
@@ -275,7 +282,8 @@ def run_linter(file_path, file_type):
                 # Run ruff format check
                 ruff_format_result = subprocess.run(
                     ["ruff", "format", "--check", str(file_path)],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     text=True,
                     timeout=10,
                 )
@@ -291,7 +299,8 @@ def run_linter(file_path, file_type):
                 # Fallback to flake8
                 flake8_result = subprocess.run(
                     ["flake8", str(file_path)],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     text=True,
                     timeout=10,
                 )
@@ -318,7 +327,8 @@ def run_linter(file_path, file_type):
 
                 mypy_result = subprocess.run(
                     ["mypy", str(file_path)],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     text=True,
                     cwd=project_root,
                     timeout=15,

@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-04",
+  "lastUpdated": "2025-08-05",
   "research": {
     "modelContextProtocol": {
       "overview": "Open standard by Anthropic for LLM-tool communication",
@@ -87,14 +87,25 @@
       "rustdocJson": {
         "availability": "Started 2025-05-23",
         "formats": [".json", ".json.zst", ".json.gz"],
-        "urlPattern": "/crate/{name}/{version}/{target}/json.zst",
-        "compressionPreference": ".zst (zstandard)",
+        "urlPattern": "https://docs.rs/{crate}/{version}/{crate_name}.json[.zst|.gz]",
+        "compressionPreference": ".zst (zstandard) - better compression than gzip",
+        "fileSizes": {
+          "compressed": "Varies significantly by crate",
+          "uncompressed": "Can exceed 100MB for large crates",
+          "efficiency": "Zstandard compression preferred for size reduction"
+        },
         "parsingLibrary": "rustdoc-types crate",
         "parsingComplexity": {
           "status": "Complex nested JSON structure",
           "mvpApproach": "Use only crate descriptions for initial implementation",
           "fullParsing": "Requires significant effort for complete documentation extraction",
           "recommendation": "Start simple, expand incrementally based on user needs"
+        },
+        "memoryConsiderations": {
+          "issue": "Large JSON files can cause memory spikes",
+          "solution": "Use streaming decompression and parsing",
+          "library": "ijson for memory-efficient streaming JSON parsing",
+          "bestPractice": "Avoid loading entire JSON into memory at once"
         }
       },
       "apiEndpoints": {
@@ -106,7 +117,29 @@
         "Not all crates have rustdoc JSON",
         "Older crates may lack JSON docs",
         "Format varies by rustdoc version"
-      ]
+      ],
+      "ingestionBestPractices": {
+        "concurrency": {
+          "approach": "Per-crate locking to prevent duplicate ingestion",
+          "mechanism": "File-based or database-based locks",
+          "rationale": "Avoid race conditions when multiple processes ingest same crate"
+        },
+        "sizeManagement": {
+          "downloadLimits": "Set reasonable size limits for HTTP downloads",
+          "decompressionLimits": "Limit decompressed size to prevent memory exhaustion",
+          "monitoring": "Track file sizes and memory usage during processing"
+        },
+        "cacheEviction": {
+          "strategy": "LRU eviction based on file modification time",
+          "rationale": "Keep recently accessed crates while freeing space for new ones",
+          "implementation": "Use filesystem timestamps for eviction decisions"
+        },
+        "errorHandling": {
+          "retryMechanism": "Use tenacity library for robust HTTP request retries",
+          "backoffStrategy": "Exponential backoff with jitter",
+          "maxRetries": "Configure reasonable retry limits to avoid infinite loops"
+        }
+      }
     },
     "serverInfrastructure": {
       "fastAPI": {
@@ -152,7 +185,32 @@
         "library": "zstandard",
         "version": ">=0.22",
         "method": "ZstdDecompressor().copy_stream()",
-        "features": "Streaming decompression"
+        "features": "Streaming decompression",
+        "advantages": "Better compression ratio than gzip for rustdoc JSON files"
+      },
+      "jsonParsing": {
+        "library": "ijson",
+        "version": ">=3.2.0",
+        "purpose": "Memory-efficient streaming JSON parsing",
+        "use_case": "Parse large rustdoc JSON files without loading entire file into memory",
+        "method": "ijson.parse() for streaming, ijson.items() for extracting objects",
+        "benefits": [
+          "Constant memory usage regardless of file size",
+          "Ability to process 100MB+ JSON files efficiently",
+          "Compatible with compressed streams"
+        ]
+      },
+      "retryLogic": {
+        "library": "tenacity",
+        "version": ">=8.0.0",
+        "purpose": "Robust retry mechanisms for HTTP requests",
+        "features": [
+          "Exponential backoff with jitter",
+          "Configurable retry conditions",
+          "Maximum retry limits",
+          "Integration with async/await"
+        ],
+        "use_case": "Handle network failures when downloading rustdoc JSON files"
       }
     },
     "deployment": {
@@ -263,7 +321,12 @@
       "Implement connection pooling for aiohttp from start",
       "Set up proper asyncio task management",
       "Use streaming decompression for large rustdoc files",
-      "Start with simple crate description parsing for MVP"
+      "Start with simple crate description parsing for MVP",
+      "Use ijson for memory-efficient parsing of large JSON files",
+      "Implement per-crate locking to prevent duplicate ingestion",
+      "Use tenacity for robust HTTP request retry mechanisms",
+      "Set reasonable size limits for downloads and decompression",
+      "Prefer .zst compressed format over .gz for rustdoc JSON files"
     ],
     "performance": [
       "Batch embeddings in groups of 32",
@@ -273,7 +336,10 @@
       "Profile memory usage early and often",
       "Monitor aiohttp memory usage closely due to version constraints",
       "Use sqlite-vec MATCH operator for optimal query performance",
-      "Include k constraint in all KNN queries for sqlite-vec"
+      "Include k constraint in all KNN queries for sqlite-vec",
+      "Use streaming decompression to avoid memory spikes",
+      "Implement LRU eviction based on file modification time",
+      "Monitor download and decompression size limits"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

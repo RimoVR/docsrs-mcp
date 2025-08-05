@@ -40,9 +40,7 @@ class GetCrateSummaryRequest(BaseModel):
     """Request for get_crate_summary tool."""
 
     crate_name: str = Field(..., description="Name of the crate to query")
-    version: str | None = Field(
-        None, description="Specific version (default: latest)"
-    )
+    version: str | None = Field(None, description="Specific version (default: latest)")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -52,9 +50,7 @@ class SearchItemsRequest(BaseModel):
 
     crate_name: str = Field(..., description="Name of the crate to search in")
     query: str = Field(..., description="Search query text")
-    version: str | None = Field(
-        None, description="Specific version (default: latest)"
-    )
+    version: str | None = Field(None, description="Specific version (default: latest)")
     k: int | None = Field(5, description="Number of results to return", ge=1, le=20)
 
     model_config = ConfigDict(extra="forbid")
@@ -67,9 +63,7 @@ class GetItemDocRequest(BaseModel):
     item_path: str = Field(
         ..., description="Full path to the item (e.g., 'tokio::spawn')"
     )
-    version: str | None = Field(
-        None, description="Specific version (default: latest)"
-    )
+    version: str | None = Field(None, description="Specific version (default: latest)")
 
     model_config = ConfigDict(extra="forbid")
 

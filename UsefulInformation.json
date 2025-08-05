@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-04",
+  "lastUpdated": "2025-08-05",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "commonErrors": {
@@ -29,6 +29,30 @@
           "prevention": "Always include k parameter in vector search queries",
           "dateEncountered": "2025-08-04",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "ijson expects binary input but sometimes receives string",
+          "context": "JSON streaming during ingestion pipeline processing",
+          "solution": "Use io.BytesIO(json_content.encode()) instead of io.StringIO for binary input",
+          "prevention": "Always ensure ijson receives bytes input by encoding strings first",
+          "dateEncountered": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "AsyncMock context managers require proper setup",
+          "context": "Testing async context managers with unittest.mock",
+          "solution": "Set up __aenter__ and __aexit__ methods explicitly on AsyncMock objects",
+          "prevention": "Use MagicMock for session objects or properly configure AsyncMock context manager methods",
+          "dateEncountered": "2025-08-05",
+          "relatedFiles": ["tests/test_ingest.py"]
+        },
+        {
+          "error": "Variable scope in exception handlers",
+          "context": "Referencing variables in exception blocks that may not be defined",
+          "solution": "Avoid referencing variables that may not be defined in exception scope",
+          "prevention": "Initialize variables before try blocks or check existence in except blocks",
+          "dateEncountered": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
         }
       ]
     },
@@ -41,6 +65,14 @@
           "solution": "Model loading happens on first embedding generation - expected behavior",
           "prevention": "Consider warming up models during server startup for production",
           "dateEncountered": "2025-08-04",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Large download and decompression memory usage",
+          "context": "Ingesting large crates with streaming downloads and decompression",
+          "solution": "Use streaming with reasonable limits: DOWNLOAD_CHUNK_SIZE=8KB, MAX_DOWNLOAD_SIZE=100MB, MAX_DECOMPRESSED_SIZE=100MB",
+          "prevention": "Set appropriate memory limits and use chunked processing for large files",
+          "dateEncountered": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/ingest.py"]
         }
       ]
@@ -89,6 +121,22 @@
           "impact": "Significant performance improvement for repeated queries",
           "dateLearned": "2025-08-04",
           "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Batch processing for embeddings",
+          "context": "Optimizing embedding generation performance",
+          "details": "Use EMBEDDING_BATCH_SIZE=32 for optimal balance between memory usage and processing speed",
+          "impact": "Improved throughput while keeping memory usage reasonable",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Test isolation with cache directories",
+          "context": "Integration testing with shared cache state",
+          "details": "Always patch both ingest.CACHE_DIR and database.CACHE_DIR for integration tests to avoid state pollution",
+          "impact": "Prevents test failures due to shared state between test runs",
+          "dateLearned": "2025-08-05",
+          "relatedFiles": ["tests/test_ingest.py", "tests/test_app.py"]
         }
       ]
     }
@@ -130,7 +178,11 @@
       "Check asyncio.Lock is properly acquired/released",
       "Verify URL construction for docs.rs API",
       "Monitor decompression memory usage for large files",
-      "Use await with all aiosqlite database operations"
+      "Use await with all aiosqlite database operations",
+      "Ensure ijson receives bytes input using io.BytesIO(content.encode())",
+      "Set reasonable limits: MAX_DOWNLOAD_SIZE=100MB, MAX_DECOMPRESSED_SIZE=100MB",
+      "Use DOWNLOAD_CHUNK_SIZE=8KB for streaming downloads",
+      "Clean up test databases between runs to avoid state pollution"
     ],
     "rateLimiting": [
       "Ensure Redis is running for distributed limiting",
@@ -152,7 +204,7 @@
       "cacheSize": "< 2GB total"
     },
     "optimizationStrategies": {
-      "embedding": "Batch size 32 for optimal CPU utilization",
+      "embedding": "Batch size 32 (EMBEDDING_BATCH_SIZE) for optimal CPU utilization",
       "database": "Insert batches of 1000 rows",
       "caching": "LRU eviction when > 2GB",
       "asyncio": "Use asyncio.gather for concurrent operations"

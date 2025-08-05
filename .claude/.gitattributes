@@ -1,0 +1,3 @@
+# Preserve executable permissions for hooks
+hooks/*.py filter=chmod
+*.sh filter=chmod
