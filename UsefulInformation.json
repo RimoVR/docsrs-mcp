@@ -375,6 +375,46 @@
           "impact": "Improves user experience by explaining limitations rather than showing cryptic errors",
           "dateLearned": "2025-08-06",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Async generator compatibility patterns",
+          "context": "Memory optimization implementation with streaming data processing",
+          "details": "parse_rustdoc_items must be async generator but generate_embeddings should be sync generator. Mixing async and sync generators requires careful handling - use wrapper functions for backwards compatibility",
+          "impact": "Enables streaming data processing while maintaining compatibility with existing sync code and tests",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Test compatibility with generators vs lists",
+          "context": "Maintaining backwards compatibility during streaming implementation",
+          "details": "Tests expect list-returning functions, not generators. Wrapper functions maintain backwards compatibility while enabling streaming optimizations. Integration tests are critical for streaming pipelines",
+          "impact": "Allows incremental migration to streaming while preserving existing test suite",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["tests/test_ingest.py"]
+        },
+        {
+          "lesson": "Memory monitoring implementation patterns",
+          "context": "Tracking memory usage during streaming operations",
+          "details": "psutil.virtual_memory().percent gives system-wide usage, process.memory_info().rss for process-specific monitoring. Trigger GC after processing chunks of 100+ items for optimal memory management",
+          "impact": "Enables proactive memory management preventing OOM errors during large dataset processing",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "MemoryMonitor context manager pattern",
+          "context": "Operation-level memory tracking and reporting",
+          "details": "Use MemoryMonitor context manager for operation tracking - pre-serialize vectors before batch processing, clear buffers and trigger GC between batches",
+          "impact": "Provides structured memory management with clear operation boundaries and automatic cleanup",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Streaming error recovery strategies",
+          "context": "Error handling in streaming data processing pipelines",
+          "details": "Streaming requires different error recovery strategies than batch processing. Maintain per-batch transactions for database resilience, log memory status at key points for debugging",
+          "impact": "Improves system resilience by enabling partial recovery from processing errors without losing all work",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/database.py"]
         }
       ]
     }
@@ -433,7 +473,17 @@
       "Implement stdlib crate detection using set lookup for O(1) performance",
       "Configure AsyncMock context manager methods (__aenter__, __aexit__) when testing async sessions",
       "Always provide fallback version when external API calls (like Rust version fetch) fail",
-      "Provide clear error messages with helpful instructions when stdlib download fails"
+      "Provide clear error messages with helpful instructions when stdlib download fails",
+      "Use async generators for streaming data processing, sync generators for embedding batches",
+      "Implement wrapper functions to maintain backwards compatibility between generators and lists",
+      "Use MemoryMonitor context manager to track operation-level memory usage and cleanup",
+      "Monitor both system-wide (psutil.virtual_memory().percent) and process-specific (process.memory_info().rss) memory usage",
+      "Trigger garbage collection after processing 100+ items to maintain optimal memory usage",
+      "Pre-serialize vectors and complex data structures before batch processing",
+      "Clear buffers and trigger GC between batches in streaming operations",
+      "Implement per-batch transactions for database resilience in streaming pipelines",
+      "Log memory status at key processing points for debugging streaming operations",
+      "Use integration tests to validate streaming pipeline error recovery"
     ],
     "rateLimiting": [
       "Ensure Redis is running for distributed limiting",
@@ -474,7 +524,10 @@
       "database": "Insert batches respecting SQLite's 999 parameter limit, pre-serialize data",
       "caching": "LRU eviction when > 2GB",
       "asyncio": "Use asyncio.gather for concurrent operations",
-      "batchProcessing": "Maintains constant memory usage regardless of dataset size"
+      "batchProcessing": "Maintains constant memory usage regardless of dataset size",
+      "memoryManagement": "Use MemoryMonitor context manager, trigger GC after 100+ items, pre-serialize before batching",
+      "streaming": "Async generators for data processing, wrapper functions for backwards compatibility",
+      "errorRecovery": "Per-batch transactions, memory status logging, streaming-aware error handling"
     }
   },
   "codeQuality": {

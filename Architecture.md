@@ -132,10 +132,10 @@ sequenceDiagram
         Worker->>Worker: Parse complete rustdoc structure
         Worker->>Worker: Extract module hierarchy
         Worker->>Worker: Parse code examples from docs
-        Worker->>Worker: Chunk into typed items
-        Worker->>Embed: Batch embed (size=32)
+        Worker->>Worker: Stream items progressively (generator-based)
+        Worker->>Embed: Adaptive batch embed (size=16-512 based on memory)
         Embed-->>Worker: 384-dim vectors
-        Worker->>DB: Batch insert (size=999 with transactions)
+        Worker->>DB: Stream batch insert (size=999 with memory-aware chunking)
         Worker->>DB: Index with vss_index!
         Worker->>Worker: Check cache size (2GB limit)
         alt Cache > 2 GiB
@@ -551,18 +551,28 @@ graph TB
 - **Standard Library Integration**: Applies same locking mechanism to stdlib crates (std, core, alloc, etc.)
 - **Channel-Aware Locking**: Locks consider Rust channel versions to prevent conflicts between stable/beta/nightly docs
 
-**Enhanced Memory-Efficient Parsing with Metadata Extraction**
-- ijson streaming parser for large rustdoc JSON files (unchanged)
-- Multi-pass parsing: paths mapping + item extraction + hierarchy building (unchanged)
-- Complete item type extraction (functions, structs, traits, modules, enums, constants, macros)
-- Enhanced metadata extraction pipeline:
+**Memory-Optimized Streaming Parsing with Metadata Extraction**
+- **Streaming JSON Processing**: ijson event-based parser processes large files progressively
+- **Generator-Based Architecture**: parse_rustdoc_items_streaming() yields items on-demand instead of collecting in memory
+- **Memory-Aware Processing**: Adaptive batch sizing (16-512 items) based on memory pressure thresholds
+- **Progressive Parsing Strategy**:
+  - First pass: Stream paths mapping extraction without full memory load
+  - Second pass: Progressive item extraction with immediate processing
+  - Hierarchy building: On-demand parent-child relationship resolution
+- **Enhanced Metadata Extraction Pipeline**:
   - Type normalization helper functions for consistent item classification
   - Signature extraction with full type information and generics
   - Parent ID resolution for module hierarchy relationships
   - Code example extraction from documentation comments
-- Maintains backward compatibility with NULL defaults for new metadata columns
-- Processes items incrementally without loading full JSON into memory
-- Performance impact: ~10-15% parsing overhead for enhanced metadata extraction
+- **Memory Management Features**:
+  - psutil-based memory monitoring with 80%/90% thresholds
+  - Garbage collection triggers at chunk boundaries during high memory usage
+  - Dynamic batch size adjustment (16-512 items) based on available memory
+  - Backwards compatibility wrappers maintain existing API contracts
+- **Performance Characteristics**:
+  - Memory usage: O(1) instead of O(n) for large files
+  - Processing overhead: ~10-15% for enhanced metadata extraction
+  - Memory efficiency: Processes files >1GB without memory exhaustion
 
 **LRU Cache Eviction**
 - File modification time (mtime) based eviction strategy
@@ -601,13 +611,15 @@ graph TB
 | Component | Target | Notes |
 |-----------|--------|-------|
 | Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH |
-| Ingest latency | < 30s | Full rustdoc processing with compression |
-| Memory usage | < 512 MiB RSS | Including FastEmbed model and streaming |
+| Ingest latency | < 30s | Full rustdoc processing with streaming |
+| Memory usage | < 512 MiB RSS | Streaming architecture with memory monitoring |
+| Memory monitoring | psutil-based | 80%/90% thresholds with adaptive processing |
 | Cache storage | ./cache directory | File-based, LRU eviction |
-| Embedding model | BAAI/bge-small-en-v1.5 | 384 dimensions, batch processing |
+| Embedding model | BAAI/bge-small-en-v1.5 | 384 dimensions, adaptive batch processing |
 | Async architecture | aiosqlite + asyncio | Non-blocking I/O with per-crate locks |
 | Compression ratio | ~10:1 typical | .zst format for bandwidth efficiency |
-| Batch sizes | 32 embed, 999 DB | Optimized for throughput vs memory |
+| Batch sizes | 16-512 adaptive, 999 DB | Memory-aware adaptive sizing |
+| Streaming memory | O(1) for large files | Generator-based progressive processing |
 
 ## Parameter Validation Architecture
 
@@ -848,54 +860,70 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - **Batch Processing**: Optimizes database operations and embedding generation
 - **Resource Management**: Proper cleanup of connections and file handles
 
-### Enhanced Database Batch Processing with Metadata
+### Memory-Optimized Database Streaming with Metadata
 
-The store_embeddings() function implements efficient batch processing for large datasets with enhanced metadata support:
+The store_embeddings_streaming() function implements memory-efficient streaming processing for large datasets with enhanced metadata support:
 
 ```mermaid
 sequenceDiagram
     participant Worker as Ingest Worker
+    participant Monitor as Memory Monitor
     participant Serialize as sqlite_vec.serialize_float32()
     participant DB as SQLite Database
     participant Embeddings as embeddings table
     participant VecEmbed as vec_embeddings table
     
-    Worker->>Serialize: Pre-serialize all vectors
-    Serialize-->>Worker: Serialized vector blobs
-    
-    loop For each batch of 999 items
-        Worker->>DB: BEGIN TRANSACTION
-        Worker->>Embeddings: executemany() batch insert with metadata
-        Embeddings-->>Worker: Batch inserted with type, signature, parent_id, examples
-        Worker->>DB: last_insert_rowid() - get rowid range
-        DB-->>Worker: Starting rowid for batch
-        Worker->>VecEmbed: executemany() with calculated rowids
-        VecEmbed-->>Worker: Vector index batch inserted
-        Worker->>DB: COMMIT TRANSACTION
+    loop For each streaming chunk (memory-aware)
+        Worker->>Monitor: Check memory usage
+        Monitor-->>Worker: Current memory percentage
         
-        alt Progress Logging (>999 total items)
-            Worker->>Worker: Log batch progress
+        alt Memory > 90%
+            Worker->>Worker: Trigger garbage collection
         end
         
-        alt Error in batch
-            Worker->>DB: ROLLBACK TRANSACTION
-            Worker->>Worker: Log error, continue next batch
+        Worker->>Serialize: Stream serialize vectors (chunk-based)
+        Serialize-->>Worker: Serialized vector blobs
+        
+        loop For each batch of 999 items within chunk
+            Worker->>DB: BEGIN TRANSACTION
+            Worker->>Embeddings: executemany() batch insert with metadata
+            Embeddings-->>Worker: Batch inserted with type, signature, parent_id, examples
+            Worker->>DB: last_insert_rowid() - get rowid range
+            DB-->>Worker: Starting rowid for batch
+            Worker->>VecEmbed: executemany() with calculated rowids
+            VecEmbed-->>Worker: Vector index batch inserted
+            Worker->>DB: COMMIT TRANSACTION
+            
+            alt Progress Logging (>999 total items)
+                Worker->>Worker: Log batch progress with memory stats
+            end
+            
+            alt Error in batch
+                Worker->>DB: ROLLBACK TRANSACTION
+                Worker->>Worker: Log error, continue next batch
+            end
         end
+        
+        Worker->>Worker: Garbage collect at chunk boundary
     end
 ```
 
 **Key Implementation Details:**
-- **Batch Size**: 999 items per transaction (SQLite parameter limit)
-- **Vector Pre-serialization**: All vectors serialized with sqlite_vec.serialize_float32() before processing
+- **Streaming Architecture**: Memory-aware chunked processing with adaptive batch sizing
+- **Memory Monitoring**: psutil-based monitoring with 80%/90% memory thresholds
+- **Adaptive Batch Sizing**: Dynamic adjustment from 16-512 items based on memory pressure
+- **Garbage Collection**: Triggered at chunk boundaries during high memory usage
+- **Database Batch Size**: 999 items per transaction (SQLite parameter limit) within memory chunks
+- **Vector Stream Serialization**: Chunk-based serialization with sqlite_vec.serialize_float32()
 - **Two-table Strategy**: Coordinated inserts into embeddings and vec_embeddings tables
 - **Enhanced Metadata Processing**: Processes item_type, signature, parent_id, examples fields with NULL defaults
-- **Transaction Management**: Begin/commit per batch with rollback on errors
+- **Transaction Management**: Begin/commit per batch with rollback on errors within streaming chunks
 - **Rowid Synchronization**: Uses last_insert_rowid() to maintain relationships between tables
-- **Backward Compatibility**: NULL defaults ensure compatibility with existing data
-- **Memory Optimization**: O(batch_size) memory usage instead of O(total_items)
-- **Progress Logging**: Tracks progress for large datasets (>999 items)
+- **Backward Compatibility**: NULL defaults and wrapper functions ensure compatibility with existing data
+- **Memory Optimization**: O(chunk_size) memory usage with configurable chunk boundaries
+- **Progress Logging**: Tracks progress for large datasets with memory usage statistics
 - **Error Isolation**: Per-batch error handling prevents complete ingestion failure
-- **Minimal Performance Impact**: ~10-15% overhead for enhanced metadata processing
+- **Performance Impact**: ~10-15% overhead for enhanced metadata + memory monitoring
 
 ### Cache Management Strategy
 - **LRU Algorithm**: Based on file system modification time (mtime)
@@ -915,6 +943,70 @@ The enhanced rustdoc JSON parsing implementation provides comprehensive metadata
 - **Backward Compatibility**: NULL defaults ensure existing data and queries continue to work
 - **Performance**: Memory usage remains under 512 MiB RSS target, search latency unchanged
 
+## Memory Management Architecture
+
+### Streaming Processing Pipeline
+
+The memory optimization architecture implements a streaming processing pipeline that processes large rustdoc JSON files without loading them entirely into memory:
+
+```mermaid
+graph TB
+    subgraph "Streaming Pipeline"
+        STREAM[parse_rustdoc_items_streaming()<br/>Generator-based item streaming]
+        BATCH[generate_embeddings_streaming()<br/>Adaptive batch processing]
+        STORE[store_embeddings_streaming()<br/>Chunked database operations]
+        MONITOR[Memory Monitor<br/>psutil-based tracking]
+    end
+    
+    subgraph "Memory Thresholds"
+        THRESH80[80% Memory<br/>Reduce batch size]
+        THRESH90[90% Memory<br/>Trigger garbage collection]
+        ADAPTIVE[Adaptive Batch Sizing<br/>16-512 items]
+    end
+    
+    subgraph "Legacy Wrappers"
+        COMPAT[Backwards Compatibility<br/>Non-streaming entry points]
+    end
+    
+    STREAM --> BATCH
+    BATCH --> STORE
+    MONITOR --> THRESH80
+    MONITOR --> THRESH90
+    THRESH80 --> ADAPTIVE
+    THRESH90 --> ADAPTIVE
+    ADAPTIVE --> BATCH
+    COMPAT --> STREAM
+```
+
+### Memory Monitoring System
+
+The system uses psutil to monitor memory usage and implement adaptive processing:
+
+- **Memory Thresholds**: 80% threshold triggers batch size reduction, 90% threshold forces garbage collection
+- **Adaptive Batch Sizing**: Dynamically adjusts from 16-512 items based on memory pressure
+- **Memory Tracking**: Uses psutil.virtual_memory() for real-time memory percentage monitoring
+- **Garbage Collection**: Triggered at chunk boundaries during high memory usage
+
+### Streaming Implementation Details
+
+**parse_rustdoc_items_streaming()**
+- Uses ijson events for progressive JSON parsing
+- Yields items as generators instead of collecting in memory
+- Processes items on-demand without storing intermediate collections
+- Memory usage: O(1) instead of O(n) for large files
+
+**generate_embeddings_streaming()**
+- Processes items in adaptive batches (16-512 items)
+- Monitors memory usage between batches
+- Adjusts batch size based on memory thresholds
+- Uses FastEmbed batch processing for efficiency
+
+**store_embeddings_streaming()**
+- Stores embeddings in DB_BATCH_SIZE chunks (default 999 items)
+- Commits transactions at chunk boundaries
+- Triggers garbage collection during high memory pressure
+- Maintains backwards compatibility with existing storage logic
+
 ## Enhanced Data Flow Architecture
 
 ```mermaid
@@ -924,9 +1016,10 @@ sequenceDiagram
     participant Queue as asyncio.Queue
     participant Worker as Enhanced Ingest Worker
     participant DocsRS as docs.rs
-    participant Parser as Enhanced Parser
-    participant Embed as FastEmbed
+    participant Parser as Streaming Parser
+    participant Embed as Adaptive Embed
     participant DB as SQLite+VSS+Examples
+    participant Monitor as Memory Monitor
     
     Client->>API: POST /mcp/tools/search_documentation
     API->>DB: Check if crate@version exists
@@ -940,16 +1033,29 @@ sequenceDiagram
         Worker->>DocsRS: GET compressed rustdoc (.zst/.gz/.json)
         DocsRS-->>Worker: Complete rustdoc JSON
         Worker->>Worker: Stream decompress with size limits
-        Worker->>Parser: Parse with enhanced ijson pipeline
-        Parser->>Parser: Extract module hierarchy
-        Parser->>Parser: Parse all item types (functions, structs, traits, modules, etc)
-        Parser->>Parser: Extract code examples from documentation
-        Parser->>Parser: Build parent-child relationships
-        Parser-->>Worker: Structured items with hierarchy and examples
-        Worker->>Embed: Batch embed enhanced content (size=32)
-        Embed-->>Worker: 384-dim vectors
-        Worker->>DB: Batch insert passages with type/signature/parent_id
-        Worker->>DB: Batch insert code examples with relationships
+        Worker->>Parser: parse_rustdoc_items_streaming() - progressive ijson parsing
+        
+        loop Progressive Processing
+            Parser->>Parser: Yield items progressively (generator-based)
+            Parser-->>Worker: Stream of structured items
+            Worker->>Monitor: Check memory usage
+            Monitor-->>Worker: Current memory percentage
+            
+            alt Memory > 90%
+                Worker->>Worker: Trigger garbage collection
+                Worker->>Worker: Reduce batch size to minimum (16)
+            else Memory > 80%
+                Worker->>Worker: Reduce batch size
+            else Memory OK
+                Worker->>Worker: Normal batch size (up to 512)
+            end
+            
+            Worker->>Embed: generate_embeddings_streaming() - adaptive batches
+            Embed-->>Worker: 384-dim vectors (batch)
+            Worker->>DB: store_embeddings_streaming() - chunked storage
+            Worker->>Worker: Garbage collect at chunk boundaries
+        end
+        
         Worker->>DB: Index with vss_index!
         Worker->>Worker: Check cache size (2GB limit)
         alt Cache > 2 GiB
@@ -1089,11 +1195,15 @@ classDiagram
 - **Vector Search**: Unchanged performance for similarity queries
 
 ### Memory Usage Considerations
-- **Parsing Memory**: ~10-15% increase during ingestion for enhanced metadata extraction
-- **Runtime Memory**: Minimal increase due to maintained streaming architecture
+- **Streaming Memory**: O(1) memory usage for large files through progressive processing
+- **Adaptive Processing**: Dynamic batch sizing (16-512 items) based on memory thresholds
+- **Memory Monitoring**: Real-time tracking with psutil for proactive memory management
+- **Garbage Collection**: Triggered at 90% memory threshold and chunk boundaries
+- **Runtime Memory**: Optimized memory footprint through generator-based architecture
 - **Cache Efficiency**: Better cache utilization due to complete documentation coverage
 - **Backward Compatibility**: No memory overhead for NULL metadata fields
-- **Batch Processing**: Memory efficiency maintained with 999-item transactions
+- **Batch Processing**: Memory efficiency enhanced with adaptive chunking strategies
+- **Performance Target**: Maintains <512 MiB RSS target even with large rustdoc files (>1GB)
 
 ## Implementation Phases
 

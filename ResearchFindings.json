@@ -252,7 +252,23 @@
             "transactionPerBatch": {
               "approach": "One transaction per batch of 1000 records",
               "benefit": "Prevents memory accumulation during large ingestion",
-              "rationale": "Balances performance with memory efficiency"
+              "rationale": "Balances performance with memory efficiency",
+              "errorIsolation": "Transaction-per-batch provides error isolation"
+            },
+            "batchSizeOptimization": {
+              "sqliteParameterLimit": {
+                "value": 999,
+                "description": "SQLite parameter limit is 999 (critical for batch sizing)",
+                "impact": "Limits maximum batch size for single INSERT statement to prevent SQL errors"
+              },
+              "adaptiveBatching": {
+                "range": "16-512 items",
+                "technique": "Adaptive batch sizing effective between 16-512 items",
+                "memoryThresholds": {
+                  "reduceThreshold": "80% memory usage triggers batch size reduction",
+                  "minimumThreshold": "90% memory usage triggers minimum batch size and garbage collection"
+                }
+              }
             }
           },
           "sqliteVecPerformance": {
@@ -505,6 +521,41 @@
         }
       }
     },
+    "memoryManagement": {
+      "monitoring": {
+        "library": "psutil",
+        "capabilities": [
+          "Cross-platform memory monitoring",
+          "Real-time memory usage tracking",
+          "Process-level memory statistics",
+          "System memory availability detection"
+        ],
+        "implementation": "Use psutil to monitor memory usage and trigger adaptive batch sizing",
+        "thresholds": {
+          "warningLevel": "80% memory usage - reduce batch sizes",
+          "criticalLevel": "90% memory usage - minimum batch size and force garbage collection"
+        }
+      },
+      "optimizationTechniques": {
+        "generatorPatterns": {
+          "efficiency": "Generator patterns provide 7x-25x memory efficiency gains",
+          "technique": "Use generators instead of loading entire datasets into memory",
+          "benefit": "Enables processing of arbitrarily large datasets with constant memory usage"
+        },
+        "adaptiveBatchSizing": {
+          "range": "16-512 items per batch",
+          "strategy": "Dynamically adjust batch sizes based on available memory",
+          "monitoring": "Use psutil to track memory usage and adapt batch sizes accordingly",
+          "failsafe": "Minimum batch size with garbage collection at 90% memory threshold"
+        },
+        "streamingParsing": {
+          "library": "ijson 3.4.0 with yajl2_c backend",
+          "performance": "656x performance gain over pure Python implementation",
+          "memoryReduction": "Reduces memory from O(file_size) to O(batch_size)",
+          "scalability": "Handles 100MB+ files with constant memory usage"
+        }
+      }
+    },
     "serverInfrastructure": {
       "fastAPI": {
         "version": ">=0.111",
@@ -586,10 +637,23 @@
         ],
         "performanceOptimization": {
           "version": "3.4.0",
-          "backend": "yajl2",
+          "backend": "yajl2_c",
           "performanceGain": "656x over pure Python implementation",
-          "implementation": "Use ijson with yajl2 backend for maximum performance",
-          "significance": "Critical for processing large rustdoc JSON files efficiently"
+          "implementation": "Use ijson with yajl2_c backend for maximum performance",
+          "significance": "Critical for processing large rustdoc JSON files efficiently",
+          "memoryOptimization": {
+            "streamProcessing": {
+              "benefit": "Reduces memory from O(file_size) to O(batch_size)",
+              "technique": "Stream processing enables handling files larger than available RAM",
+              "implementation": "Two-pass parsing required for rustdoc format (paths then index)",
+              "memoryReduction": "Maintains constant memory usage regardless of dataset size"
+            },
+            "progressiveProcessing": {
+              "capability": "Enables handling 100MB+ rustdoc files",
+              "efficiency": "Generator patterns provide 7x-25x memory efficiency gains",
+              "scalability": "Streaming maintains constant memory usage regardless of dataset size"
+            }
+          }
         }
       },
       "retryLogic": {
@@ -877,7 +941,7 @@
       "Use SELECT last_insert_rowid() after aiosqlite.executemany() calls",
       "Respect SQLite's 999 parameter limit when designing batch operations",
       "Rely on sqlite-vec automatic indexing - no manual vss_index! calls needed",
-      "Use ijson 3.4.0 with yajl2 backend for 656x performance improvement in JSON parsing",
+      "Use ijson 3.4.0 with yajl2_c backend for 656x performance improvement in JSON parsing",
       "Always validate rustdoc FORMAT_VERSION field before processing JSON files",
       "Handle both string and object representations of rustdoc item types dynamically",
       "Extract function and method signatures from inner.function.decl and inner.method.decl paths",
@@ -889,7 +953,12 @@
       "Use streaming parsers (ijson) for processing large stdlib JSON files (100MB+)",
       "Monitor Rust version manifest at https://static.rust-lang.org/version for release tracking",
       "Cache parsed stdlib sections aggressively due to expensive parsing overhead",
-      "Process stdlib docs in chunks to prevent out-of-memory errors with large files"
+      "Process stdlib docs in chunks to prevent out-of-memory errors with large files",
+      "Use psutil for cross-platform memory monitoring and adaptive batch sizing",
+      "Implement generator patterns for 7x-25x memory efficiency gains over list-based processing",
+      "Use two-pass parsing for rustdoc format (paths then index) to optimize memory usage",
+      "Set memory thresholds at 80% (reduce batch) and 90% (minimum batch + GC) for adaptive processing",
+      "Implement progressive processing to enable handling 100MB+ rustdoc files with constant memory usage"
     ],
     "performance": [
       "Use semantic chunking with 50-200 tokens for optimal search granularity",
@@ -917,9 +986,14 @@
       "Use one transaction per batch of 1000 records to prevent memory accumulation",
       "Pre-serialize vectors to bytes before batch processing for significant overhead reduction",
       "Leverage sqlite-vec v0.1.0 excellent performance for 384-dimensional vectors",
-      "Use ijson 3.4.0 with yajl2 backend for 656x JSON parsing performance improvement over pure Python",
+      "Use ijson 3.4.0 with yajl2_c backend for 656x JSON parsing performance improvement over pure Python",
       "Implement streaming rustdoc JSON parsing to handle large files without memory spikes",
-      "Optimize batch operations to respect SQLite's 999 parameter limit for maximum efficiency"
+      "Optimize batch operations to respect SQLite's 999 parameter limit for maximum efficiency",
+      "Monitor memory usage with psutil and adapt batch sizes between 16-512 items based on available memory",
+      "Use generator patterns instead of loading entire datasets for 7x-25x memory efficiency improvements",
+      "Implement progressive processing with streaming parsers to maintain constant memory usage",
+      "Set up memory thresholds with adaptive batch sizing to prevent out-of-memory conditions",
+      "Use two-pass parsing strategy for rustdoc JSON to optimize memory usage during processing"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

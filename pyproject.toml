@@ -33,6 +33,7 @@ dependencies = [
     "ijson>=3.2",
     "tenacity>=8.0",
     "fastmcp==2.11.1",
+    "psutil>=7.0.0",
 ]
 
 [project.scripts]

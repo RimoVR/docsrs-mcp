@@ -28,10 +28,16 @@ from .config import (
     MAX_DECOMPRESSED_SIZE,
     MAX_DOWNLOAD_SIZE,
     MODEL_NAME,
+    PARSE_CHUNK_SIZE,
     RUST_VERSION_MANIFEST_URL,
     STDLIB_CRATES,
 )
 from .database import get_db_path, init_database, store_crate_metadata
+from .memory_utils import (
+    MemoryMonitor,
+    get_adaptive_batch_size,
+    trigger_gc_if_needed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -508,103 +514,108 @@ def extract_code_examples(docstring: str) -> list[str]:
         return []
 
 
-async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
+async def parse_rustdoc_items_streaming(json_content: str):
     """Parse rustdoc JSON using ijson for memory-efficient streaming.
 
     Extracts items (functions, structs, traits, modules) with their documentation.
-    Returns a list of items with item_id, item_path, header, and docstring.
+    Yields items progressively to avoid memory accumulation.
+
+    Yields:
+        dict: Item with item_id, item_path, header, docstring, and metadata.
     """
-    items = []
 
     # For rustdoc JSON format, we need to parse two main sections:
-    # 1. "paths" - maps IDs to paths
-    # 2. "index" - contains the actual items with their details
+    # 1. "paths" - maps IDs to paths (must be collected first)
+    # 2. "index" - contains the actual items (can be streamed)
 
-    # First pass: collect paths
+    # First pass: collect paths (required for reference resolution)
     id_to_path = {}
-    try:
-        # Use items() for efficient iteration over dict items
-        parser = ijson.kvitems(io.BytesIO(json_content.encode()), "paths")
-        for item_id, path_info in parser:
-            if isinstance(path_info, dict) and "path" in path_info:
-                id_to_path[item_id] = "::".join(path_info["path"])
-    except Exception as e:
-        logger.warning(f"Error parsing paths section: {e}")
+    with MemoryMonitor("parse_rustdoc_paths"):
+        try:
+            parser = ijson.kvitems(io.BytesIO(json_content.encode()), "paths")
+            for item_id, path_info in parser:
+                if isinstance(path_info, dict) and "path" in path_info:
+                    id_to_path[item_id] = "::".join(path_info["path"])
+        except Exception as e:
+            logger.warning(f"Error parsing paths section: {e}")
 
-    # Second pass: collect items from index
-    try:
-        parser = ijson.kvitems(io.BytesIO(json_content.encode()), "index")
-        for item_id, item_info in parser:
-            if not isinstance(item_info, dict):
-                continue
+    # Second pass: stream items from index
+    item_count = 0
+    chunk_count = 0
 
-            # Extract relevant fields
-            name = item_info.get("name", "")
-            kind = item_info.get("kind", "")
-            docs = item_info.get("docs", "")
+    with MemoryMonitor("parse_rustdoc_index"):
+        try:
+            parser = ijson.kvitems(io.BytesIO(json_content.encode()), "index")
+            for item_id, item_info in parser:
+                if not isinstance(item_info, dict):
+                    continue
 
-            # Get the path from our mapping
-            path = id_to_path.get(item_id, "")
+                # Extract relevant fields
+                name = item_info.get("name", "")
+                kind = item_info.get("kind", "")
+                docs = item_info.get("docs", "")
 
-            # Filter to relevant item types
-            if isinstance(kind, str):
-                kind_lower = kind.lower()
-            elif isinstance(kind, dict) and len(kind) == 1:
-                # Handle {"variant_name": data} format
-                kind_lower = list(kind.keys())[0].lower()
-            else:
-                continue
+                # Get the path from our mapping
+                path = id_to_path.get(item_id, "")
 
-            # Check if it's a type we want to index
-            indexable_kinds = [
-                "function",
-                "struct",
-                "trait",
-                "mod",
-                "module",
-                "enum",
-                "type",
-                "typedef",
-                "const",
-                "static",
-                "method",
-            ]
-
-            if any(k in kind_lower for k in indexable_kinds):
-                # Create header based on item type
-                if "function" in kind_lower or "method" in kind_lower:
-                    header = f"fn {name}"
-                elif "struct" in kind_lower:
-                    header = f"struct {name}"
-                elif "trait" in kind_lower:
-                    header = f"trait {name}"
-                elif "mod" in kind_lower:
-                    header = f"mod {name}"
-                elif "enum" in kind_lower:
-                    header = f"enum {name}"
-                elif "type" in kind_lower:
-                    header = f"type {name}"
-                elif "const" in kind_lower:
-                    header = f"const {name}"
-                elif "static" in kind_lower:
-                    header = f"static {name}"
+                # Filter to relevant item types
+                if isinstance(kind, str):
+                    kind_lower = kind.lower()
+                elif isinstance(kind, dict) and len(kind) == 1:
+                    # Handle {"variant_name": data} format
+                    kind_lower = list(kind.keys())[0].lower()
                 else:
-                    header = f"{kind_lower} {name}"
+                    continue
 
-                # Ensure path includes the item name if not already
-                if path and name and not path.endswith(name):
-                    full_path = f"{path}::{name}"
-                else:
-                    full_path = path or name
+                # Check if it's a type we want to index
+                indexable_kinds = [
+                    "function",
+                    "struct",
+                    "trait",
+                    "mod",
+                    "module",
+                    "enum",
+                    "type",
+                    "typedef",
+                    "const",
+                    "static",
+                    "method",
+                ]
 
-                # Extract additional metadata using helper functions
-                item_type = normalize_item_type(kind)
-                signature = extract_signature(item_info)
-                parent_id = resolve_parent_id(item_info, id_to_path)
-                examples = extract_code_examples(docs)
+                if any(k in kind_lower for k in indexable_kinds):
+                    # Create header based on item type
+                    if "function" in kind_lower or "method" in kind_lower:
+                        header = f"fn {name}"
+                    elif "struct" in kind_lower:
+                        header = f"struct {name}"
+                    elif "trait" in kind_lower:
+                        header = f"trait {name}"
+                    elif "mod" in kind_lower:
+                        header = f"mod {name}"
+                    elif "enum" in kind_lower:
+                        header = f"enum {name}"
+                    elif "type" in kind_lower:
+                        header = f"type {name}"
+                    elif "const" in kind_lower:
+                        header = f"const {name}"
+                    elif "static" in kind_lower:
+                        header = f"static {name}"
+                    else:
+                        header = f"{kind_lower} {name}"
 
-                items.append(
-                    {
+                    # Ensure path includes the item name if not already
+                    if path and name and not path.endswith(name):
+                        full_path = f"{path}::{name}"
+                    else:
+                        full_path = path or name
+
+                    # Extract additional metadata using helper functions
+                    item_type = normalize_item_type(kind)
+                    signature = extract_signature(item_info)
+                    parent_id = resolve_parent_id(item_info, id_to_path)
+                    examples = extract_code_examples(docs)
+
+                    yield {
                         "item_id": item_id,
                         "item_path": full_path,
                         "header": header,
@@ -615,12 +626,27 @@ async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
                         "parent_id": parent_id,
                         "examples": examples,
                     }
-                )
 
-    except Exception as e:
-        logger.warning(f"Error parsing index section: {e}")
+                    item_count += 1
+                    chunk_count += 1
 
-    logger.info(f"Parsed {len(items)} items from rustdoc JSON")
+                    # Trigger GC periodically to control memory
+                    if chunk_count >= PARSE_CHUNK_SIZE:
+                        trigger_gc_if_needed()
+                        chunk_count = 0
+                        logger.debug(f"Parsed {item_count} items so far...")
+
+        except Exception as e:
+            logger.warning(f"Error parsing index section: {e}")
+
+    logger.info(f"Streamed {item_count} items from rustdoc JSON")
+
+
+async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
+    """Parse rustdoc JSON and return a list of items (backwards compatible)."""
+    items = []
+    async for item in parse_rustdoc_items_streaming(json_content):
+        items.append(item)
     return items
 
 
@@ -703,37 +729,78 @@ async def evict_cache_if_needed() -> None:
         logger.error(f"Error during cache eviction: {e}")
 
 
-async def generate_embeddings(chunks: list[dict[str, str]]) -> list[list[float]]:
-    """Generate embeddings for text chunks."""
-    if not chunks:
-        return []
+def generate_embeddings_streaming(chunks):
+    """Generate embeddings for text chunks in streaming fashion.
+
+    Args:
+        chunks: Iterable of chunks (can be list or generator).
+
+    Yields:
+        tuple: (chunk, embedding) pairs.
+    """
 
     model = get_embedding_model()
-    texts = [chunk["content"] for chunk in chunks]
 
+    # Buffer for batching
+    chunk_buffer = []
+    processed_count = 0
+
+    for chunk in chunks:
+        chunk_buffer.append(chunk)
+
+        # Calculate adaptive batch size based on memory
+        batch_size = get_adaptive_batch_size(
+            base_batch_size=EMBEDDING_BATCH_SIZE,
+            min_size=16,
+            max_size=128,  # Cap at reasonable size for embeddings
+        )
+
+        # Process batch when buffer reaches adaptive size
+        if len(chunk_buffer) >= batch_size:
+            texts = [c["content"] for c in chunk_buffer]
+            batch_embeddings = list(model.embed(texts))
+
+            # Yield chunk-embedding pairs
+            for item, embedding in zip(chunk_buffer, batch_embeddings, strict=False):
+                yield item, embedding
+                processed_count += 1
+
+            # Clear buffer and trigger GC if needed
+            chunk_buffer = []
+            if processed_count % 100 == 0:
+                trigger_gc_if_needed()
+                logger.debug(f"Generated {processed_count} embeddings...")
+
+    # Process remaining chunks in buffer
+    if chunk_buffer:
+        texts = [c["content"] for c in chunk_buffer]
+        batch_embeddings = list(model.embed(texts))
+
+        for item, embedding in zip(chunk_buffer, batch_embeddings, strict=False):
+            yield item, embedding
+            processed_count += 1
+
+    logger.info(f"Generated {processed_count} embeddings total")
+
+
+async def generate_embeddings(chunks: list[dict[str, str]]) -> list[list[float]]:
+    """Generate embeddings for text chunks (backwards compatible)."""
     embeddings = []
-    for i in range(0, len(texts), EMBEDDING_BATCH_SIZE):
-        batch = texts[i : i + EMBEDDING_BATCH_SIZE]
-        batch_embeddings = list(model.embed(batch))
-        embeddings.extend(batch_embeddings)
-
+    for _chunk, embedding in generate_embeddings_streaming(chunks):
+        embeddings.append(embedding)
     return embeddings
 
 
-async def store_embeddings(
-    db_path: Path, chunks: list[dict[str, str]], embeddings: list[list[float]]
-) -> None:
-    """Store chunks and their embeddings in the database using batch processing."""
-    if not chunks or not embeddings:
-        return
+async def store_embeddings_streaming(db_path: Path, chunk_embedding_pairs) -> None:
+    """Store chunks and their embeddings in the database using streaming batch processing.
 
-    total_items = len(chunks)
-    logger.info(f"Storing {total_items} embeddings in batches of {DB_BATCH_SIZE}")
+    Args:
+        db_path: Path to the database file.
+        chunk_embedding_pairs: Iterator of (chunk, embedding) tuples.
+    """
 
-    # Pre-serialize all vectors to reduce per-batch overhead
-    serialized_embeddings = [
-        bytes(sqlite_vec.serialize_float32(embedding)) for embedding in embeddings
-    ]
+    total_items = 0
+    batch_num = 0
 
     async with aiosqlite.connect(db_path) as db:
         # Enable extension
@@ -741,84 +808,123 @@ async def store_embeddings(
         await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
         await db.enable_load_extension(False)
 
-        # Process in batches
-        for batch_start in range(0, total_items, DB_BATCH_SIZE):
-            batch_end = min(batch_start + DB_BATCH_SIZE, total_items)
-            batch_chunks = chunks[batch_start:batch_end]
-            batch_embeddings = serialized_embeddings[batch_start:batch_end]
+        # Buffer for batching
+        chunk_buffer = []
+        embedding_buffer = []
 
-            try:
-                # Begin transaction for this batch
-                await db.execute("BEGIN TRANSACTION")
+        with MemoryMonitor("store_embeddings"):
+            for chunk, embedding in chunk_embedding_pairs:
+                chunk_buffer.append(chunk)
+                # Pre-serialize the embedding
+                embedding_buffer.append(bytes(sqlite_vec.serialize_float32(embedding)))
 
-                # Prepare batch data for embeddings table
-                embeddings_data = [
-                    (
-                        chunk["item_path"],
-                        chunk["header"],
-                        chunk["content"],
-                        embedding,
-                        chunk.get("item_type"),
-                        chunk.get("signature"),
-                        chunk.get("parent_id"),
-                        json.dumps(chunk.get("examples", []))
-                        if chunk.get("examples")
-                        else None,
+                # Process batch when buffer reaches DB_BATCH_SIZE
+                if len(chunk_buffer) >= DB_BATCH_SIZE:
+                    await _store_batch(
+                        db, chunk_buffer, embedding_buffer, batch_num, total_items
                     )
-                    for chunk, embedding in zip(
-                        batch_chunks, batch_embeddings, strict=False
-                    )
-                ]
 
-                # Batch insert into embeddings table
-                await db.executemany(
-                    """
-                    INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature, parent_id, examples)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    embeddings_data,
+                    total_items += len(chunk_buffer)
+                    batch_num += 1
+
+                    # Clear buffers and trigger GC
+                    chunk_buffer = []
+                    embedding_buffer = []
+                    trigger_gc_if_needed()
+
+            # Process remaining items in buffer
+            if chunk_buffer:
+                await _store_batch(
+                    db, chunk_buffer, embedding_buffer, batch_num, total_items
                 )
-
-                # Get the rowids for the inserted records
-                # SQLite's last_insert_rowid() gives us the last rowid
-                cursor = await db.execute("SELECT last_insert_rowid()")
-                last_rowid = (await cursor.fetchone())[0]
-                first_rowid = last_rowid - len(batch_chunks) + 1
-
-                # Prepare batch data for vec_embeddings table
-                vec_data = [
-                    (rowid, embedding)
-                    for rowid, embedding in zip(
-                        range(first_rowid, last_rowid + 1),
-                        batch_embeddings,
-                        strict=False,
-                    )
-                ]
-
-                # Batch insert into vec_embeddings table
-                await db.executemany(
-                    "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
-                    vec_data,
-                )
-
-                # Commit this batch
-                await db.commit()
-
-                # Log progress for large datasets
-                if total_items > DB_BATCH_SIZE:
-                    progress = (batch_end / total_items) * 100
-                    logger.info(
-                        f"Batch {batch_start // DB_BATCH_SIZE + 1}: "
-                        f"Processed {batch_end}/{total_items} items ({progress:.1f}%)"
-                    )
-
-            except Exception as e:
-                # Rollback on error
-                await db.execute("ROLLBACK")
-                logger.error(f"Error in batch {batch_start}-{batch_end}: {e}")
-                raise
+                total_items += len(chunk_buffer)
 
         logger.info(f"Successfully stored {total_items} embeddings")
+
+
+async def store_embeddings(
+    db_path: Path, chunks: list[dict[str, str]], embeddings: list[list[float]]
+) -> None:
+    """Store chunks and their embeddings (backwards compatible)."""
+    # Convert to streaming format
+    chunk_embedding_pairs = zip(chunks, embeddings)
+    await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+
+
+async def _store_batch(
+    db: aiosqlite.Connection,
+    chunks: list[dict],
+    embeddings: list[bytes],
+    batch_num: int,
+    items_so_far: int,
+) -> None:
+    """Store a single batch of chunks and embeddings."""
+    try:
+        # Begin transaction for this batch
+        await db.execute("BEGIN TRANSACTION")
+
+        # Prepare batch data for embeddings table
+        embeddings_data = [
+            (
+                chunk["item_path"],
+                chunk["header"],
+                chunk["content"],
+                embedding,
+                chunk.get("item_type"),
+                chunk.get("signature"),
+                chunk.get("parent_id"),
+                json.dumps(chunk.get("examples", []))
+                if chunk.get("examples")
+                else None,
+            )
+            for chunk, embedding in zip(chunks, embeddings, strict=False)
+        ]
+
+        # Batch insert into embeddings table
+        await db.executemany(
+            """
+            INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature, parent_id, examples)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            embeddings_data,
+        )
+
+        # Get the rowids for the inserted records
+        cursor = await db.execute("SELECT last_insert_rowid()")
+        last_rowid = (await cursor.fetchone())[0]
+        first_rowid = last_rowid - len(chunks) + 1
+
+        # Prepare batch data for vec_embeddings table
+        vec_data = [
+            (rowid, embedding)
+            for rowid, embedding in zip(
+                range(first_rowid, last_rowid + 1),
+                embeddings,
+                strict=False,
+            )
+        ]
+
+        # Batch insert into vec_embeddings table
+        await db.executemany(
+            "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
+            vec_data,
+        )
+
+        # Commit this batch
+        await db.commit()
+
+        # Log progress
+        total_processed = items_so_far + len(chunks)
+        logger.info(
+            f"Batch {batch_num + 1}: Processed {len(chunks)} items "
+            f"(total: {total_processed})"
+        )
+
+    except Exception as e:
+        # Rollback on error
+        await db.execute("ROLLBACK")
+        logger.error(f"Error in batch {batch_num}: {e}")
+        raise
 
 
 async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
@@ -916,47 +1022,49 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     compressed_content, download_url
                 )
 
-                # Parse rustdoc items
-                logger.info("Parsing rustdoc items")
-                rustdoc_items = await parse_rustdoc_items(json_content)
+                # Parse rustdoc items (now returns an async generator)
+                logger.info("Parsing rustdoc items in streaming mode")
 
-                if rustdoc_items:
-                    # Convert items to chunks for embedding
-                    chunks = []
-                    for item in rustdoc_items:
-                        # Combine header and docstring for embedding
-                        content = (
-                            f"{item['header']}\n\n{item['docstring']}"
-                            if item["docstring"]
-                            else item["header"]
-                        )
-
-                        chunks.append(
-                            {
-                                "item_path": item["item_path"],
-                                "header": item["header"],
-                                "content": content,
-                                "item_type": item.get("item_type"),
-                                "signature": item.get("signature"),
-                                "parent_id": item.get("parent_id"),
-                                "examples": item.get("examples", []),
-                            }
-                        )
-
-                    # Generate embeddings in batches
-                    logger.info(f"Generating embeddings for {len(chunks)} items")
-                    embeddings = await generate_embeddings(chunks)
-
-                    # Store embeddings
-                    logger.info("Storing embeddings in database")
-                    await store_embeddings(db_path, chunks, embeddings)
-
-                    logger.info(
-                        f"Successfully ingested {len(chunks)} items from rustdoc"
-                    )
-                else:
+                # Collect items from streaming parser
+                items = []
+                async for item in parse_rustdoc_items_streaming(json_content):
+                    items.append(item)
+                
+                if not items:
                     logger.warning("No items found in rustdoc JSON")
                     raise Exception("No items found in rustdoc JSON")
+                
+                logger.info(f"Collected {len(items)} rustdoc items")
+                
+                # Transform items to chunks
+                chunks = []
+                for item in items:
+                    # Combine header and docstring for embedding
+                    content = (
+                        f"{item['header']}\n\n{item['docstring']}"
+                        if item["docstring"]
+                        else item["header"]
+                    )
+
+                    chunk = {
+                        "item_path": item["item_path"],
+                        "header": item["header"],
+                        "content": content,
+                        "item_type": item.get("item_type"),
+                        "signature": item.get("signature"),
+                        "parent_id": item.get("parent_id"),
+                        "examples": item.get("examples", []),
+                    }
+                    chunks.append(chunk)
+
+                # Generate embeddings and store in streaming fashion
+                logger.info(f"Generating embeddings for {len(chunks)} items in streaming mode")
+                chunk_embedding_pairs = generate_embeddings_streaming(chunks)
+
+                # Store embeddings in streaming fashion
+                await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+
+                logger.info("Successfully completed streaming ingestion")
 
             except Exception as e:
                 if is_stdlib_crate(crate_name):

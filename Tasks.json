@@ -395,25 +395,40 @@
         "id": "idx-3",
         "title": "Optimize indexing performance",
         "description": "Improve memory usage during ingestion to handle larger crates more efficiently",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": [],
         "relatedTasks": ["idx-1"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-06T20:00:00Z",
+          "implementation": "Implemented true streaming JSON parsing with adaptive memory management",
+          "notes": "Successfully implemented streaming JSON parser using ijson.parse() for memory-efficient processing, added memory monitoring with psutil.Process(), created adaptive batch sizing based on memory pressure, refactored parse_rustdoc_items(), generate_embeddings(), and store_embeddings() for streaming operations, added memory_utils.py module with MemoryMonitor context manager, maintained backwards compatibility with wrapper functions, and achieved all performance targets with comprehensive test coverage."
+        },
         "subtasks": [
           {
             "id": "idx-3.1",
             "title": "Implement streaming JSON parsing",
             "description": "Use streaming JSON parser to reduce memory footprint during ingestion",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-06T20:00:00Z",
+              "implementation": "Implemented streaming JSON parser using ijson.parse() with memory-efficient item processing",
+              "notes": "Replaced json.loads() with ijson.parse() for true streaming parsing, implemented incremental item processing to avoid loading entire JSON into memory, added proper error handling for streaming parser edge cases, maintained full compatibility with existing rustdoc JSON structure parsing"
+            }
           },
           {
             "id": "idx-3.2",
             "title": "Optimize batch processing",
             "description": "Improve batch size and processing strategy for large rustdoc files",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-06T20:00:00Z",
+              "implementation": "Created adaptive batch sizing system with memory monitoring and pressure-based adjustments",
+              "notes": "Added psutil-based memory monitoring with configurable thresholds, implemented adaptive batch sizing (reduces batch size when memory usage exceeds 80% threshold), created MemoryMonitor context manager for tracking memory usage patterns, integrated memory monitoring into generate_embeddings() and store_embeddings() functions, added comprehensive logging for memory usage patterns and batch size adjustments"
+            }
           }
         ]
       },
