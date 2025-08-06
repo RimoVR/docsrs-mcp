@@ -3,8 +3,10 @@
 import asyncio
 import gzip
 import io
+import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -295,6 +297,150 @@ async def decompress_content(content: bytes, url: str) -> str:
         return content.decode("utf-8")
 
 
+def normalize_item_type(kind: dict | str) -> str:
+    """Normalize rustdoc kind to standard item_type."""
+    if isinstance(kind, dict):
+        kind_str = list(kind.keys())[0] if kind else "unknown"
+    else:
+        kind_str = str(kind).lower()
+
+    # Map rustdoc kinds to standard types
+    type_map = {
+        "function": "function",
+        "struct": "struct",
+        "trait": "trait",
+        "mod": "module",
+        "module": "module",
+        "method": "method",
+        "enum": "enum",
+        "type": "type",
+        "typedef": "type",
+        "const": "const",
+        "static": "static",
+    }
+
+    # Find matching type
+    for key, value in type_map.items():
+        if key in kind_str:
+            return value
+    return kind_str
+
+
+def format_signature(decl: dict) -> str:
+    """Format a function/method declaration into a readable signature."""
+    try:
+        inputs = decl.get("inputs", [])
+        output = decl.get("output")
+
+        # Format parameters
+        params = []
+        for param in inputs:
+            if isinstance(param, dict):
+                param_name = param.get("name", "_")
+                param_type = param.get("type", {})
+                # Simple type extraction - can be enhanced
+                if isinstance(param_type, dict):
+                    type_str = param_type.get("name", "Unknown")
+                else:
+                    type_str = str(param_type)
+                params.append(f"{param_name}: {type_str}")
+            else:
+                params.append(str(param))
+
+        signature = f"({', '.join(params)})"
+
+        # Add return type if present
+        if output and output != "unit":
+            if isinstance(output, dict):
+                return_type = output.get("name", "")
+            else:
+                return_type = str(output)
+            if return_type:
+                signature += f" -> {return_type}"
+
+        return signature
+    except Exception:
+        return ""
+
+
+def extract_signature(item: dict) -> str | None:
+    """Extract function/method signature."""
+    try:
+        inner = item.get("inner", {})
+
+        # Check for function
+        if isinstance(inner, dict) and "function" in inner:
+            decl = inner["function"].get("decl", {})
+            if decl:
+                return format_signature(decl)
+
+        # Check for method
+        if isinstance(inner, dict) and "method" in inner:
+            decl = inner["method"].get("decl", {})
+            if decl:
+                return format_signature(decl)
+
+        # Check for other inner types that might have signatures
+        for key in ["assoc_const", "assoc_type"]:
+            if key in inner:
+                # These might have type information
+                type_info = inner[key].get("type", {})
+                if isinstance(type_info, dict) and "name" in type_info:
+                    return type_info["name"]
+    except Exception as e:
+        logger.warning(f"Could not extract signature: {e}")
+    return None
+
+
+def resolve_parent_id(item: dict, paths: dict) -> str | None:
+    """Resolve the parent module/struct ID for an item."""
+    try:
+        # Check if item has a parent field
+        if "parent" in item:
+            parent = item["parent"]
+            if parent and parent != "null":
+                return parent
+
+        # Try to infer from path if available
+        if "path" in item:
+            path_parts = item["path"]
+            if isinstance(path_parts, list) and len(path_parts) > 1:
+                # The parent would be all but the last part
+                parent_path = "::".join(path_parts[:-1])
+                # Try to find the parent ID from paths
+                for pid, pinfo in paths.items():
+                    if isinstance(pinfo, dict) and "path" in pinfo:
+                        if "::".join(pinfo["path"]) == parent_path:
+                            return pid
+    except Exception as e:
+        logger.warning(f"Could not resolve parent ID: {e}")
+    return None
+
+
+def extract_code_examples(docstring: str) -> list[str]:
+    """Extract ```rust code blocks from documentation."""
+    if not docstring:
+        return []
+
+    try:
+        # Match ```rust blocks and also plain ``` blocks that are likely Rust
+        pattern = r"```(?:rust)?\s*\n(.*?)```"
+        examples = re.findall(pattern, docstring, re.DOTALL | re.MULTILINE)
+
+        # Clean up examples
+        cleaned_examples = []
+        for example in examples:
+            # Remove leading/trailing whitespace but preserve internal formatting
+            cleaned_example = example.strip()
+            if cleaned_example:  # Only add non-empty examples
+                cleaned_examples.append(cleaned_example)
+
+        return cleaned_examples
+    except Exception as e:
+        logger.warning(f"Error extracting code examples: {e}")
+        return []
+
+
 async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
     """Parse rustdoc JSON using ijson for memory-efficient streaming.
 
@@ -384,6 +530,12 @@ async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
                 else:
                     full_path = path or name
 
+                # Extract additional metadata using helper functions
+                item_type = normalize_item_type(kind)
+                signature = extract_signature(item_info)
+                parent_id = resolve_parent_id(item_info, id_to_path)
+                examples = extract_code_examples(docs)
+
                 items.append(
                     {
                         "item_id": item_id,
@@ -391,6 +543,10 @@ async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
                         "header": header,
                         "docstring": docs,
                         "kind": kind_lower,
+                        "item_type": item_type,
+                        "signature": signature,
+                        "parent_id": parent_id,
+                        "examples": examples,
                     }
                 )
 
@@ -535,6 +691,12 @@ async def store_embeddings(
                         chunk["header"],
                         chunk["content"],
                         embedding,
+                        chunk.get("item_type"),
+                        chunk.get("signature"),
+                        chunk.get("parent_id"),
+                        json.dumps(chunk.get("examples", []))
+                        if chunk.get("examples")
+                        else None,
                     )
                     for chunk, embedding in zip(
                         batch_chunks, batch_embeddings, strict=False
@@ -544,8 +706,8 @@ async def store_embeddings(
                 # Batch insert into embeddings table
                 await db.executemany(
                     """
-                    INSERT INTO embeddings (item_path, header, content, embedding)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature, parent_id, examples)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     embeddings_data,
                 )
@@ -688,6 +850,10 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                 "item_path": item["item_path"],
                                 "header": item["header"],
                                 "content": content,
+                                "item_type": item.get("item_type"),
+                                "signature": item.get("signature"),
+                                "parent_id": item.get("parent_id"),
+                                "examples": item.get("examples", []),
                             }
                         )
 

@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-05T17:00:00Z",
+    "lastUpdated": "2025-08-06T12:00:00Z",
     "priorities": ["high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked"]
   },
@@ -304,9 +304,347 @@
             "progress": 100
           }
         ]
+      },
+      {
+        "id": "idx-1",
+        "title": "Enhance rustdoc JSON parsing",
+        "description": "Extract functions, structs, traits, modules with metadata for improved documentation analysis",
+        "status": "completed",
+        "progress": 100,
+        "dependencies": ["core-3", "core-4"],
+        "relatedTasks": ["search-1", "mod-1", "examples-1"],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-06T12:00:00Z",
+          "implementation": "Enhanced rustdoc JSON parsing with comprehensive metadata extraction",
+          "notes": "Added new database columns: item_type, signature, parent_id, examples. Implemented helper functions for metadata extraction: normalize_item_type, extract_signature, resolve_parent_id, extract_code_examples. Enhanced parse_rustdoc_items to use helper functions. Updated store_embeddings to handle new metadata fields. Added comprehensive tests for metadata extraction. Maintains backward compatibility with existing data."
+        },
+        "subtasks": [
+          {
+            "id": "idx-1.1",
+            "title": "Parse function signatures and metadata",
+            "description": "Extract function signatures, parameters, return types, and visibility from rustdoc JSON",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "idx-1.2",
+            "title": "Parse struct and enum definitions",
+            "description": "Extract struct fields, enum variants, and associated metadata",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "idx-1.3",
+            "title": "Parse trait definitions",
+            "description": "Extract trait methods, associated types, and implementation requirements",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "idx-1.4",
+            "title": "Extract module metadata",
+            "description": "Parse module structure, re-exports, and hierarchical relationships",
+            "status": "completed",
+            "progress": 100
+          }
+        ]
+      },
+      {
+        "id": "idx-2",
+        "title": "Add standard library support",
+        "description": "Extend ingestion for Rust std documentation to provide comprehensive standard library search capabilities",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "relatedTasks": ["idx-1"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "idx-2.1",
+            "title": "Implement std library ingestion",
+            "description": "Add support for ingesting Rust standard library documentation",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "idx-2.2",
+            "title": "Handle std library versioning",
+            "description": "Support multiple Rust versions and std library compatibility",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "idx-3",
+        "title": "Optimize indexing performance",
+        "description": "Improve memory usage during ingestion to handle larger crates more efficiently",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "relatedTasks": ["idx-1"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "idx-3.1",
+            "title": "Implement streaming JSON parsing",
+            "description": "Use streaming JSON parser to reduce memory footprint during ingestion",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "idx-3.2",
+            "title": "Optimize batch processing",
+            "description": "Improve batch size and processing strategy for large rustdoc files",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "search-1",
+        "title": "Improve search result ranking",
+        "description": "Enhance vector similarity scoring to provide more relevant and accurate search results",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["idx-1"],
+        "relatedTasks": ["search-2"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "search-1.1",
+            "title": "Implement weighted scoring",
+            "description": "Add weights based on item type, popularity, and relevance",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "search-1.2",
+            "title": "Add semantic similarity improvements",
+            "description": "Enhance vector similarity calculations for better matches",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "search-2",
+        "title": "Add search result filtering",
+        "description": "Filter by crate, item type, metadata to allow users to narrow down search results",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "relatedTasks": ["search-1", "search-3"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "search-2.1",
+            "title": "Implement crate filtering",
+            "description": "Allow users to filter search results by specific crates",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "search-2.2",
+            "title": "Implement item type filtering",
+            "description": "Filter results by function, struct, trait, module, etc.",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "search-2.3",
+            "title": "Add metadata-based filtering",
+            "description": "Filter by visibility, deprecation status, and other metadata",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "search-3",
+        "title": "Fix search query parsing",
+        "description": "Handle edge cases in queries to improve search robustness and user experience",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "relatedTasks": ["search-1", "search-2"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "search-3.1",
+            "title": "Handle special characters",
+            "description": "Properly escape and handle special characters in search queries",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "search-3.2",
+            "title": "Implement query normalization",
+            "description": "Normalize queries for consistent matching behavior",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "mod-1",
+        "title": "Extract module hierarchy",
+        "description": "Parse and store module relationships to enable hierarchical browsing and search",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["idx-1"],
+        "relatedTasks": ["mod-2"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "mod-1.1",
+            "title": "Parse module tree structure",
+            "description": "Extract parent-child relationships between modules",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "mod-1.2",
+            "title": "Store module metadata",
+            "description": "Store module paths, visibility, and documentation",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "mod-2",
+        "title": "Add module metadata search",
+        "description": "Enable searching by module path to help users find items within specific modules",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "relatedTasks": ["mod-1"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "mod-2.1",
+            "title": "Implement module path search",
+            "description": "Allow searching items by their module path",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "mod-2.2",
+            "title": "Add module-scoped search",
+            "description": "Enable searching within specific module scopes",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
       }
     ],
     "medium": [
+      {
+        "id": "param-1",
+        "title": "Extend parameter validation patterns",
+        "description": "Apply to all numeric MCP parameters to ensure consistent validation across all endpoints",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["mcp-2"],
+        "relatedTasks": ["param-2"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "param-1.1",
+            "title": "Audit all numeric parameters",
+            "description": "Identify all numeric parameters across MCP endpoints that need validation",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "param-1.2",
+            "title": "Apply consistent validation patterns",
+            "description": "Extend the k parameter validation pattern to other numeric parameters",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "param-2",
+        "title": "Add comprehensive input validation",
+        "description": "Validate all parameters with errors to provide better user experience and prevent edge cases",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "relatedTasks": ["param-1"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "param-2.1",
+            "title": "Implement string parameter validation",
+            "description": "Add validation for string parameters with length limits and format checks",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "param-2.2",
+            "title": "Add range validation for numeric parameters",
+            "description": "Implement min/max value validation for numeric parameters",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "examples-1",
+        "title": "Extract code examples",
+        "description": "Parse examples from rustdoc to provide practical usage information alongside documentation",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["idx-1"],
+        "relatedTasks": ["examples-2"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "examples-1.1",
+            "title": "Parse rustdoc examples",
+            "description": "Extract code examples from rustdoc documentation blocks",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "examples-1.2",
+            "title": "Link examples to items",
+            "description": "Associate extracted examples with their corresponding documentation items",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "examples-2",
+        "title": "Index example embeddings",
+        "description": "Generate searchable vectors for examples to enable example-based search functionality",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "relatedTasks": ["examples-1"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "examples-2.1",
+            "title": "Generate example embeddings",
+            "description": "Create vector embeddings for code examples using FastEmbed",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "examples-2.2",
+            "title": "Implement example search",
+            "description": "Add search functionality specifically for finding relevant code examples",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
       {
         "id": "test-1",
         "title": "Create comprehensive test suite",

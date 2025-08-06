@@ -10,9 +10,11 @@
 
 Let local AI coding assistants
 
-1. fetch a crate’s high-level description,
-2. run semantic (vector-based) search inside that crate’s docs, and
-3. retrieve the full rustdoc for any documented item –
+1. fetch a crate's high-level description and complete item documentation index,
+2. run semantic (vector-based) search across all documented items with type filtering,
+3. navigate the full module hierarchy with structured tree access,
+4. extract and search code examples from documentation,
+5. retrieve the full rustdoc for any documented item –
 
 all through the open MCP tool-calling standard, **without** proprietary services or cloud credentials.
 
@@ -30,9 +32,11 @@ all through the open MCP tool-calling standard, **without** proprietary services
 
 | Capability                | Notes                                                                                                                                                            |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_crate_summary`       | Return crate name, resolved version, README/description (≤ 1 k chars), list of root modules, and tool links.                                                     |
-| `search_items`            | k-NN cosine search in embedded passages (default k = 5).                                                                                                         |
+| `get_crate_summary`       | Return crate name, resolved version, README/description (≤ 1 k chars), comprehensive item index, module hierarchy, and tool links.                             |
+| `search_items`            | k-NN cosine search across all documented items with type filtering (functions, structs, traits, modules). Default k = 5.                                        |
 | `get_item_doc`            | Complete markdown/HTML for a single item, incl. code blocks.                                                                                                     |
+| `get_module_tree`         | Navigate module hierarchy with structured tree representation and item counts.                                                                                   |
+| `search_examples`         | Search and retrieve code examples from documentation with context.                                                                                               |
 | `list_versions`           | List all published versions (`yanked` flag, latest default).                                                                                                     |
 | MCP discovery             | `/mcp/manifest`, `/mcp/tools/*` per MCP 2025-06-18 spec.                                                                                                         |
 | On-disk cache             | One **SQLite + VSS** file per `crate@version`, auto-evicted LRU when total > 2 GiB.                                                                              |
@@ -86,9 +90,11 @@ all through the open MCP tool-calling standard, **without** proprietary services
 | Route                          | Method | Purpose                                           | Response                                         |
 | ------------------------------ | ------ | ------------------------------------------------- | ------------------------------------------------ |
 | `/mcp/manifest`                | GET    | Static MCP manifest listing tools & JSON schemas. | JSON                                             |
-| `/mcp/tools/get_crate_summary` | POST   | Resolve version & return summary.                 | JSON                                             |
-| `/mcp/tools/search_items`      | POST   | Vector search.                                    | JSON array `{score, item_path, header, snippet}` |
+| `/mcp/tools/get_crate_summary` | POST   | Resolve version & return comprehensive summary.   | JSON with item index & module tree              |
+| `/mcp/tools/search_items`      | POST   | Vector search with type filtering.                | JSON array `{score, item_path, item_type, header, snippet}` |
 | `/mcp/tools/get_item_doc`      | POST   | Full rustdoc for `item_path`.                     | `text/markdown`                                  |
+| `/mcp/tools/get_module_tree`   | POST   | Navigate module hierarchy.                        | JSON tree structure with item counts            |
+| `/mcp/tools/search_examples`   | POST   | Search code examples in documentation.           | JSON array `{score, item_path, example_text, context}` |
 | `/mcp/resources/versions`      | GET    | List published versions.                          | JSON                                             |
 | `/health`                      | GET    | Liveness/readiness probe.                         | `200 OK`                                         |
 
@@ -104,21 +110,36 @@ Responses validate against in-repo JSON Schema before send (pydantic).
 | **1. Resolve version**                                                                                                                                                                                                           | `GET https://docs.rs/crate/{crate}/latest/json` (or explicit version) → 302 target file. Honour `~semver` selectors & optional `target=` triple.                                                                                                      |
 | **1b. Fallback**                                                                                                                                                                                                                 | If rustdoc JSON is `404` or missing (older crates never rebuilt) → return `crate_not_documented` error **without** building locally, keeping MVP lean. *Docs.rs hosts rustdoc-JSON for the majority of modern crates but not all.* ([docs.rs][1])     |
 | **2. Download & decompress**                                                                                                                                                                                                     | Supports `.json`, `.json.zst` (preferred), `.json.gz`. Enforce max compressed 30 MiB and max decompressed 100 MiB; only `https://docs.rs/` URLs accepted.                                                                                             |
-| **3. Chunk**                                                                                                                                                                                                                     | One passage per item (`fn/struct/trait/mod`). Embedded text = `header + "\n\n" + docstring` (code blocks excluded from embedding but stored verbatim). Store both `item_path` *and* stable `item_id` from rustdoc JSON to survive re-exports & moves. |
+| **3. Chunk**                                                                                                                                                                                                                     | One passage per item (`fn/struct/trait/mod`) with comprehensive item indexing. Embedded text = `header + "\n\n" + docstring` (code blocks excluded from embedding but stored separately for example search). Store `item_path`, stable `item_id`, `item_type`, and extracted code examples from rustdoc JSON. |
 | **4. Embed**                                                                                                                                                                                                                     | FastEmbed ONNX, batch-size 32. First dummy embed at startup warms model (\~400 ms).                                                                                                                                                                   |
-| **5. Persist**                                                                                                                                                                                                                   | SQLite schema per crate-db:  \`\`\`sql                                                                                                                                                                                                                |
+| **5. Persist**                                                                                                                                                                                                                   | Enhanced SQLite schema per crate-db:  \`\`\`sql                                                                                                                                                                                                       |
 | CREATE TABLE passages(                                                                                                                                                                                                           |                                                                                                                                                                                                                                                       |
 | id INTEGER PRIMARY KEY,                                                                                                                                                                                                          |                                                                                                                                                                                                                                                       |
 | item\_id TEXT,           -- stable rustdoc identifier                                                                                                                                                                            |                                                                                                                                                                                                                                                       |
 | item\_path TEXT NOT NULL,                                                                                                                                                                                                        |                                                                                                                                                                                                                                                       |
+| item\_type TEXT,         -- function, struct, trait, module, etc                                                                                                                                                                |                                                                                                                                                                                                                                                       |
 | header TEXT,                                                                                                                                                                                                                     |                                                                                                                                                                                                                                                       |
 | doc TEXT,                                                                                                                                                                                                                        |                                                                                                                                                                                                                                                       |
 | char\_start INTEGER,     -- first char of original doc                                                                                                                                                                           |                                                                                                                                                                                                                                                       |
 | vec BLOB                                                                                                                                                                                                                         |                                                                                                                                                                                                                                                       |
 | );                                                                                                                                                                                                                               |                                                                                                                                                                                                                                                       |
+| CREATE TABLE code\_examples(                                                                                                                                                                                                     |                                                                                                                                                                                                                                                       |
+| id INTEGER PRIMARY KEY,                                                                                                                                                                                                          |                                                                                                                                                                                                                                                       |
+| item\_id TEXT,                                                                                                                                                                                                                   |                                                                                                                                                                                                                                                       |
+| item\_path TEXT,                                                                                                                                                                                                                 |                                                                                                                                                                                                                                                       |
+| example\_text TEXT,                                                                                                                                                                                                              |                                                                                                                                                                                                                                                       |
+| context TEXT,                                                                                                                                                                                                                    |                                                                                                                                                                                                                                                       |
+| vec BLOB                                                                                                                                                                                                                         |                                                                                                                                                                                                                                                       |
+| );                                                                                                                                                                                                                               |                                                                                                                                                                                                                                                       |
+| CREATE TABLE module\_tree(                                                                                                                                                                                                       |                                                                                                                                                                                                                                                       |
+| path TEXT PRIMARY KEY,                                                                                                                                                                                                           |                                                                                                                                                                                                                                                       |
+| parent\_path TEXT,                                                                                                                                                                                                               |                                                                                                                                                                                                                                                       |
+| item\_count INTEGER                                                                                                                                                                                                              |                                                                                                                                                                                                                                                       |
+| );                                                                                                                                                                                                                               |                                                                                                                                                                                                                                                       |
 | CREATE VIRTUAL TABLE vss\_passages USING vss0(vec);                                                                                                                                                                              |                                                                                                                                                                                                                                                       |
+| CREATE VIRTUAL TABLE vss\_examples USING vss0(vec);                                                                                                                                                                              |                                                                                                                                                                                                                                                       |
 | CREATE TABLE meta(crate TEXT, version TEXT, ts INTEGER, target TEXT);                                                                                                                                                            |                                                                                                                                                                                                                                                       |
-| PRAGMA user\_version = 1;                                                                                                                                                                                                        |                                                                                                                                                                                                                                                       |
+| PRAGMA user\_version = 2;                                                                                                                                                                                                        |                                                                                                                                                                                                                                                       |
 | \`\`\`  Insert vectors in batches of **1 000** rows, then call `vss_index!` to keep FAISS peak RAM well under 1 GiB even on big crates. FAISS keeps the index in memory; batching prevents a momentary spike. ([Hacker News][2]) |                                                                                                                                                                                                                                                       |
 | **6. Cache eviction**                                                                                                                                                                                                            | After a successful ingest, if `cache/*/*.db` totals > 2 GiB, delete oldest databases by `meta.ts` until under limit.                                                                                                                                  |
 
@@ -129,15 +150,17 @@ Responses validate against in-repo JSON Schema before send (pydantic).
 ```sql
 SELECT id,
        item_path,
+       item_type,
        header,
        doc,
        1.0 - vss_distance(vec, :qv) AS score
 FROM passages
+WHERE (:type_filter IS NULL OR item_type = :type_filter)
 ORDER BY score DESC
 LIMIT :k;
 ```
 
-`score ∈ [0, 1]` (higher = better).
+`score ∈ [0, 1]` (higher = better). Type filtering enables targeted search across functions, structs, traits, or modules.
 
 ---
 
@@ -155,7 +178,7 @@ LIMIT :k;
 * **Origin allow-list:** only fetch from `https://docs.rs/…`.
 * **Size caps:** 30 MiB compressed / 100 MiB decompressed.
 * **Path safety:** databases saved as `cache/{crate}/{version}.db` using sanitised names.
-* **Input validation:** strict pydantic models; reject unknown fields (`extra="forbid"`).
+* **Input validation:** strict pydantic models with comprehensive parameter validation; reject unknown fields (`extra="forbid"`). All numeric parameters (k, limit, offset) validate against reasonable bounds and types using anyOf schema patterns.
 * **Error model**
 
 | Condition            | HTTP | Body                               |
@@ -235,7 +258,7 @@ uvx docsrs-mcp@latest
 | Category          | Requirement                                                                            |
 | ----------------- | -------------------------------------------------------------------------------------- |
 | **Portability**   | CPython 3.10+; CI on Ubuntu 22.04, macOS 14, Windows 11 (GitHub Actions).              |
-| **Performance**   | `search_items`: ≤ 500 ms P95 (warm); ≤ 3 s cold ingest for crates ≤ 10 MiB compressed. |
+| **Performance**   | All search operations: ≤ 500 ms P95 (warm) across expanded dataset; ≤ 3 s cold ingest for crates ≤ 10 MiB compressed with full item indexing. |
 | **Memory**        | ≤ 1 GiB RSS incl. ONNX & FAISS under 10 k vectors.                                     |
 | **Disk**          | Cache auto-evicts to ≤ 2 GiB.                                                          |
 | **Availability**  | Stateless web layer; cache can be rebuilt.                                             |
@@ -261,12 +284,15 @@ uvx docsrs-mcp@latest
 1. `uvx docsrs-mcp` starts on Linux, macOS, and Windows (zero-install).
 2. `uv sync --dev && uv run python -m docsrs_mcp.cli` works for development.
 3. `POST /mcp/tools/get_crate_summary` for crate **tokio** (version omitted) returns latest version & overview.
-4. `POST /mcp/tools/search_items` with query `"spawn task"` returns ≥ 1 passage containing `tokio::spawn`.
-5. `POST /mcp/tools/get_item_doc` with `item_path="tokio::spawn"` returns markdown including a runnable example.
-6. Cold ingest of crate **serde** (< 5 MiB compressed) completes in ≤ 2 s on an M1/Ryzen 5; crates up to 10 MiB complete in ≤ 3 s.
-7. After ingesting 50 average crates, `cache/` ≤ 2 GiB and server RSS ≤ 1 GiB.
-8. A single IP exceeding 30 requests/s receives HTTP 429.
-9. All package management operations use `uv` exclusively (no pip/conda mixing).
+4. `POST /mcp/tools/search_items` with query `"spawn task"` and optional type filter returns ≥ 1 passage containing `tokio::spawn` with item type information.
+5. `POST /mcp/tools/get_module_tree` for crate **tokio** returns structured hierarchy with item counts per module.
+6. `POST /mcp/tools/search_examples` with query `"async"` returns ≥ 1 code example from tokio documentation.
+7. `POST /mcp/tools/get_item_doc` with `item_path="tokio::spawn"` returns markdown including a runnable example.
+8. Cold ingest of crate **serde** (< 5 MiB compressed) with full item indexing and example extraction completes in ≤ 2 s on an M1/Ryzen 5; crates up to 10 MiB complete in ≤ 3 s.
+9. After ingesting 50 average crates with comprehensive indexing, `cache/` ≤ 2 GiB and server RSS ≤ 1 GiB.
+10. A single IP exceeding 30 requests/s receives HTTP 429.
+11. All numeric parameters (k, limit, type filters) are properly validated with helpful error messages.
+12. All package management operations use `uv` exclusively (no pip/conda mixing).
 
 ---
 

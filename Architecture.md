@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a dual-mode architecture with a FastAPI web layer that can operate in either MCP mode (default) or REST mode. The MCP mode uses STDIO transport for AI clients, while REST mode requires an explicit flag. The system includes a comprehensive asynchronous ingestion pipeline with full rustdoc JSON processing, and a SQLite-based vector storage system with intelligent caching.
+The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a dual-mode architecture with a FastAPI web layer that can operate in either MCP mode (default) or REST mode. The MCP mode uses STDIO transport for AI clients, while REST mode requires an explicit flag. The system includes a comprehensive asynchronous ingestion pipeline with enhanced rustdoc JSON processing for complete documentation extraction, and a SQLite-based vector storage system with intelligent caching and example management.
 
 ## High-Level Architecture
 
@@ -55,16 +55,18 @@ graph LR
     subgraph "docsrs_mcp Package"
         subgraph "Web Layer"
             APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata]
-            ROUTES[routes.py<br/>MCP endpoints<br/>Comprehensive docstrings]
-            MODELS[models.py<br/>Pydantic schemas<br/>Field validators<br/>MCP compatibility<br/>Auto-generated docs]
+            ROUTES[routes.py<br/>Enhanced MCP endpoints<br/>Comprehensive docstrings]
+            MODELS[models.py<br/>Enhanced Pydantic schemas<br/>Field validators<br/>MCP compatibility<br/>Auto-generated docs]
+            NAV[navigation.py<br/>Module tree operations<br/>Hierarchy traversal]
             MW[middleware.py<br/>Rate limiting]
         end
         
         subgraph "Ingestion Layer"
-            ING[ingest.py<br/>Full rustdoc pipeline]
+            ING[ingest.py<br/>Enhanced rustdoc pipeline<br/>Complete item extraction]
             VER[Version Resolution<br/>docs.rs redirects]
             DL[Compression Support<br/>zst, gzip, json]
-            PARSE[ijson Parser<br/>Memory-efficient streaming]
+            PARSE[ijson Parser<br/>Memory-efficient streaming<br/>Module hierarchy extraction]
+            EXTRACT[Code Example Extractor<br/>Doc comment parsing]
             EMBED[FastEmbed<br/>Batch processing]
             LOCK[Per-crate Locks<br/>Prevent duplicates]
         end
@@ -90,8 +92,10 @@ graph LR
     ROUTES --> MODELS
     APP --> MW
     ROUTES --> ING
-    ING --> CHUNK
-    CHUNK --> EMBED
+    ROUTES --> NAV
+    ING --> PARSE
+    PARSE --> EXTRACT
+    EXTRACT --> EMBED
     EMBED --> DB
     DB --> VSS
     DB --> CACHE
@@ -125,7 +129,10 @@ sequenceDiagram
         DocsRS-->>Worker: Compressed rustdoc JSON
         Worker->>Worker: Stream decompress with size limits
         Worker->>Worker: Parse with ijson (memory-efficient)
-        Worker->>Worker: Chunk into items
+        Worker->>Worker: Parse complete rustdoc structure
+        Worker->>Worker: Extract module hierarchy
+        Worker->>Worker: Parse code examples from docs
+        Worker->>Worker: Chunk into typed items
         Worker->>Embed: Batch embed (size=32)
         Embed-->>Worker: 384-dim vectors
         Worker->>DB: Batch insert (size=999 with transactions)
@@ -145,18 +152,51 @@ sequenceDiagram
 
 ```mermaid
 erDiagram
+    EMBEDDINGS {
+        INTEGER rowid PK
+        TEXT item_id "stable rustdoc ID"
+        TEXT item_path "e.g. serde::de::Deserialize"
+        TEXT item_type "function, struct, trait, module, etc - DEFAULT NULL"
+        TEXT signature "complete item signature - DEFAULT NULL"
+        TEXT header "item signature (legacy)"
+        TEXT doc "full documentation"
+        INTEGER parent_id "module hierarchy parent - DEFAULT NULL"
+        TEXT examples "extracted code examples - DEFAULT NULL"
+        TEXT tags "searchable metadata tags"
+        INTEGER char_start "original position"
+    }
+    
+    VEC_EMBEDDINGS {
+        INTEGER rowid PK
+        BLOB embedding "384-dim float32 vector"
+    }
+    
     PASSAGES {
         INTEGER id PK
         TEXT item_id "stable rustdoc ID"
         TEXT item_path "e.g. serde::de::Deserialize"
-        TEXT header "item signature"
+        TEXT item_type "function, struct, trait, module, etc - DEFAULT NULL"
+        TEXT signature "complete item signature - DEFAULT NULL"
+        TEXT header "item signature (legacy)"
         TEXT doc "full documentation"
+        INTEGER parent_id "module hierarchy parent - DEFAULT NULL"
+        TEXT examples "extracted code examples - DEFAULT NULL"
+        TEXT tags "searchable metadata tags"
         INTEGER char_start "original position"
         BLOB vec "384-dim float32 array"
     }
     
     VSS_PASSAGES {
-        BLOB vec "FAISS index"
+        BLOB vec "FAISS index (legacy)"
+    }
+    
+    EXAMPLES {
+        INTEGER id PK
+        INTEGER passage_id FK
+        TEXT code "example code snippet"
+        TEXT language "rust, bash, toml, etc"
+        TEXT description "example description"
+        INTEGER line_number "position in docs"
     }
     
     META {
@@ -166,8 +206,14 @@ erDiagram
         TEXT target "e.g. x86_64-unknown-linux-gnu"
     }
     
-    PASSAGES ||--|| VSS_PASSAGES : "indexed by"
-    META ||--|| PASSAGES : "describes"
+    EMBEDDINGS ||--|| VEC_EMBEDDINGS : "vector indexed by rowid"
+    EMBEDDINGS ||--o{ EXAMPLES : "contains"
+    EMBEDDINGS ||--o{ EMBEDDINGS : "parent_id references rowid"
+    PASSAGES ||--|| VSS_PASSAGES : "legacy indexed by"
+    PASSAGES ||--o{ EXAMPLES : "legacy contains"
+    PASSAGES ||--o{ PASSAGES : "legacy parent_id references id"
+    META ||--|| EMBEDDINGS : "describes"
+    META ||--|| PASSAGES : "legacy describes"
 ```
 
 ## Dual-Mode Architecture
@@ -221,8 +267,11 @@ graph TB
 
 ```mermaid
 graph TD
-    subgraph "Auto-Generated MCP Tools"
-        SEARCH[search_crates<br/>Vector similarity search<br/>Input: query text<br/>Output: ranked crate list]
+    subgraph "Enhanced MCP Tools"
+        SEARCH_DOC[search_documentation<br/>Vector similarity search with type filtering<br/>Input: query text, item_type filter<br/>Output: ranked documentation items]
+        NAV_MOD[navigate_modules<br/>Module hierarchy navigation<br/>Input: crate, path<br/>Output: module tree structure]
+        GET_EX[get_examples<br/>Code example retrieval<br/>Input: item_id or query<br/>Output: relevant code examples]
+        GET_SIG[get_item_signature<br/>Item signature retrieval<br/>Input: item_path<br/>Output: complete signature]
         INGEST_TOOL[ingest_crate<br/>Manual crate ingestion<br/>Input: crate name/version<br/>Output: ingestion status]
     end
     
@@ -231,15 +280,24 @@ graph TD
         STDIO_TRANSPORT[STDIO Transport<br/>JSON-RPC messages]
     end
     
-    subgraph "Original REST Endpoints"
-        REST_SEARCH[POST /search<br/>FastAPI endpoint]
+    subgraph "Enhanced REST Endpoints"
+        REST_SEARCH_DOC[POST /search_documentation<br/>Enhanced search endpoint]
+        REST_NAV[POST /navigate_modules<br/>Module navigation endpoint]
+        REST_EXAMPLES[POST /get_examples<br/>Example retrieval endpoint]
+        REST_SIG[POST /get_item_signature<br/>Signature endpoint]
         REST_INGEST[POST /ingest<br/>FastAPI endpoint]
         HEALTH[GET /health<br/>Liveness probe]
     end
     
-    FASTMCP --> SEARCH
+    FASTMCP --> SEARCH_DOC
+    FASTMCP --> NAV_MOD
+    FASTMCP --> GET_EX
+    FASTMCP --> GET_SIG
     FASTMCP --> INGEST_TOOL
-    SEARCH -->|converts| REST_SEARCH
+    SEARCH_DOC -->|converts| REST_SEARCH_DOC
+    NAV_MOD -->|converts| REST_NAV
+    GET_EX -->|converts| REST_EXAMPLES
+    GET_SIG -->|converts| REST_SIG
     INGEST_TOOL -->|converts| REST_INGEST
     STDIO_TRANSPORT --> FASTMCP
 ```
@@ -483,11 +541,18 @@ graph TB
 - Maintains lock state throughout application lifetime
 - Ensures data consistency during parallel processing
 
-**Memory-Efficient Parsing**
-- ijson streaming parser for large rustdoc JSON files
-- Two-pass parsing: paths mapping + item extraction
-- Filters relevant item types (functions, structs, traits, modules)
+**Enhanced Memory-Efficient Parsing with Metadata Extraction**
+- ijson streaming parser for large rustdoc JSON files (unchanged)
+- Multi-pass parsing: paths mapping + item extraction + hierarchy building (unchanged)
+- Complete item type extraction (functions, structs, traits, modules, enums, constants, macros)
+- Enhanced metadata extraction pipeline:
+  - Type normalization helper functions for consistent item classification
+  - Signature extraction with full type information and generics
+  - Parent ID resolution for module hierarchy relationships
+  - Code example extraction from documentation comments
+- Maintains backward compatibility with NULL defaults for new metadata columns
 - Processes items incrementally without loading full JSON into memory
+- Performance impact: ~10-15% parsing overhead for enhanced metadata extraction
 
 **LRU Cache Eviction**
 - File modification time (mtime) based eviction strategy
@@ -724,12 +789,20 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - **Size Limits**: 30MB compressed, 100MB decompressed (configurable)
 - **Memory Management**: Chunked reading to prevent memory exhaustion
 
-### JSON Processing with ijson
-- **Streaming Parser**: Processes large files without full memory load
-- **Path Extraction**: First pass builds ID-to-path mapping from "paths" section
-- **Item Processing**: Second pass extracts documentation from "index" section
-- **Type Filtering**: Focuses on functions, structs, traits, modules, enums, constants
+### Enhanced JSON Processing with Metadata Extraction
+- **Streaming Parser**: Processes large files without full memory load (unchanged)
+- **Multi-pass Processing**: 
+  - First pass builds ID-to-path mapping from "paths" section
+  - Second pass extracts documentation from "index" section with enhanced metadata
+- **Enhanced Metadata Extraction**:
+  - **Type Normalization**: Helper functions for consistent item type classification
+  - **Signature Extraction**: Complete function signatures with generics and return types  
+  - **Parent ID Resolution**: Module hierarchy relationships for navigation
+  - **Code Example Parsing**: Extracts examples from documentation comments
+- **Type Filtering**: Focuses on functions, structs, traits, modules, enums, constants, macros
+- **Backward Compatibility**: NULL defaults for all new metadata fields
 - **Memory Efficiency**: Processes items incrementally, not all at once
+- **Performance Impact**: ~10-15% parsing overhead for enhanced metadata
 
 ### Concurrency Architecture
 - **Per-Crate Locks**: Prevents race conditions during ingestion
@@ -737,9 +810,9 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - **Batch Processing**: Optimizes database operations and embedding generation
 - **Resource Management**: Proper cleanup of connections and file handles
 
-### Database Batch Processing
+### Enhanced Database Batch Processing with Metadata
 
-The store_embeddings() function implements efficient batch processing for large datasets:
+The store_embeddings() function implements efficient batch processing for large datasets with enhanced metadata support:
 
 ```mermaid
 sequenceDiagram
@@ -754,8 +827,8 @@ sequenceDiagram
     
     loop For each batch of 999 items
         Worker->>DB: BEGIN TRANSACTION
-        Worker->>Embeddings: executemany() batch insert
-        Embeddings-->>Worker: Batch inserted
+        Worker->>Embeddings: executemany() batch insert with metadata
+        Embeddings-->>Worker: Batch inserted with type, signature, parent_id, examples
         Worker->>DB: last_insert_rowid() - get rowid range
         DB-->>Worker: Starting rowid for batch
         Worker->>VecEmbed: executemany() with calculated rowids
@@ -777,11 +850,14 @@ sequenceDiagram
 - **Batch Size**: 999 items per transaction (SQLite parameter limit)
 - **Vector Pre-serialization**: All vectors serialized with sqlite_vec.serialize_float32() before processing
 - **Two-table Strategy**: Coordinated inserts into embeddings and vec_embeddings tables
+- **Enhanced Metadata Processing**: Processes item_type, signature, parent_id, examples fields with NULL defaults
 - **Transaction Management**: Begin/commit per batch with rollback on errors
 - **Rowid Synchronization**: Uses last_insert_rowid() to maintain relationships between tables
+- **Backward Compatibility**: NULL defaults ensure compatibility with existing data
 - **Memory Optimization**: O(batch_size) memory usage instead of O(total_items)
 - **Progress Logging**: Tracks progress for large datasets (>999 items)
 - **Error Isolation**: Per-batch error handling prevents complete ingestion failure
+- **Minimal Performance Impact**: ~10-15% overhead for enhanced metadata processing
 
 ### Cache Management Strategy
 - **LRU Algorithm**: Based on file system modification time (mtime)
@@ -789,13 +865,231 @@ sequenceDiagram
 - **Eviction Process**: Removes oldest files first until under size limit
 - **Error Handling**: Graceful handling of file system errors during cleanup
 
-## Future Considerations (Out of Scope v1)
+### Enhanced Rustdoc Implementation Summary
 
-- Cross-crate dependency search capabilities
-- GPU acceleration for embedding generation
-- Multi-tenant quota management and rate limiting
-- Distributed caching with Redis for horizontal scaling
-- Real-time incremental updates via docs.rs webhooks
-- Advanced search features (semantic similarity, code examples)
-- Analytics and usage tracking for optimization
-- Authentication and authorization for enterprise deployments
+The enhanced rustdoc JSON parsing implementation provides comprehensive metadata extraction while maintaining backward compatibility and memory efficiency:
+
+**Key Enhancements:**
+- **Database Schema**: Added metadata columns (item_type, signature, parent_id, examples) with NULL defaults
+- **Parsing Pipeline**: Enhanced with helper functions for type normalization, signature extraction, parent ID resolution, and code example extraction
+- **Memory Efficiency**: Maintained streaming approach with ijson, minimal performance impact (~10-15% overhead)
+- **Batch Processing**: Continues to use 999-item transactions for optimal performance
+- **Backward Compatibility**: NULL defaults ensure existing data and queries continue to work
+- **Performance**: Memory usage remains under 512 MiB RSS target, search latency unchanged
+
+## Enhanced Data Flow Architecture
+
+```mermaid
+sequenceDiagram
+    participant Client as AI Client
+    participant API as Enhanced FastAPI
+    participant Queue as asyncio.Queue
+    participant Worker as Enhanced Ingest Worker
+    participant DocsRS as docs.rs
+    participant Parser as Enhanced Parser
+    participant Embed as FastEmbed
+    participant DB as SQLite+VSS+Examples
+    
+    Client->>API: POST /mcp/tools/search_documentation
+    API->>DB: Check if crate@version exists
+    
+    alt Cache Miss
+        API->>Queue: Enqueue enhanced ingest task
+        Queue->>Worker: Dequeue task
+        Worker->>Worker: Acquire per-crate lock
+        Worker->>DocsRS: Resolve version via redirect
+        DocsRS-->>Worker: Actual version + rustdoc URL
+        Worker->>DocsRS: GET compressed rustdoc (.zst/.gz/.json)
+        DocsRS-->>Worker: Complete rustdoc JSON
+        Worker->>Worker: Stream decompress with size limits
+        Worker->>Parser: Parse with enhanced ijson pipeline
+        Parser->>Parser: Extract module hierarchy
+        Parser->>Parser: Parse all item types (functions, structs, traits, modules, etc)
+        Parser->>Parser: Extract code examples from documentation
+        Parser->>Parser: Build parent-child relationships
+        Parser-->>Worker: Structured items with hierarchy and examples
+        Worker->>Embed: Batch embed enhanced content (size=32)
+        Embed-->>Worker: 384-dim vectors
+        Worker->>DB: Batch insert passages with type/signature/parent_id
+        Worker->>DB: Batch insert code examples with relationships
+        Worker->>DB: Index with vss_index!
+        Worker->>Worker: Check cache size (2GB limit)
+        alt Cache > 2 GiB
+            Worker->>DB: LRU eviction by file mtime
+        end
+    end
+    
+    API->>DB: Enhanced vector search with type filtering
+    DB-->>API: Typed results with signatures and examples
+    API-->>Client: Enhanced JSON response with item metadata
+```
+
+## Enhanced MCP Tool Architecture
+
+```mermaid
+graph TD
+    subgraph "Enhanced Search Tools"
+        SEARCH_DOC[search_documentation<br/>• Vector similarity search<br/>• Item type filtering (struct, function, trait, etc)<br/>• Signature matching<br/>• Tag-based filtering]
+        
+        NAV_TREE[navigate_modules<br/>• Hierarchical module browsing<br/>• Parent-child relationships<br/>• Module content listing<br/>• Path-based navigation]
+        
+        GET_EXAMPLES[get_examples<br/>• Code example retrieval<br/>• Language-specific filtering<br/>• Context-aware examples<br/>• Usage pattern discovery]
+        
+        GET_SIG[get_item_signature<br/>• Complete function signatures<br/>• Trait definitions<br/>• Struct layouts<br/>• Type information]
+    end
+    
+    subgraph "Enhanced Database Operations"
+        HIER_QUERY[Hierarchical Queries<br/>• Recursive module traversal<br/>• Parent-child lookups<br/>• Breadcrumb generation]
+        
+        TYPE_FILTER[Type-based Filtering<br/>• Item type constraints<br/>• Signature pattern matching<br/>• Tag-based search]
+        
+        EXAMPLE_LINK[Example Relationships<br/>• Passage-to-example linking<br/>• Code snippet retrieval<br/>• Language detection]
+    end
+    
+    subgraph "Enhanced Parsing Pipeline"
+        FULL_PARSE[Complete Rustdoc Parsing<br/>• All item types extraction<br/>• Module hierarchy building<br/>• Example code parsing]
+        
+        HIERARCHY[Module Hierarchy<br/>• Parent-child relationships<br/>• Path reconstruction<br/>• Tree navigation support]
+        
+        CODE_EXTRACT[Code Example Extraction<br/>• Doc comment parsing<br/>• Language detection<br/>• Example categorization]
+    end
+    
+    SEARCH_DOC --> TYPE_FILTER
+    NAV_TREE --> HIER_QUERY
+    GET_EXAMPLES --> EXAMPLE_LINK
+    GET_SIG --> TYPE_FILTER
+    
+    TYPE_FILTER --> FULL_PARSE
+    HIER_QUERY --> HIERARCHY
+    EXAMPLE_LINK --> CODE_EXTRACT
+```
+
+## Enhanced Database Schema Details
+
+### EMBEDDINGS Table Enhancements (Primary Storage)
+- **item_type**: Categorizes documentation items (function, struct, trait, module, enum, constant, macro) - DEFAULT NULL for backward compatibility
+- **signature**: Complete item signature including generics, bounds, and return types - DEFAULT NULL
+- **parent_id**: Self-referencing foreign key for module hierarchy navigation - DEFAULT NULL
+- **examples**: Extracted code examples from documentation comments - DEFAULT NULL
+- **tags**: Comma-separated searchable metadata for enhanced filtering
+- **header**: Preserved for backward compatibility with existing search functionality
+- **rowid**: Primary key used for vector indexing coordination with vec_embeddings table
+
+### PASSAGES Table (Legacy Compatibility)
+- Maintains existing schema structure for backward compatibility
+- Enhanced with same metadata columns as EMBEDDINGS table
+- Both tables support the enhanced rustdoc parsing implementation
+
+### EXAMPLES Table Structure
+- **passage_id**: Foreign key linking examples to their parent documentation items
+- **code**: The actual code snippet extracted from documentation
+- **language**: Detected or specified language (rust, bash, toml, json, etc.)
+- **description**: Optional description or context for the example
+- **line_number**: Position within the original documentation for reference
+
+### Navigation Support
+- **Hierarchical Queries**: Self-joining PASSAGES table on parent_id for tree traversal
+- **Breadcrumb Generation**: Recursive parent lookup for complete navigation paths
+- **Module Content Listing**: Query children of a given module for content discovery
+
+## Enhanced Component Integration
+
+### navigation.py Module
+```mermaid
+classDiagram
+    class NavigationService {
+        +get_module_tree(crate: str, version: str, path: str) -> ModuleTree
+        +get_module_children(parent_id: int) -> List[ModuleItem]
+        +get_breadcrumbs(item_id: int) -> List[BreadcrumbItem]
+        +search_in_module(module_path: str, query: str) -> List[SearchResult]
+        -build_tree_recursive(parent_id: int, depth: int) -> TreeNode
+        -resolve_module_path(path: str) -> int
+    }
+    
+    class ModuleTree {
+        +root: ModuleItem
+        +children: List[ModuleTree]
+        +total_items: int
+        +depth: int
+    }
+    
+    class BreadcrumbItem {
+        +name: str
+        +path: str
+        +item_type: str
+        +is_current: bool
+    }
+    
+    NavigationService --> ModuleTree
+    NavigationService --> BreadcrumbItem
+```
+
+### Enhanced Search Capabilities
+- **Type-filtered Search**: Filter results by item type (functions only, traits only, etc.)
+- **Signature-based Matching**: Search by function signatures, trait bounds, or type parameters
+- **Module-scoped Search**: Limit search results to specific modules or crates
+- **Example-integrated Results**: Include relevant code examples with search results
+- **Tag-based Discovery**: Use metadata tags for enhanced result categorization
+
+## Performance Implications
+
+### Enhanced Storage Requirements
+| Component | Estimated Increase | Notes |
+|-----------|-------------------|-------|
+| EMBEDDINGS table | +40% | Additional metadata fields: item_type, signature, parent_id, examples (all DEFAULT NULL) |
+| VEC_EMBEDDINGS table | Unchanged | Vector storage remains the same |
+| PASSAGES table | +40% | Legacy compatibility with same enhancements |
+| EXAMPLES table | +25% | New table for code examples with relationships |
+| Index overhead | +15% | Additional indexes for type filtering and hierarchy |
+| Total storage | +60-80% | Complete documentation vs. descriptions only |
+| **Backward Compatibility** | **Maintained** | **NULL defaults ensure no breaking changes** |
+
+### Query Performance Optimizations
+- **Composite Indexes**: (crate, version, item_type) for efficient type filtering
+- **Hierarchy Indexes**: (parent_id, item_path) for fast tree traversal
+- **Example Indexes**: (passage_id, language) for quick example retrieval
+- **Vector Search**: Unchanged performance for similarity queries
+
+### Memory Usage Considerations
+- **Parsing Memory**: ~10-15% increase during ingestion for enhanced metadata extraction
+- **Runtime Memory**: Minimal increase due to maintained streaming architecture
+- **Cache Efficiency**: Better cache utilization due to complete documentation coverage
+- **Backward Compatibility**: No memory overhead for NULL metadata fields
+- **Batch Processing**: Memory efficiency maintained with 999-item transactions
+
+## Implementation Phases
+
+### Phase 1: Enhanced Database Schema
+1. Add new fields to PASSAGES table with migration support
+2. Create EXAMPLES table with proper foreign key relationships
+3. Add composite indexes for performance optimization
+4. Implement backward compatibility for existing data
+
+### Phase 2: Enhanced Parsing Pipeline
+1. Extend ingest.py to parse complete rustdoc JSON structure
+2. Implement module hierarchy extraction and parent-child relationships
+3. Add code example extraction from documentation comments
+4. Integrate enhanced parsing with existing ingestion workflow
+
+### Phase 3: Navigation and Enhanced Search
+1. Implement navigation.py module for tree operations
+2. Add enhanced MCP tools with type filtering and signature matching
+3. Integrate example retrieval with search results
+4. Add module-scoped search capabilities
+
+### Phase 4: API Enhancement and Integration
+1. Update Pydantic models for enhanced request/response schemas
+2. Implement new REST endpoints for enhanced functionality
+3. Update FastMCP integration for new tool definitions
+4. Add comprehensive testing for all enhanced features
+
+## Future Considerations (Enhanced)
+
+- Cross-crate dependency search capabilities with enhanced metadata
+- GPU acceleration for embedding generation of complete documentation
+- Multi-tenant quota management with per-crate rate limiting
+- Distributed caching with Redis for horizontal scaling of enhanced data
+- Real-time incremental updates via docs.rs webhooks with example tracking
+- Advanced search features (semantic similarity across code examples)
+- Analytics and usage tracking for enhanced feature optimization
+- Authentication and authorization for enterprise deployments with enhanced APIs

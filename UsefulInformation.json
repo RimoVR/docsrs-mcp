@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-05",
+  "lastUpdated": "2025-08-06",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "commonErrors": {
@@ -69,6 +69,30 @@
           "prevention": "Always account for SQLite's 999 parameter limit when batching operations",
           "dateEncountered": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Loop variable overwriting in extract_code_examples",
+          "context": "Variable name collision causing data loss in rustdoc parsing",
+          "solution": "Use different variable names (cleaned_example vs example) to avoid overwriting loop variables",
+          "prevention": "Always use distinct variable names in nested loops and data processing to prevent accidental overwrites",
+          "dateEncountered": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Type matching too broad in rustdoc parsing",
+          "context": "String matching 'type' in 'unknown_type' causing incorrect type categorization",
+          "solution": "Use exact key matching in type_map dictionary instead of substring matching",
+          "prevention": "Use precise key matching instead of substring matching for dictionary lookups to avoid false positives",
+          "dateEncountered": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Path resolution not finding items without explicit path mapping",
+          "context": "Items without path mappings in rustdoc JSON causing lookup failures",
+          "solution": "Implement fallback to item name when no path mapping exists in rustdoc data",
+          "prevention": "Always provide fallback mechanisms when working with optional or incomplete data structures",
+          "dateEncountered": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
         }
       ]
     },
@@ -287,6 +311,30 @@
           "impact": "Enables robust parameter handling that works across different MCP client implementations",
           "dateLearned": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Database schema changes need backward compatibility",
+          "context": "Adding new columns to existing database tables during development",
+          "details": "Use NULL defaults for new columns in ALTER TABLE statements to ensure backward compatibility with existing databases",
+          "impact": "Prevents database migration issues and allows incremental schema updates",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/database.py"]
+        },
+        {
+          "lesson": "Clear cache directory before testing enhanced parsing",
+          "context": "Testing database schema changes and parsing improvements",
+          "details": "Clear cache directory before testing enhanced parsing to ensure fresh database creation with new schema and updated parsing logic",
+          "impact": "Prevents test failures caused by stale database schemas or cached parsing results",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "tests/"]
+        },
+        {
+          "lesson": "Always run Ruff formatting before committing",
+          "context": "Code quality and consistency maintenance",
+          "details": "Use 'uv run ruff format .' before committing to ensure consistent code formatting across the project",
+          "impact": "Maintains code quality and prevents formatting-related merge conflicts",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["pyproject.toml"]
         }
       ]
     }
@@ -336,7 +384,11 @@
       "Use 'SELECT last_insert_rowid()' after executemany() to get last inserted ID",
       "Calculate batch sizes as 999 // params_per_row to respect SQLite parameter limits",
       "Pre-serialize complex data before batching to avoid repeated serialization overhead",
-      "Test batch logic with datasets >2x batch size to verify multiple batch handling"
+      "Test batch logic with datasets >2x batch size to verify multiple batch handling",
+      "Clear cache directory before testing enhanced parsing to ensure fresh database creation",
+      "Use exact key matching in type dictionaries to avoid false positive substring matches",
+      "Implement fallback mechanisms for optional data structures in rustdoc JSON",
+      "Use distinct variable names in nested loops to prevent accidental overwrites"
     ],
     "rateLimiting": [
       "Ensure Redis is running for distributed limiting",

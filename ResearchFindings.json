@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-05",
+  "lastUpdated": "2025-08-06",
   "research": {
     "modelContextProtocol": {
       "overview": "Open standard by Anthropic for LLM-tool communication",
@@ -183,6 +183,19 @@
         "dimensions": 384,
         "optimization": "ONNX for CPU inference",
         "performance": "2-4x faster than PyTorch",
+        "fastEmbedOptimization": {
+          "runtime": "FastEmbed with ONNX runtime provides 3x speedup over PyTorch",
+          "backend": "ONNX runtime optimized for CPU inference",
+          "batchProcessing": "Optimal batch size of 32 for embedding generation",
+          "memoryEfficiency": "Keep memory under 1GB for 10k embeddings",
+          "implementation": "Use FastEmbed with ONNX backend for production workloads"
+        },
+        "streamProcessing": {
+          "technique": "Stream large JSON files to avoid OOM",
+          "benefit": "Handle files larger than available RAM",
+          "implementation": "Process documents in chunks rather than loading entirely",
+          "memoryTarget": "Maintain constant memory usage regardless of file size"
+        },
         "modelDownload": "Automatic on first use - no manual download needed",
         "onnxruntimeCompatibility": {
           "issue": "FastEmbed newer versions incompatible with onnxruntime >=1.20",
@@ -247,6 +260,38 @@
             "vectorDimensions": 384,
             "performance": "Excellent for 384-dimensional vectors",
             "benchmarkResult": "Significant improvement over sqlite-vss"
+          },
+          "vectorSearchOptimization": {
+            "semanticChunking": {
+              "optimalRange": "50-200 token chunks for optimal granularity",
+              "rationale": "Balance between context preservation and search precision",
+              "implementation": "Split documentation into semantic units rather than arbitrary sizes",
+              "benefit": "Improved relevance and context in search results"
+            },
+            "bruteForceThreshold": {
+              "library": "sqlite-vec",
+              "capacity": "Works well up to 1M vectors with brute-force search",
+              "performance": "Acceptable latency for most use cases up to 1M scale",
+              "recommendation": "Use brute-force for initial implementation, evaluate ANN later"
+            },
+            "binaryQuantization": {
+              "storageReduction": "8x reduction in storage requirements",
+              "accuracyLoss": "Minimal accuracy loss with binary quantization",
+              "implementation": "Available in sqlite-vec for production use",
+              "benefit": "Significant storage savings with negligible quality impact"
+            },
+            "annIndexes": {
+              "availability": "ANN indexes coming in sqlite-vec 2025",
+              "capacity": "Designed for 10M+ vector collections",
+              "currentStatus": "Use brute-force until ANN indexes available",
+              "futureProofing": "Architecture should support migration to ANN when available"
+            },
+            "simdAcceleration": {
+              "feature": "SIMD-accelerated distance calculations",
+              "library": "Built into sqlite-vec for performance",
+              "benefit": "Hardware acceleration for vector operations",
+              "platform": "Automatic detection and utilization of SIMD instructions"
+            }
           }
         }
       }
@@ -274,6 +319,80 @@
           "solution": "Use streaming decompression and parsing",
           "library": "ijson for memory-efficient streaming JSON parsing",
           "bestPractice": "Avoid loading entire JSON into memory at once"
+        },
+        "parsingBestPractices": {
+          "streamingParser": {
+            "technique": "Use streaming JSON parser with zero-copy deserialization",
+            "benefit": "Handles large files without memory spikes",
+            "library": "ijson with streaming approach",
+            "implementation": "Process JSON incrementally rather than loading entire structure"
+          },
+          "symbolInterning": {
+            "purpose": "Optimize repeated string lookups in rustdoc JSON",
+            "technique": "Intern frequently used strings like type names and module paths",
+            "benefit": "Reduces memory usage and improves lookup performance",
+            "implementation": "Use string interning library or custom dictionary"
+          },
+          "onDemandParsing": {
+            "strategy": "Parse on-demand rather than loading entire AST",
+            "rationale": "Most queries only need specific sections of documentation",
+            "implementation": "Use streaming parser to extract relevant sections only",
+            "memoryBenefit": "Significant reduction in memory footprint for large crates"
+          },
+          "formatVersion": {
+            "current": "Version 1 format is stable",
+            "validation": "Always check format_version field before parsing",
+            "compatibility": "Version 1 format guaranteed stable by rustdoc team",
+            "futureProofing": "Handle unknown versions gracefully"
+          }
+        },
+        "implementationFindings": {
+          "formatVersionTracking": {
+            "field": "FORMAT_VERSION",
+            "purpose": "rustdoc JSON uses FORMAT_VERSION field for tracking schema changes",
+            "importance": "Essential for maintaining parsing compatibility across rustdoc versions",
+            "implementation": "Check FORMAT_VERSION before processing any rustdoc JSON file"
+          },
+          "structuralPatterns": {
+            "itemTypes": {
+              "variability": "Item types can be strings or nested objects",
+              "examples": [
+                "Simple string types for basic items",
+                "Complex nested objects like {'struct': {...}} for detailed definitions"
+              ],
+              "parsing": "Must handle both string and object type representations dynamically"
+            },
+            "signatureExtraction": {
+              "functionSignatures": "Available in inner.function.decl path",
+              "methodSignatures": "Available in inner.method.decl path",
+              "importance": "Critical for generating accurate API documentation and examples",
+              "implementation": "Extract signature information from decl fields for comprehensive documentation"
+            },
+            "parentResolution": {
+              "mechanism": "Parent ID resolution through paths section mapping",
+              "benefit": "Enables construction of complete hierarchical documentation structure",
+              "implementation": "Use paths section to map item IDs to their parent containers and module hierarchy"
+            },
+            "codeExampleExtraction": {
+              "pattern": "r'```(?:rust)?\\s*\\n(.*?)```'",
+              "purpose": "Extract Rust code examples from documentation strings",
+              "effectiveness": "Proven effective for isolating code blocks from markdown documentation",
+              "implementation": "Use regex pattern to extract code examples for syntax highlighting and validation"
+            }
+          },
+          "databaseOptimizations": {
+            "sqliteParameterLimit": {
+              "constant": 999,
+              "description": "SQLite has maximum 999 parameters per SQL statement",
+              "impact": "Limits batch operation size in database insertions",
+              "implementation": "Respect 999 parameter limit when designing batch operations to avoid SQL errors"
+            },
+            "backwardCompatibility": {
+              "approach": "NULL defaults for new columns",
+              "benefit": "Maintains database schema compatibility during enhancements",
+              "implementation": "Use NULL defaults when adding new columns to support progressive schema evolution"
+            }
+          }
         }
       },
       "apiEndpoints": {
@@ -306,6 +425,26 @@
           "retryMechanism": "Use tenacity library for robust HTTP request retries",
           "backoffStrategy": "Exponential backoff with jitter",
           "maxRetries": "Configure reasonable retry limits to avoid infinite loops"
+        },
+        "moduleTreeExtraction": {
+          "rustdocPaths": {
+            "source": "Use rustdoc 'paths' section for module hierarchy",
+            "structure": "Contains complete module tree information",
+            "benefit": "Provides navigable crate structure for documentation",
+            "implementation": "Extract paths section to build module navigation"
+          },
+          "cargoModules": {
+            "tool": "cargo-modules for module visualization",
+            "purpose": "Generate visual representations of module structure",
+            "integration": "Complement rustdoc paths with visual module maps",
+            "useCase": "Help users understand crate organization"
+          },
+          "workspaceHandling": {
+            "challenge": "Handle workspace vs single-crate scenarios",
+            "workspaces": "Multiple crates in single workspace require different parsing",
+            "singleCrate": "Simpler structure for standalone crates",
+            "implementation": "Detect workspace structure and adapt parsing accordingly"
+          }
         }
       }
     },
@@ -387,7 +526,14 @@
           "Constant memory usage regardless of file size",
           "Ability to process 100MB+ JSON files efficiently",
           "Compatible with compressed streams"
-        ]
+        ],
+        "performanceOptimization": {
+          "version": "3.4.0",
+          "backend": "yajl2",
+          "performanceGain": "656x over pure Python implementation",
+          "implementation": "Use ijson with yajl2 backend for maximum performance",
+          "significance": "Critical for processing large rustdoc JSON files efficiently"
+        }
       },
       "retryLogic": {
         "library": "tenacity",
@@ -400,6 +546,38 @@
           "Integration with async/await"
         ],
         "use_case": "Handle network failures when downloading rustdoc JSON files"
+      }
+    },
+    "security": {
+      "mcpSecurity": {
+        "schemaPoisoning": {
+          "risk": "MCP schema poisoning attacks via malicious tool definitions",
+          "vulnerability": "Clients may accept and execute tools with misleading schemas",
+          "mitigation": "Validate all schema fields, not just descriptions",
+          "implementation": "Comprehensive schema validation beyond basic field checking",
+          "impact": "Prevent malicious tools from masquerading as legitimate ones"
+        },
+        "parameterExtraction": {
+          "attack": "Parameter extraction attacks via unused or hidden parameters",
+          "vector": "Malicious parameters injected through unused schema fields",
+          "prevention": "Strict parameter validation and allowlisting",
+          "bestPractice": "Only accept explicitly defined and expected parameters",
+          "implementation": "Reject requests containing undocumented parameters"
+        },
+        "productionSecurity": {
+          "errorMasking": {
+            "setting": "Enable mask_error_details=True in production",
+            "purpose": "Prevent information leakage through error messages",
+            "benefit": "Avoid exposing internal system details to clients",
+            "implementation": "Configure FastMCP with error detail masking"
+          },
+          "schemaAllowlisting": {
+            "approach": "Implement allowlisting for vetted tool schemas",
+            "rationale": "Only permit execution of pre-approved and audited tools",
+            "implementation": "Maintain curated list of approved MCP tool schemas",
+            "maintenance": "Regular security review of approved schemas"
+          }
+        }
       }
     },
     "deployment": {
@@ -613,7 +791,26 @@
       "Implement connection pooling for aiohttp from start",
       "Set up proper asyncio task management",
       "Use streaming decompression for large rustdoc files",
+      "Prefer zstd decompression over gzip for docs.rs files for better performance",
       "Start with simple crate description parsing for MVP",
+      "Implement streaming JSON parser with zero-copy deserialization for large files",
+      "Use symbol interning for repeated string lookups in rustdoc JSON",
+      "Parse rustdoc JSON on-demand rather than loading entire AST",
+      "Always validate rustdoc format_version field before parsing",
+      "Use semantic chunking with 50-200 token chunks for optimal search granularity",
+      "Leverage sqlite-vec brute-force search for collections up to 1M vectors",
+      "Implement binary quantization to reduce storage by 8x with minimal accuracy loss",
+      "Utilize SIMD-accelerated distance calculations in sqlite-vec",
+      "Use FastEmbed with ONNX runtime for 3x speedup over PyTorch",
+      "Process embeddings in batches of 32 for optimal performance",
+      "Keep memory under 1GB for 10k embeddings",
+      "Stream large JSON files to avoid out-of-memory errors",
+      "Extract module hierarchy from rustdoc 'paths' section",
+      "Handle both workspace and single-crate scenarios in module extraction",
+      "Validate all MCP schema fields, not just descriptions, to prevent schema poisoning",
+      "Implement parameter allowlisting to prevent extraction attacks",
+      "Enable mask_error_details=True in production for security",
+      "Maintain allowlist of vetted tool schemas for production security",
       "Use ijson for memory-efficient parsing of large JSON files",
       "Implement per-crate locking to prevent duplicate ingestion",
       "Use tenacity for robust HTTP request retry mechanisms",
@@ -622,9 +819,21 @@
       "Pre-serialize vectors before batch insertion to reduce overhead",
       "Use SELECT last_insert_rowid() after aiosqlite.executemany() calls",
       "Respect SQLite's 999 parameter limit when designing batch operations",
-      "Rely on sqlite-vec automatic indexing - no manual vss_index! calls needed"
+      "Rely on sqlite-vec automatic indexing - no manual vss_index! calls needed",
+      "Use ijson 3.4.0 with yajl2 backend for 656x performance improvement in JSON parsing",
+      "Always validate rustdoc FORMAT_VERSION field before processing JSON files",
+      "Handle both string and object representations of rustdoc item types dynamically",
+      "Extract function and method signatures from inner.function.decl and inner.method.decl paths",
+      "Use paths section mapping for parent ID resolution in rustdoc hierarchies",
+      "Apply regex pattern r'```(?:rust)?\\s*\\n(.*?)```' for effective code example extraction",
+      "Use NULL defaults for new database columns to maintain backward compatibility"
     ],
     "performance": [
+      "Use semantic chunking with 50-200 tokens for optimal search granularity",
+      "Leverage sqlite-vec brute-force performance up to 1M vectors before considering ANN",
+      "Implement binary quantization for 8x storage reduction with minimal accuracy loss",
+      "Utilize SIMD-accelerated distance calculations built into sqlite-vec",
+      "Use FastEmbed with ONNX runtime for 3x performance improvement over PyTorch",
       "Batch embeddings in groups of 32",
       "Batch database inserts in groups of 1000",
       "Use uvloop for event loop optimization",
@@ -633,12 +842,21 @@
       "Monitor aiohttp memory usage closely due to version constraints",
       "Use sqlite-vec MATCH operator for optimal query performance",
       "Include k constraint in all KNN queries for sqlite-vec",
+      "Use streaming JSON parser with zero-copy deserialization for large rustdoc files",
+      "Implement symbol interning for repeated string lookups in rustdoc parsing",
+      "Parse rustdoc JSON on-demand rather than loading entire AST into memory",
+      "Prefer zstd over gzip decompression for better performance on docs.rs files",
       "Use streaming decompression to avoid memory spikes",
+      "Stream large JSON files during processing to avoid OOM conditions",
+      "Keep embedding memory usage under 1GB for 10k vectors",
       "Implement LRU eviction based on file modification time",
       "Monitor download and decompression size limits",
       "Use one transaction per batch of 1000 records to prevent memory accumulation",
       "Pre-serialize vectors to bytes before batch processing for significant overhead reduction",
-      "Leverage sqlite-vec v0.1.0 excellent performance for 384-dimensional vectors"
+      "Leverage sqlite-vec v0.1.0 excellent performance for 384-dimensional vectors",
+      "Use ijson 3.4.0 with yajl2 backend for 656x JSON parsing performance improvement over pure Python",
+      "Implement streaming rustdoc JSON parsing to handle large files without memory spikes",
+      "Optimize batch operations to respect SQLite's 999 parameter limit for maximum efficiency"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

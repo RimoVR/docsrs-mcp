@@ -63,7 +63,11 @@ async def init_database(db_path: Path) -> None:
                 item_path TEXT NOT NULL,
                 header TEXT NOT NULL,
                 content TEXT NOT NULL,
-                embedding BLOB NOT NULL
+                embedding BLOB NOT NULL,
+                item_type TEXT,
+                signature TEXT,
+                parent_id TEXT,
+                examples TEXT
             )
         """)
 
