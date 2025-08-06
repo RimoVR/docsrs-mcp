@@ -495,7 +495,7 @@ async def test_stdlib_version_resolution():
     mock_response = AsyncMock()
     mock_response.status = 200
     mock_response.text = AsyncMock(return_value="1.75.0 (2023-12-28)")
-    
+
     # Create a proper async context manager mock
     mock_ctx_mgr = AsyncMock()
     mock_ctx_mgr.__aenter__ = AsyncMock(return_value=mock_response)
@@ -570,6 +570,6 @@ async def test_fetch_current_stable_version():
     # Test fallback on error - simulate network error
     mock_session_error = MagicMock()
     mock_session_error.get.side_effect = Exception("Network error")
-    
+
     version = await fetch_current_stable_version(mock_session_error)
     assert version == "1.75.0"  # Should return fallback version

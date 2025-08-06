@@ -6,7 +6,7 @@ following the Model Context Protocol (MCP) specification. All models use
 strict validation with `extra="forbid"` to prevent injection attacks.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -154,6 +154,24 @@ class SearchItemsRequest(BaseModel):
         description="Filter results to specific crate",
         examples=["tokio", "serde"],
     )
+    has_examples: bool | None = Field(
+        None,
+        description="Filter to only items with code examples",
+    )
+    min_doc_length: int | None = Field(
+        None,
+        description="Minimum documentation length in characters",
+        ge=100,
+        le=10000,
+    )
+    visibility: Literal["public", "private", "crate"] | None = Field(
+        None,
+        description="Filter by item visibility",
+    )
+    deprecated: bool | None = Field(
+        None,
+        description="Filter by deprecation status (true=deprecated only, false=non-deprecated only)",
+    )
 
     @field_validator("k", mode="before")
     @classmethod
@@ -193,6 +211,31 @@ class SearchItemsRequest(BaseModel):
         if v is None or v == "":
             return None
         return str(v)
+
+    @field_validator("deprecated", "has_examples", mode="before")
+    @classmethod
+    def validate_boolean_filters(cls, v):
+        """Convert various inputs to boolean for MCP compatibility."""
+        if v is None or v == "":
+            return None
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower() in ["true", "1", "yes"]
+        return None
+
+    @field_validator("visibility", mode="before")
+    @classmethod
+    def validate_visibility(cls, v):
+        """Validate and normalize visibility filter."""
+        if v is None or v == "":
+            return None
+        normalized = str(v).lower()
+        if normalized not in ["public", "private", "crate"]:
+            raise ValueError(
+                f"visibility must be one of ['public', 'private', 'crate'], got '{normalized}'"
+            )
+        return normalized
 
     model_config = ConfigDict(extra="forbid")
 

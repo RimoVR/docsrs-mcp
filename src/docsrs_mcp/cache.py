@@ -29,6 +29,10 @@ class SearchCache:
         k: int,
         type_filter: str | None = None,
         crate_filter: str | None = None,
+        has_examples: bool | None = None,
+        min_doc_length: int | None = None,
+        visibility: str | None = None,
+        deprecated: bool | None = None,
     ) -> str:
         """Generate a cache key from search parameters."""
         # Use a subset of the embedding for efficiency
@@ -38,6 +42,10 @@ class SearchCache:
             str(k),
             str(type_filter) if type_filter else "none",
             str(crate_filter) if crate_filter else "none",
+            str(has_examples) if has_examples is not None else "none",
+            str(min_doc_length) if min_doc_length else "none",
+            str(visibility) if visibility else "none",
+            str(deprecated) if deprecated is not None else "none",
         ]
         key_str = "|".join(key_parts)
         return hashlib.md5(key_str.encode()).hexdigest()
@@ -48,6 +56,10 @@ class SearchCache:
         k: int,
         type_filter: str | None = None,
         crate_filter: str | None = None,
+        has_examples: bool | None = None,
+        min_doc_length: int | None = None,
+        visibility: str | None = None,
+        deprecated: bool | None = None,
     ) -> list[tuple[float, str, str, str]] | None:
         """
         Retrieve cached results if available and not expired.
@@ -55,7 +67,16 @@ class SearchCache:
         Returns:
             Cached results or None if not found or expired
         """
-        key = self._make_key(query_embedding, k, type_filter, crate_filter)
+        key = self._make_key(
+            query_embedding,
+            k,
+            type_filter,
+            crate_filter,
+            has_examples,
+            min_doc_length,
+            visibility,
+            deprecated,
+        )
 
         if key in self._cache:
             timestamp, results = self._cache[key]
@@ -84,6 +105,10 @@ class SearchCache:
         results: list[tuple[float, str, str, str]],
         type_filter: str | None = None,
         crate_filter: str | None = None,
+        has_examples: bool | None = None,
+        min_doc_length: int | None = None,
+        visibility: str | None = None,
+        deprecated: bool | None = None,
     ) -> None:
         """
         Store search results in cache.
@@ -94,8 +119,21 @@ class SearchCache:
             results: Search results to cache
             type_filter: Optional type filter
             crate_filter: Optional crate filter
+            has_examples: Optional examples filter
+            min_doc_length: Optional minimum doc length filter
+            visibility: Optional visibility filter
+            deprecated: Optional deprecated filter
         """
-        key = self._make_key(query_embedding, k, type_filter, crate_filter)
+        key = self._make_key(
+            query_embedding,
+            k,
+            type_filter,
+            crate_filter,
+            has_examples,
+            min_doc_length,
+            visibility,
+            deprecated,
+        )
 
         # Remove least recently used if at capacity
         if len(self._cache) >= self.max_size and key not in self._cache:

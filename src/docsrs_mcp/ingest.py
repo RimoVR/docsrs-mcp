@@ -514,6 +514,78 @@ def extract_code_examples(docstring: str) -> list[str]:
         return []
 
 
+def extract_visibility(item: dict) -> str:
+    """Extract visibility level from rustdoc item."""
+    try:
+        inner = item.get("inner", {})
+
+        # Check visibility field directly
+        visibility = item.get("visibility")
+        if visibility:
+            if visibility == "public":
+                return "public"
+            elif visibility == "crate":
+                return "crate"
+            elif visibility == "private" or visibility == "restricted":
+                return "private"
+
+        # Check inner visibility
+        if isinstance(inner, dict):
+            # Check for pub keyword in various inner types
+            for key in ["function", "struct", "trait", "enum", "mod", "module"]:
+                if key in inner:
+                    inner_item = inner[key]
+                    if isinstance(inner_item, dict):
+                        vis = inner_item.get("visibility")
+                        if vis == "public":
+                            return "public"
+                        elif vis == "crate":
+                            return "crate"
+                        elif vis in ["private", "restricted"]:
+                            return "private"
+
+        # Default to public if not specified (common for public API items)
+        return "public"
+    except Exception as e:
+        logger.warning(f"Error extracting visibility: {e}")
+        return "public"
+
+
+def extract_deprecated(item: dict) -> bool:
+    """Extract deprecated status from rustdoc item attributes."""
+    try:
+        # Check attrs field for deprecated attribute
+        attrs = item.get("attrs", [])
+        if isinstance(attrs, list):
+            for attr in attrs:
+                if isinstance(attr, str):
+                    if "deprecated" in attr.lower():
+                        return True
+                elif isinstance(attr, dict):
+                    # Handle structured attributes
+                    if attr.get("name") == "deprecated":
+                        return True
+                    # Check for deprecated in attribute content
+                    content = attr.get("content", "")
+                    if "deprecated" in str(content).lower():
+                        return True
+
+        # Check if item has deprecated field directly
+        if item.get("deprecated", False):
+            return True
+
+        # Check inner for deprecated status
+        inner = item.get("inner", {})
+        if isinstance(inner, dict):
+            if inner.get("deprecated", False):
+                return True
+
+        return False
+    except Exception as e:
+        logger.warning(f"Error extracting deprecated status: {e}")
+        return False
+
+
 async def parse_rustdoc_items_streaming(json_content: str):
     """Parse rustdoc JSON using ijson for memory-efficient streaming.
 
@@ -614,6 +686,8 @@ async def parse_rustdoc_items_streaming(json_content: str):
                     signature = extract_signature(item_info)
                     parent_id = resolve_parent_id(item_info, id_to_path)
                     examples = extract_code_examples(docs)
+                    visibility = extract_visibility(item_info)
+                    deprecated = extract_deprecated(item_info)
 
                     yield {
                         "item_id": item_id,
@@ -625,6 +699,8 @@ async def parse_rustdoc_items_streaming(json_content: str):
                         "signature": signature,
                         "parent_id": parent_id,
                         "examples": examples,
+                        "visibility": visibility,
+                        "deprecated": deprecated,
                     }
 
                     item_count += 1
@@ -847,7 +923,7 @@ async def store_embeddings(
 ) -> None:
     """Store chunks and their embeddings (backwards compatible)."""
     # Convert to streaming format
-    chunk_embedding_pairs = zip(chunks, embeddings)
+    chunk_embedding_pairs = zip(chunks, embeddings, strict=False)
     await store_embeddings_streaming(db_path, chunk_embedding_pairs)
 
 
@@ -876,6 +952,8 @@ async def _store_batch(
                 json.dumps(chunk.get("examples", []))
                 if chunk.get("examples")
                 else None,
+                chunk.get("visibility", "public"),
+                chunk.get("deprecated", False),
             )
             for chunk, embedding in zip(chunks, embeddings, strict=False)
         ]
@@ -883,8 +961,8 @@ async def _store_batch(
         # Batch insert into embeddings table
         await db.executemany(
             """
-            INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature, parent_id, examples)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature, parent_id, examples, visibility, deprecated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             embeddings_data,
         )
@@ -1029,13 +1107,13 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 items = []
                 async for item in parse_rustdoc_items_streaming(json_content):
                     items.append(item)
-                
+
                 if not items:
                     logger.warning("No items found in rustdoc JSON")
                     raise Exception("No items found in rustdoc JSON")
-                
+
                 logger.info(f"Collected {len(items)} rustdoc items")
-                
+
                 # Transform items to chunks
                 chunks = []
                 for item in items:
@@ -1054,11 +1132,15 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                         "signature": item.get("signature"),
                         "parent_id": item.get("parent_id"),
                         "examples": item.get("examples", []),
+                        "visibility": item.get("visibility", "public"),
+                        "deprecated": item.get("deprecated", False),
                     }
                     chunks.append(chunk)
 
                 # Generate embeddings and store in streaming fashion
-                logger.info(f"Generating embeddings for {len(chunks)} items in streaming mode")
+                logger.info(
+                    f"Generating embeddings for {len(chunks)} items in streaming mode"
+                )
                 chunk_embedding_pairs = generate_embeddings_streaming(chunks)
 
                 # Store embeddings in streaming fashion

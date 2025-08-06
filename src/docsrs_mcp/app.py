@@ -181,6 +181,25 @@ async def get_mcp_manifest():
                             "type": "string",
                             "description": "Filter results to specific crate",
                         },
+                        "has_examples": {
+                            "type": "boolean",
+                            "description": "Filter to only items with code examples",
+                        },
+                        "min_doc_length": {
+                            "type": "integer",
+                            "description": "Minimum documentation length in characters",
+                            "minimum": 100,
+                            "maximum": 10000,
+                        },
+                        "visibility": {
+                            "type": "string",
+                            "description": "Filter by item visibility",
+                            "enum": ["public", "private", "crate"],
+                        },
+                        "deprecated": {
+                            "type": "boolean",
+                            "description": "Filter by deprecation status (true=deprecated only, false=non-deprecated only)",
+                        },
                     },
                     "required": ["crate_name", "query"],
                 },
@@ -310,6 +329,10 @@ async def search_items(request: SearchItemsRequest):
             k=request.k or 5,
             type_filter=request.item_type,
             crate_filter=request.crate_filter,
+            has_examples=request.has_examples,
+            min_doc_length=request.min_doc_length,
+            visibility=request.visibility,
+            deprecated=request.deprecated,
         )
 
         # Convert to response format

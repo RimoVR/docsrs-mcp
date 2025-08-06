@@ -73,7 +73,9 @@ async def init_database(db_path: Path) -> None:
                 item_type TEXT,
                 signature TEXT,
                 parent_id TEXT,
-                examples TEXT
+                examples TEXT,
+                visibility TEXT DEFAULT 'public',
+                deprecated BOOLEAN DEFAULT 0
             )
         """)
 
@@ -89,6 +91,15 @@ async def init_database(db_path: Path) -> None:
             CREATE INDEX IF NOT EXISTS idx_filter_composite
             ON embeddings(item_type, item_path)
         """)
+
+        # Create compound index for common filter combinations
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_filter_combo
+            ON embeddings(item_type, visibility, deprecated)
+        """)
+
+        # Run ANALYZE to update query planner statistics
+        await db.execute("ANALYZE")
 
         await db.commit()
 
@@ -120,6 +131,10 @@ async def search_embeddings(
     k: int = 5,
     type_filter: str | None = None,
     crate_filter: str | None = None,
+    has_examples: bool | None = None,
+    min_doc_length: int | None = None,
+    visibility: str | None = None,
+    deprecated: bool | None = None,
 ) -> list[tuple[float, str, str, str]]:
     """Search for similar embeddings using k-NN with enhanced ranking and caching."""
     if not db_path.exists():
@@ -129,7 +144,16 @@ async def search_embeddings(
 
     # Check cache first
     cache = get_search_cache()
-    cached_results = cache.get(query_embedding, k, type_filter, crate_filter)
+    cached_results = cache.get(
+        query_embedding,
+        k,
+        type_filter,
+        crate_filter,
+        has_examples,
+        min_doc_length,
+        visibility,
+        deprecated,
+    )
     if cached_results is not None:
         logger.debug(
             f"Cache hit for search with k={k}, latency: {(time.time() - start_time) * 1000:.2f}ms"
@@ -158,12 +182,18 @@ async def search_embeddings(
                 e.content,
                 e.item_type,
                 LENGTH(e.content) as doc_length,
-                e.examples
+                e.examples,
+                e.visibility,
+                e.deprecated
             FROM vec_embeddings v
             JOIN embeddings e ON v.rowid = e.id
-            WHERE v.embedding MATCH ? AND k = ?
+            WHERE v.embedding MATCH :embedding AND k = :k
                 AND (:type_filter IS NULL OR e.item_type = :type_filter)
                 AND (:crate_pattern IS NULL OR e.item_path LIKE :crate_pattern)
+                AND (:visibility IS NULL OR e.visibility = :visibility)
+                AND (:deprecated IS NULL OR e.deprecated = :deprecated)
+                AND (:has_examples IS NULL OR (:has_examples = 0 OR e.examples IS NOT NULL))
+                AND (:min_doc_length IS NULL OR LENGTH(e.content) >= :min_doc_length)
             ORDER BY v.distance
             """,
             {
@@ -171,6 +201,10 @@ async def search_embeddings(
                 "k": fetch_k,
                 "type_filter": type_filter,
                 "crate_pattern": crate_pattern,
+                "visibility": visibility,
+                "deprecated": deprecated,
+                "has_examples": has_examples,
+                "min_doc_length": min_doc_length,
             },
         )
 
@@ -179,7 +213,17 @@ async def search_embeddings(
         # Apply enhanced ranking algorithm
         ranked_results = []
         for row in results:
-            distance, item_path, header, content, item_type, doc_length, examples = row
+            (
+                distance,
+                item_path,
+                header,
+                content,
+                item_type,
+                doc_length,
+                examples,
+                visibility,
+                deprecated,
+            ) = row
 
             # Base vector similarity score
             base_score = 1.0 - distance
@@ -234,6 +278,16 @@ async def search_embeddings(
             )
 
         # Store in cache before returning
-        cache.set(query_embedding, k, top_results, type_filter, crate_filter)
+        cache.set(
+            query_embedding,
+            k,
+            top_results,
+            type_filter,
+            crate_filter,
+            has_examples,
+            min_doc_length,
+            visibility,
+            deprecated,
+        )
 
         return top_results
