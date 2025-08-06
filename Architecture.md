@@ -73,8 +73,9 @@ graph LR
         
         subgraph "Storage Layer"
             DB[database.py<br/>SQLite operations]
-            VSS[vector_search.py<br/>k-NN queries]
-            CACHE[cache_manager.py<br/>LRU eviction]
+            VSS[vector_search.py<br/>k-NN queries with ranking]
+            RANK[ranking.py<br/>Multi-factor scoring<br/>Type-aware weights]
+            CACHE[cache_manager.py<br/>LRU eviction with TTL]
         end
         
         subgraph "Server Layer"
@@ -98,6 +99,7 @@ graph LR
     EXTRACT --> EMBED
     EMBED --> DB
     DB --> VSS
+    VSS --> RANK
     DB --> CACHE
     CLI --> APP
     CLI --> MCP_SERVER
@@ -143,9 +145,13 @@ sequenceDiagram
         end
     end
     
-    API->>DB: Vector search query
-    DB-->>API: Top-k results
-    API-->>Client: JSON response
+    API->>DB: Vector search query with ranking
+    DB->>DB: sqlite-vec MATCH similarity
+    DB->>DB: Multi-factor scoring (vector 70% + type 15% + quality 10% + examples 5%)
+    DB->>DB: Type-aware boost (functions 1.2x, traits 1.15x, structs 1.1x)
+    DB->>DB: Score normalization to [0, 1] range
+    DB-->>API: Ranked top-k results with scores
+    API-->>Client: JSON response with ranking scores
 ```
 
 ## Database Schema
@@ -606,20 +612,114 @@ graph TB
 - **Error Handling**: Graceful degradation when standard library documentation cannot be retrieved
 - **Cache Resilience**: Maintains cached standard library docs even when upstream docs.rs is unavailable
 
+## Search Ranking Architecture
+
+### Multi-Factor Scoring Algorithm
+
+The search ranking system implements a sophisticated multi-factor scoring algorithm that combines multiple relevance signals to deliver highly relevant results:
+
+```mermaid
+graph TB
+    subgraph "Scoring Components"
+        VECTOR[Vector Similarity<br/>70% weight<br/>BAAI/bge-small-en-v1.5]
+        TYPE[Type-Aware Boost<br/>15% weight<br/>Functions 1.2x, Traits 1.15x]
+        QUALITY[Documentation Quality<br/>10% weight<br/>Length + examples heuristics]
+        EXAMPLES[Example Presence<br/>5% weight<br/>Code example availability]
+    end
+    
+    subgraph "Type Weights"
+        FUNC[Functions: 1.2x]
+        TRAIT[Traits: 1.15x]
+        STRUCT[Structs: 1.1x]
+        MODULE[Modules: 0.9x]
+    end
+    
+    subgraph "Score Processing"
+        COMBINE[Weighted Combination<br/>Score = (V×0.7) + (T×0.15) + (Q×0.1) + (E×0.05)]
+        NORMALIZE[Score Normalization<br/>Min-Max to [0, 1] range]
+        RANK[Final Ranking<br/>Sorted by normalized score]
+    end
+    
+    VECTOR --> COMBINE
+    TYPE --> COMBINE
+    QUALITY --> COMBINE
+    EXAMPLES --> COMBINE
+    
+    FUNC --> TYPE
+    TRAIT --> TYPE
+    STRUCT --> TYPE
+    MODULE --> TYPE
+    
+    COMBINE --> NORMALIZE
+    NORMALIZE --> RANK
+```
+
+### Caching Layer with TTL Support
+
+The enhanced caching system provides intelligent result caching with time-to-live (TTL) support:
+
+```mermaid
+graph LR
+    subgraph "Cache Architecture"
+        LRU[LRU Cache<br/>1000 entry capacity]
+        TTL[TTL Support<br/>15-minute default]
+        KEY_GEN[Cache Key Generation<br/>Query embedding + parameters]
+    end
+    
+    subgraph "Cache Operations"
+        LOOKUP[Cache Lookup<br/>O(1) hash lookup]
+        STORE[Cache Store<br/>Evict oldest if full]
+        EXPIRE[TTL Expiration<br/>Background cleanup]
+    end
+    
+    subgraph "Performance Monitoring"
+        LATENCY[Latency Tracking<br/>Cache hit/miss timing]
+        STATS[Hit Rate Statistics<br/>Cache effectiveness metrics]
+        LOG[Score Distribution<br/>Ranking validation]
+    end
+    
+    KEY_GEN --> LOOKUP
+    LOOKUP --> LRU
+    LOOKUP --> TTL
+    STORE --> LRU
+    EXPIRE --> TTL
+    
+    LOOKUP --> LATENCY
+    LATENCY --> STATS
+    STATS --> LOG
+```
+
+### Performance Optimizations
+
+**K+10 Over-fetching Strategy**
+- Fetches k+10 results from vector search to ensure sufficient candidates for re-ranking
+- Prevents constraining initial retrieval while allowing sophisticated ranking
+- Balances retrieval recall with ranking precision
+
+**Score Validation and Monitoring**
+- Validates score distributions to detect ranking anomalies
+- Logs performance metrics for continuous optimization
+- Tracks latency across cache hits, misses, and ranking operations
+
 ## Performance Characteristics
 
 | Component | Target | Notes |
 |-----------|--------|-------|
-| Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH |
+| Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH + multi-factor ranking |
+| Ranking overhead | < 20ms P95 | Multi-factor scoring with type weights and normalization |
+| Cache hit latency | < 5ms P95 | LRU cache with TTL support |
+| Cache miss latency | < 100ms P95 | Full search + ranking + cache store |
 | Ingest latency | < 30s | Full rustdoc processing with streaming |
 | Memory usage | < 512 MiB RSS | Streaming architecture with memory monitoring |
 | Memory monitoring | psutil-based | 80%/90% thresholds with adaptive processing |
-| Cache storage | ./cache directory | File-based, LRU eviction |
+| Cache storage | ./cache directory | File-based, LRU eviction with TTL |
+| Cache capacity | 1000 entries | TTL-based expiration, 15-minute default |
 | Embedding model | BAAI/bge-small-en-v1.5 | 384 dimensions, adaptive batch processing |
 | Async architecture | aiosqlite + asyncio | Non-blocking I/O with per-crate locks |
 | Compression ratio | ~10:1 typical | .zst format for bandwidth efficiency |
 | Batch sizes | 16-512 adaptive, 999 DB | Memory-aware adaptive sizing |
 | Streaming memory | O(1) for large files | Generator-based progressive processing |
+| Over-fetching ratio | k+10 results | Ensures sufficient candidates for re-ranking |
 
 ## Parameter Validation Architecture
 
@@ -1063,9 +1163,12 @@ sequenceDiagram
         end
     end
     
-    API->>DB: Enhanced vector search with type filtering
-    DB-->>API: Typed results with signatures and examples
-    API-->>Client: Enhanced JSON response with item metadata
+    API->>DB: Enhanced vector search with ranking
+    DB->>DB: sqlite-vec MATCH (k+10 over-fetch)
+    DB->>DB: Multi-factor scoring (vector + type + quality + examples)
+    DB->>DB: Score normalization and ranking
+    DB-->>API: Top-k ranked results with scores
+    API-->>Client: Enhanced JSON response with ranking scores and metadata
 ```
 
 ## Enhanced MCP Tool Architecture
@@ -1169,6 +1272,12 @@ classDiagram
 ```
 
 ### Enhanced Search Capabilities
+- **Multi-factor Ranking**: Combines vector similarity (70%), type-aware boost (15%), documentation quality (10%), and example presence (5%)
+- **Type-aware Scoring**: Functions receive 1.2x boost, traits 1.15x, structs 1.1x, modules 0.9x for relevance optimization
+- **Score Normalization**: Min-max normalization to [0, 1] range for consistent ranking across different query types
+- **Intelligent Caching**: LRU cache with 15-minute TTL, 1000 entry capacity, and cache key generation from query embeddings
+- **Performance Monitoring**: Latency tracking, hit rate statistics, and score distribution validation
+- **Over-fetching Optimization**: K+10 strategy ensures sufficient candidates for re-ranking without constraining initial retrieval
 - **Type-filtered Search**: Filter results by item type (functions only, traits only, etc.)
 - **Signature-based Matching**: Search by function signatures, trait bounds, or type parameters
 - **Module-scoped Search**: Limit search results to specific modules or crates
@@ -1192,7 +1301,10 @@ classDiagram
 - **Composite Indexes**: (crate, version, item_type) for efficient type filtering
 - **Hierarchy Indexes**: (parent_id, item_path) for fast tree traversal
 - **Example Indexes**: (passage_id, language) for quick example retrieval
-- **Vector Search**: Unchanged performance for similarity queries
+- **Vector Search with Ranking**: sqlite-vec MATCH with multi-factor scoring overlay
+- **Cache Optimization**: LRU cache with TTL reduces repeated ranking computations
+- **Over-fetching Strategy**: K+10 retrieval ensures ranking quality without multiple database queries
+- **Score Indexing**: Pre-computed quality and type scores for faster ranking operations
 
 ### Memory Usage Considerations
 - **Streaming Memory**: O(1) memory usage for large files through progressive processing

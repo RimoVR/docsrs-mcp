@@ -239,6 +239,49 @@ class GetCrateSummaryResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RankingConfig(BaseModel):
+    """
+    Configuration for search result ranking algorithm.
+
+    Defines weights for combining multiple scoring factors to produce
+    a final relevance score for search results.
+    """
+
+    vector_weight: float = Field(
+        0.7, ge=0.0, le=1.0, description="Weight for vector similarity score"
+    )
+    type_weight: float = Field(
+        0.15, ge=0.0, le=1.0, description="Weight for item type boost"
+    )
+    quality_weight: float = Field(
+        0.1, ge=0.0, le=1.0, description="Weight for documentation quality"
+    )
+    examples_weight: float = Field(
+        0.05, ge=0.0, le=1.0, description="Weight for example presence"
+    )
+
+    @field_validator(
+        "vector_weight", "type_weight", "quality_weight", "examples_weight"
+    )
+    @classmethod
+    def validate_weights_sum(cls, v, info):
+        """Ensure all weights sum to 1.0 for normalized scoring."""
+        if info.field_name == "examples_weight":
+            # Check sum when all fields are set
+            values = info.data
+            total = (
+                values.get("vector_weight", 0.7)
+                + values.get("type_weight", 0.15)
+                + values.get("quality_weight", 0.1)
+                + v
+            )
+            if abs(total - 1.0) > 0.001:  # Allow small floating point errors
+                raise ValueError(f"Weights must sum to 1.0, got {total}")
+        return v
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SearchResult(BaseModel):
     """
     Individual search result from vector similarity search.

@@ -26,6 +26,26 @@ MAX_DECOMPRESSED_SIZE = int(
 # Search configuration
 DEFAULT_K = int(os.getenv("DOCSRS_DEFAULT_K", "5"))
 
+# Ranking configuration
+RANKING_VECTOR_WEIGHT = float(os.getenv("DOCSRS_RANKING_VECTOR_WEIGHT", "0.7"))
+RANKING_TYPE_WEIGHT = float(os.getenv("DOCSRS_RANKING_TYPE_WEIGHT", "0.15"))
+RANKING_QUALITY_WEIGHT = float(os.getenv("DOCSRS_RANKING_QUALITY_WEIGHT", "0.1"))
+RANKING_EXAMPLES_WEIGHT = float(os.getenv("DOCSRS_RANKING_EXAMPLES_WEIGHT", "0.05"))
+
+# Type-specific weights for ranking
+TYPE_WEIGHTS = {
+    "function": float(os.getenv("DOCSRS_TYPE_WEIGHT_FUNCTION", "1.2")),
+    "trait": float(os.getenv("DOCSRS_TYPE_WEIGHT_TRAIT", "1.15")),
+    "struct": float(os.getenv("DOCSRS_TYPE_WEIGHT_STRUCT", "1.1")),
+    "module": float(os.getenv("DOCSRS_TYPE_WEIGHT_MODULE", "0.9")),
+    "enum": float(os.getenv("DOCSRS_TYPE_WEIGHT_ENUM", "1.0")),
+    "type": float(os.getenv("DOCSRS_TYPE_WEIGHT_TYPE", "1.0")),
+}
+
+# Caching configuration
+CACHE_SIZE = int(os.getenv("DOCSRS_CACHE_SIZE", "1000"))
+CACHE_TTL = int(os.getenv("DOCSRS_CACHE_TTL", "900"))  # 15 minutes in seconds
+
 # Batch processing
 EMBEDDING_BATCH_SIZE = int(os.getenv("DOCSRS_EMBEDDING_BATCH_SIZE", "32"))
 DB_BATCH_SIZE = int(os.getenv("DOCSRS_DB_BATCH_SIZE", "999"))  # SQLite parameter limit

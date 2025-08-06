@@ -415,6 +415,46 @@
           "impact": "Improves system resilience by enabling partial recovery from processing errors without losing all work",
           "dateLearned": "2025-08-06",
           "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/database.py"]
+        },
+        {
+          "lesson": "Score normalization for ranking consistency",
+          "context": "Implementing scoring algorithms for search ranking",
+          "details": "Always normalize scores to [0, 1] range for consistency. Use max(0.0, min(1.0, score)) clamping to ensure valid score ranges across different ranking factors",
+          "impact": "Prevents ranking inconsistencies and enables reliable score aggregation across multiple ranking factors",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Lazy imports for circular dependency resolution",
+          "context": "Avoiding circular dependency issues in module imports",
+          "details": "Lazy imports can resolve circular dependencies but may trigger linting warnings. Move imports to module level and use aliases (e.g., app_config) to avoid conflicts while maintaining clean code",
+          "impact": "Resolves circular dependency issues while maintaining code quality and IDE support",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "SQLite connection pooling alternatives",
+          "context": "Database performance optimization strategies",
+          "details": "SQLite connections are lightweight; traditional connection pooling provides less benefit than query optimization. Focus on prepared statement caching and query optimization instead of connection pooling",
+          "impact": "Optimizes development effort toward more impactful performance improvements for SQLite-based systems",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Over-fetching for re-ranking flexibility",
+          "context": "Search result ranking and retrieval optimization",
+          "details": "Over-fetch results (k+10) to allow for re-ranking without constraining initial retrieval. Fetch more results than needed, apply ranking algorithms, then return top k to user",
+          "impact": "Enables sophisticated ranking algorithms without being constrained by initial retrieval limitations",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "LRU cache with TTL for search performance",
+          "context": "Search result caching strategy for frequent queries",
+          "details": "Cache search results with LRU eviction and TTL to improve response times for frequent queries. Balances memory usage with performance gains for repeated searches",
+          "impact": "Significantly improves response times for repeated queries while managing memory usage effectively",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
         }
       ]
     }

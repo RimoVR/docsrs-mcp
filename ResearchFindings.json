@@ -166,29 +166,46 @@
           "MATCH operator for vector queries",
           "KNN search with k constraint",
           "Better performance than sqlite-vss",
-          "Active maintenance and development"
+          "Active maintenance and development",
+          "Binary quantization support (32x memory reduction)",
+          "Metadata filtering capabilities",
+          "SIMD acceleration for distance calculations"
         ],
         "syntax": {
           "searchOperator": "MATCH (not vec_distance)",
           "knnConstraint": "Requires 'k = ?' parameter for KNN queries",
           "example": "SELECT * FROM embeddings WHERE vec MATCH ? AND k = 10"
         },
-        "installation": "pip install sqlite-vec"
+        "installation": "pip install sqlite-vec",
+        "performance": {
+          "optimalScale": "Optimal for collections under 100k vectors",
+          "quantization": {
+            "memoryReduction": "32x reduction with binary quantization",
+            "accuracyLoss": "Minimal accuracy loss with binary quantization"
+          },
+          "acceleration": "SIMD-accelerated distance calculations for hardware optimization"
+        }
       },
       "embedding": {
         "library": "FastEmbed",
-        "version": "<0.7.0",
-        "versionConstraint": "Required for onnxruntime compatibility",
+        "version": "0.7.1",
+        "versionConstraint": "Version 0.7.1 provides significant performance improvements",
         "model": "BAAI/bge-small-en-v1.5",
         "dimensions": 384,
         "optimization": "ONNX for CPU inference",
-        "performance": "2-4x faster than PyTorch",
+        "performance": "3-4x faster than PyTorch",
+        "modelCharacteristics": {
+          "mtebScore": "62.17 MTEB score for retrieval quality",
+          "queryInstructions": "Works optimally without query instructions",
+          "embeddingSize": "384 dimensions for efficient storage and computation"
+        },
         "fastEmbedOptimization": {
-          "runtime": "FastEmbed with ONNX runtime provides 3x speedup over PyTorch",
+          "runtime": "FastEmbed 0.7.1 with ONNX runtime provides 3-4x speedup over PyTorch",
           "backend": "ONNX runtime optimized for CPU inference",
+          "quantization": "ONNX quantization for improved inference speed",
           "batchProcessing": "Optimal batch size of 32 for embedding generation",
           "memoryEfficiency": "Keep memory under 1GB for 10k embeddings",
-          "implementation": "Use FastEmbed with ONNX backend for production workloads"
+          "implementation": "Use FastEmbed 0.7.1 with ONNX backend for production workloads"
         },
         "streamProcessing": {
           "technique": "Stream large JSON files to avoid OOM",
@@ -309,6 +326,36 @@
               "platform": "Automatic detection and utilization of SIMD instructions"
             }
           }
+        }
+      },
+      "searchRankingOptimization": {
+        "hybridSearchApproach": {
+          "technique": "Reciprocal Rank Fusion (RRF)",
+          "description": "Industry standard for combining multiple search signals",
+          "implementation": "Multi-factor scoring combining vector similarity with metadata signals",
+          "benefit": "Effective ranking while maintaining implementation simplicity"
+        },
+        "similarityNormalization": {
+          "method": "Cosine similarity normalization using (1 + cosine_similarity) / 2",
+          "purpose": "Convert cosine similarity from [-1, 1] to [0, 1] range",
+          "rationale": "Enables consistent scoring across different similarity metrics",
+          "implementation": "Standard approach for normalizing similarity scores"
+        },
+        "performanceTargets": {
+          "latency": "Sub-500ms latency targets for search responses",
+          "description": "Industry standard for acceptable search response times",
+          "optimization": "Balance between result quality and response speed",
+          "monitoring": "Track search latency to ensure user experience goals"
+        },
+        "scoringStrategy": {
+          "approach": "Multi-factor scoring with weighted components",
+          "components": [
+            "Vector similarity (primary signal)",
+            "Metadata relevance (secondary signal)",
+            "Popularity/usage metrics (tertiary signal)"
+          ],
+          "balancing": "Weighted combination allows tuning for specific use cases",
+          "simplicity": "Keep scoring logic simple to maintain and debug"
         }
       }
     },
@@ -922,7 +969,10 @@
       "Leverage sqlite-vec brute-force search for collections up to 1M vectors",
       "Implement binary quantization to reduce storage by 8x with minimal accuracy loss",
       "Utilize SIMD-accelerated distance calculations in sqlite-vec",
-      "Use FastEmbed with ONNX runtime for 3x speedup over PyTorch",
+      "Use FastEmbed 0.7.1 with ONNX runtime for 3-4x speedup over PyTorch",
+      "Leverage ONNX quantization for improved inference speed in FastEmbed 0.7.1",
+      "Use BAAI/bge-small-en-v1.5 model with 62.17 MTEB score for optimal retrieval quality",
+      "Skip query instructions with BAAI/bge-small-en-v1.5 for optimal performance",
       "Process embeddings in batches of 32 for optimal performance",
       "Keep memory under 1GB for 10k embeddings",
       "Stream large JSON files to avoid out-of-memory errors",
@@ -974,6 +1024,12 @@
       "Monitor aiohttp memory usage closely due to version constraints",
       "Use sqlite-vec MATCH operator for optimal query performance",
       "Include k constraint in all KNN queries for sqlite-vec",
+      "Implement Reciprocal Rank Fusion (RRF) for hybrid search ranking",
+      "Normalize cosine similarity using (1 + cosine_similarity) / 2 formula",
+      "Target sub-500ms latency for search responses to meet industry standards",
+      "Use multi-factor scoring combining vector similarity with metadata signals",
+      "Leverage sqlite-vec binary quantization for 32x memory reduction with minimal accuracy loss",
+      "Utilize sqlite-vec metadata filtering capabilities for refined search results",
       "Use streaming JSON parser with zero-copy deserialization for large rustdoc files",
       "Implement symbol interning for repeated string lookups in rustdoc parsing",
       "Parse rustdoc JSON on-demand rather than loading entire AST into memory",

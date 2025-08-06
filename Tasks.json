@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-06T12:00:00Z",
+    "lastUpdated": "2025-08-06T20:30:00Z",
     "priorities": ["high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked"]
   },
@@ -436,25 +436,40 @@
         "id": "search-1",
         "title": "Improve search result ranking",
         "description": "Enhance vector similarity scoring to provide more relevant and accurate search results",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": ["idx-1"],
         "relatedTasks": ["search-2"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-06T20:30:00Z",
+          "implementation": "Multi-factor scoring algorithm with LRU caching and query optimization",
+          "notes": "Successfully implemented multi-factor scoring combining vector similarity with metadata signals (item type, signature complexity, documentation quality). Added LRU caching for search results with TTL support for improved performance. Implemented query optimization with k+10 over-fetching for re-ranking. Added comprehensive performance monitoring and score validation. Created full unit test coverage for ranking functionality. All tests pass and code meets quality standards."
+        },
         "subtasks": [
           {
             "id": "search-1.1",
             "title": "Implement weighted scoring",
             "description": "Add weights based on item type, popularity, and relevance",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-06T20:30:00Z",
+              "implementation": "Multi-factor scoring with configurable weights for item type, signature complexity, and documentation quality",
+              "notes": "Added weighted scoring system that combines vector similarity with metadata signals. Item types have different base weights (functions: 1.0, structs/enums: 0.9, traits: 0.8, modules: 0.7). Signature complexity and documentation quality provide additional scoring factors."
+            }
           },
           {
             "id": "search-1.2",
             "title": "Add semantic similarity improvements",
             "description": "Enhance vector similarity calculations for better matches",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-06T20:30:00Z",
+              "implementation": "Enhanced similarity calculations with over-fetching and re-ranking strategy",
+              "notes": "Implemented k+10 over-fetching strategy to get more candidates for re-ranking. Added comprehensive score validation and normalization. Created performance monitoring for tracking ranking effectiveness and query optimization impact."
+            }
           }
         ]
       },

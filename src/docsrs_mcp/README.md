@@ -6,6 +6,25 @@ A high-performance MCP server for querying Rust crate documentation with memory-
 
 This module provides a Model Context Protocol (MCP) server that enables efficient ingestion and querying of Rust crate documentation. The server features memory-optimized streaming processing, adaptive batch sizing, and comprehensive memory monitoring to handle large-scale documentation processing.
 
+## Search Ranking System
+
+The docsrs-mcp server now includes an enhanced search ranking system that improves result relevance through multi-factor scoring:
+
+### Features
+- **Multi-factor scoring**: Combines vector similarity (70%) with type-aware boosting (15%), documentation quality (10%), and example presence (5%)
+- **Type-specific weights**: Functions get 1.2x boost, traits 1.15x, structs 1.1x, modules 0.9x
+- **Result caching**: LRU cache with 15-minute TTL for improved performance
+- **Performance monitoring**: Tracks query latency and logs slow queries (>100ms)
+
+### Configuration
+Ranking weights can be customized via environment variables:
+- `DOCSRS_RANKING_VECTOR_WEIGHT`: Weight for vector similarity (default: 0.7)
+- `DOCSRS_RANKING_TYPE_WEIGHT`: Weight for type boost (default: 0.15)
+- `DOCSRS_RANKING_QUALITY_WEIGHT`: Weight for doc quality (default: 0.1)
+- `DOCSRS_RANKING_EXAMPLES_WEIGHT`: Weight for examples (default: 0.05)
+- `DOCSRS_CACHE_SIZE`: Max cache entries (default: 1000)
+- `DOCSRS_CACHE_TTL`: Cache TTL in seconds (default: 900)
+
 ## Streaming Architecture
 
 ### Memory-Efficient Processing Pipeline
