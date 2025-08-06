@@ -121,7 +121,9 @@ class SearchItemsRequest(BaseModel):
         {
             "crate_name": "tokio",
             "query": "spawn async tasks",
-            "k": 5
+            "k": 5,
+            "item_type": "function",
+            "crate_filter": "tokio"
         }
         ```
     """
@@ -142,6 +144,16 @@ class SearchItemsRequest(BaseModel):
     k: int | None = Field(
         5, description="Number of results to return (1-20)", ge=1, le=20
     )
+    item_type: str | None = Field(
+        None,
+        description="Filter by item type (function, struct, trait, enum, module)",
+        examples=["function", "struct", "trait"],
+    )
+    crate_filter: str | None = Field(
+        None,
+        description="Filter results to specific crate",
+        examples=["tokio", "serde"],
+    )
 
     @field_validator("k", mode="before")
     @classmethod
@@ -157,6 +169,30 @@ class SearchItemsRequest(BaseModel):
                     f"k parameter must be a valid integer, got '{v}'"
                 ) from err
         return v
+
+    @field_validator("item_type", mode="before")
+    @classmethod
+    def coerce_item_type(cls, v):
+        """Handle MCP string conversion and normalize item type."""
+        if v is None or v == "":
+            return None
+        # Normalize to lowercase for consistency
+        normalized = str(v).lower()
+        # Validate against allowed types
+        allowed_types = {"function", "struct", "trait", "enum", "module"}
+        if normalized not in allowed_types:
+            raise ValueError(
+                f"item_type must be one of {allowed_types}, got '{normalized}'"
+            )
+        return normalized
+
+    @field_validator("crate_filter", mode="before")
+    @classmethod
+    def coerce_crate_filter(cls, v):
+        """Handle MCP string conversion for crate filter."""
+        if v is None or v == "":
+            return None
+        return str(v)
 
     model_config = ConfigDict(extra="forbid")
 

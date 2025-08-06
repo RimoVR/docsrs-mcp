@@ -24,20 +24,30 @@ class SearchCache:
         self._access_order: list[str] = []
 
     def _make_key(
-        self, query_embedding: list[float], k: int, type_filter: str | None = None
+        self,
+        query_embedding: list[float],
+        k: int,
+        type_filter: str | None = None,
+        crate_filter: str | None = None,
     ) -> str:
         """Generate a cache key from search parameters."""
-        # Create a hash of the embedding + parameters
+        # Use a subset of the embedding for efficiency
+        # Full embedding would be too large for a key
         key_parts = [
             str(query_embedding[:10]),  # Use first 10 dimensions for efficiency
             str(k),
             str(type_filter) if type_filter else "none",
+            str(crate_filter) if crate_filter else "none",
         ]
         key_str = "|".join(key_parts)
         return hashlib.md5(key_str.encode()).hexdigest()
 
     def get(
-        self, query_embedding: list[float], k: int, type_filter: str | None = None
+        self,
+        query_embedding: list[float],
+        k: int,
+        type_filter: str | None = None,
+        crate_filter: str | None = None,
     ) -> list[tuple[float, str, str, str]] | None:
         """
         Retrieve cached results if available and not expired.
@@ -45,7 +55,7 @@ class SearchCache:
         Returns:
             Cached results or None if not found or expired
         """
-        key = self._make_key(query_embedding, k, type_filter)
+        key = self._make_key(query_embedding, k, type_filter, crate_filter)
 
         if key in self._cache:
             timestamp, results = self._cache[key]
@@ -73,6 +83,7 @@ class SearchCache:
         k: int,
         results: list[tuple[float, str, str, str]],
         type_filter: str | None = None,
+        crate_filter: str | None = None,
     ) -> None:
         """
         Store search results in cache.
@@ -82,8 +93,9 @@ class SearchCache:
             k: Number of results
             results: Search results to cache
             type_filter: Optional type filter
+            crate_filter: Optional crate filter
         """
-        key = self._make_key(query_embedding, k, type_filter)
+        key = self._make_key(query_embedding, k, type_filter, crate_filter)
 
         # Remove least recently used if at capacity
         if len(self._cache) >= self.max_size and key not in self._cache:

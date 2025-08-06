@@ -84,6 +84,12 @@ async def init_database(db_path: Path) -> None:
             )
         """)
 
+        # Create composite index for filtering performance
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_filter_composite
+            ON embeddings(item_type, item_path)
+        """)
+
         await db.commit()
 
 
@@ -113,6 +119,7 @@ async def search_embeddings(
     query_embedding: list[float],
     k: int = 5,
     type_filter: str | None = None,
+    crate_filter: str | None = None,
 ) -> list[tuple[float, str, str, str]]:
     """Search for similar embeddings using k-NN with enhanced ranking and caching."""
     if not db_path.exists():
@@ -122,7 +129,7 @@ async def search_embeddings(
 
     # Check cache first
     cache = get_search_cache()
-    cached_results = cache.get(query_embedding, k, type_filter)
+    cached_results = cache.get(query_embedding, k, type_filter, crate_filter)
     if cached_results is not None:
         logger.debug(
             f"Cache hit for search with k={k}, latency: {(time.time() - start_time) * 1000:.2f}ms"
@@ -138,7 +145,10 @@ async def search_embeddings(
         # Fetch k+10 results to allow for re-ranking
         fetch_k = min(k + 10, 50)  # Cap at 50 for performance
 
-        # Perform vector search with additional metadata for ranking
+        # Prepare crate pattern for LIKE query
+        crate_pattern = f"{crate_filter}::%%" if crate_filter else None
+
+        # Perform vector search with additional metadata for ranking and filtering
         cursor = await db.execute(
             """
             SELECT
@@ -152,9 +162,16 @@ async def search_embeddings(
             FROM vec_embeddings v
             JOIN embeddings e ON v.rowid = e.id
             WHERE v.embedding MATCH ? AND k = ?
+                AND (:type_filter IS NULL OR e.item_type = :type_filter)
+                AND (:crate_pattern IS NULL OR e.item_path LIKE :crate_pattern)
             ORDER BY v.distance
             """,
-            (bytes(sqlite_vec.serialize_float32(query_embedding)), fetch_k),
+            {
+                "embedding": bytes(sqlite_vec.serialize_float32(query_embedding)),
+                "k": fetch_k,
+                "type_filter": type_filter,
+                "crate_pattern": crate_pattern,
+            },
         )
 
         results = await cursor.fetchall()
@@ -168,7 +185,9 @@ async def search_embeddings(
             base_score = 1.0 - distance
 
             # Type-specific weight
-            type_weight = app_config.TYPE_WEIGHTS.get(item_type, 1.0) if item_type else 1.0
+            type_weight = (
+                app_config.TYPE_WEIGHTS.get(item_type, 1.0) if item_type else 1.0
+            )
 
             # Documentation quality score (normalize to 0-1)
             doc_quality = min(1.0, (doc_length or 0) / 1000)
@@ -215,6 +234,6 @@ async def search_embeddings(
             )
 
         # Store in cache before returning
-        cache.set(query_embedding, k, top_results, type_filter)
+        cache.set(query_embedding, k, top_results, type_filter, crate_filter)
 
         return top_results

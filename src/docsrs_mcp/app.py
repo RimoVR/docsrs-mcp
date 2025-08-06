@@ -172,6 +172,15 @@ async def get_mcp_manifest():
                             "description": "Number of results to return",
                             "default": 5,
                         },
+                        "item_type": {
+                            "type": "string",
+                            "description": "Filter by item type (function, struct, trait, enum, module)",
+                            "enum": ["function", "struct", "trait", "enum", "module"],
+                        },
+                        "crate_filter": {
+                            "type": "string",
+                            "description": "Filter results to specific crate",
+                        },
                     },
                     "required": ["crate_name", "query"],
                 },
@@ -294,8 +303,14 @@ async def search_items(request: SearchItemsRequest):
         model = get_embedding_model()
         query_embedding = list(model.embed([request.query]))[0]
 
-        # Search embeddings
-        results = await search_embeddings(db_path, query_embedding, k=request.k or 5)
+        # Search embeddings with filters
+        results = await search_embeddings(
+            db_path,
+            query_embedding,
+            k=request.k or 5,
+            type_filter=request.item_type,
+            crate_filter=request.crate_filter,
+        )
 
         # Convert to response format
         search_results = [
