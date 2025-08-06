@@ -136,13 +136,13 @@ async def get_mcp_manifest():
         tools=[
             MCPTool(
                 name="get_crate_summary",
-                description="Get summary information about a Rust crate including modules and description",
+                description="Get summary information about a Rust crate (including stdlib crates like std, core, alloc) with modules and description",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "crate_name": {
                             "type": "string",
-                            "description": "Name of the crate to query",
+                            "description": "Name of the crate to query (supports stdlib: std, core, alloc)",
                         },
                         "version": {
                             "type": "string",
@@ -154,13 +154,13 @@ async def get_mcp_manifest():
             ),
             MCPTool(
                 name="search_items",
-                description="Search for items in a crate's documentation using vector similarity",
+                description="Search for items in a crate's documentation (including stdlib) using vector similarity",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "crate_name": {
                             "type": "string",
-                            "description": "Name of the crate to search in",
+                            "description": "Name of the crate to search in (supports stdlib: std, core, alloc)",
                         },
                         "query": {"type": "string", "description": "Search query text"},
                         "version": {
@@ -178,13 +178,13 @@ async def get_mcp_manifest():
             ),
             MCPTool(
                 name="get_item_doc",
-                description="Get complete documentation for a specific item in a crate",
+                description="Get complete documentation for a specific item in a crate (including stdlib)",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "crate_name": {
                             "type": "string",
-                            "description": "Name of the crate",
+                            "description": "Name of the crate (supports stdlib: std, core, alloc)",
                         },
                         "item_path": {
                             "type": "string",

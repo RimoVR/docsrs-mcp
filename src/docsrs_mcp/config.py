@@ -43,3 +43,8 @@ RUSTDOC_CHUNK_MAX_SIZE = int(os.getenv("DOCSRS_RUSTDOC_CHUNK_MAX_SIZE", "4096"))
 
 # Download configuration
 DOWNLOAD_CHUNK_SIZE = int(os.getenv("DOCSRS_DOWNLOAD_CHUNK_SIZE", "8192"))
+
+# Standard library configuration
+STDLIB_CRATES = {"std", "core", "alloc", "proc_macro", "test"}
+RUST_CHANNEL_BASE = "https://static.rust-lang.org"
+RUST_VERSION_MANIFEST_URL = f"{RUST_CHANNEL_BASE}/version"

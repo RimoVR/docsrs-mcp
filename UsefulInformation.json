@@ -93,6 +93,22 @@
           "prevention": "Always provide fallback mechanisms when working with optional or incomplete data structures",
           "dateEncountered": "2025-08-06",
           "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Mock aiohttp sessions need proper async context manager setup",
+          "context": "Testing async HTTP operations with unittest.mock.AsyncMock",
+          "solution": "Mock aiohttp sessions need __aenter__ and __aexit__ methods configured for async context manager usage",
+          "prevention": "Always configure AsyncMock context manager methods when testing async sessions or use MagicMock for session objects",
+          "dateEncountered": "2025-08-06",
+          "relatedFiles": ["tests/test_ingest.py"]
+        },
+        {
+          "error": "Rust version fetch failures break stdlib detection",
+          "context": "Network issues or API failures when fetching current Rust version for stdlib crate filtering",
+          "solution": "Always provide fallback version when fetching Rust version fails, use hardcoded recent version as default",
+          "prevention": "Implement graceful degradation with fallback values for external API dependencies",
+          "dateEncountered": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
         }
       ]
     },
@@ -335,6 +351,30 @@
           "impact": "Maintains code quality and prevents formatting-related merge conflicts",
           "dateLearned": "2025-08-06",
           "relatedFiles": ["pyproject.toml"]
+        },
+        {
+          "lesson": "Use docs.rs as primary source for stdlib documentation",
+          "context": "Rust standard library documentation integration",
+          "details": "docs.rs provides comprehensive stdlib documentation access, simpler than attempting to use rust-docs-json component directly",
+          "impact": "Simplifies stdlib documentation access and reduces complexity compared to local JSON parsing",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Set lookup for O(1) stdlib crate detection",
+          "context": "Performance optimization for standard library crate identification",
+          "details": "Use Python set data structure for stdlib crate names to achieve O(1) lookup performance instead of list iteration",
+          "impact": "Significantly improves performance when processing many crates by eliminating linear search overhead",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Provide helpful error messages for stdlib download failures",
+          "context": "User experience when stdlib documentation is unavailable",
+          "details": "When stdlib documentation download fails, provide clear instructions explaining the limitation and suggesting alternatives",
+          "impact": "Improves user experience by explaining limitations rather than showing cryptic errors",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
         }
       ]
     }
@@ -388,7 +428,12 @@
       "Clear cache directory before testing enhanced parsing to ensure fresh database creation",
       "Use exact key matching in type dictionaries to avoid false positive substring matches",
       "Implement fallback mechanisms for optional data structures in rustdoc JSON",
-      "Use distinct variable names in nested loops to prevent accidental overwrites"
+      "Use distinct variable names in nested loops to prevent accidental overwrites",
+      "Use docs.rs as primary source for stdlib docs instead of local rust-docs-json component",
+      "Implement stdlib crate detection using set lookup for O(1) performance",
+      "Configure AsyncMock context manager methods (__aenter__, __aexit__) when testing async sessions",
+      "Always provide fallback version when external API calls (like Rust version fetch) fail",
+      "Provide clear error messages with helpful instructions when stdlib download fails"
     ],
     "rateLimiting": [
       "Ensure Redis is running for distributed limiting",

@@ -16,8 +16,12 @@ from docsrs_mcp.ingest import (
     decompress_content,
     download_rustdoc,
     evict_cache_if_needed,
+    fetch_current_stable_version,
     get_crate_lock,
+    get_stdlib_url,
+    is_stdlib_crate,
     parse_rustdoc_items,
+    resolve_stdlib_version,
     resolve_version,
     store_embeddings,
 )
@@ -460,3 +464,112 @@ async def test_store_embeddings_error_handling(tmp_path):
     # This should raise an error due to dimension mismatch
     with pytest.raises(Exception):
         await store_embeddings(db_path, chunks, embeddings)
+
+
+# ============== Standard Library Support Tests ==============
+
+
+def test_stdlib_detection():
+    """Test detection of standard library crates."""
+    # Test stdlib crates
+    assert is_stdlib_crate("std") is True
+    assert is_stdlib_crate("core") is True
+    assert is_stdlib_crate("alloc") is True
+    assert is_stdlib_crate("proc_macro") is True
+    assert is_stdlib_crate("test") is True
+
+    # Test case insensitivity
+    assert is_stdlib_crate("STD") is True
+    assert is_stdlib_crate("Core") is True
+
+    # Test non-stdlib crates
+    assert is_stdlib_crate("serde") is False
+    assert is_stdlib_crate("tokio") is False
+    assert is_stdlib_crate("std-derive") is False  # Not an exact match
+
+
+@pytest.mark.asyncio
+async def test_stdlib_version_resolution():
+    """Test standard library version resolution."""
+    mock_session = MagicMock()
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.text = AsyncMock(return_value="1.75.0 (2023-12-28)")
+    
+    # Create a proper async context manager mock
+    mock_ctx_mgr = AsyncMock()
+    mock_ctx_mgr.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_ctx_mgr.__aexit__ = AsyncMock()
+    mock_session.get.return_value = mock_ctx_mgr
+
+    # Test latest/stable resolution
+    version = await resolve_stdlib_version(mock_session, "latest")
+    assert version == "1.75.0"
+
+    version = await resolve_stdlib_version(mock_session, "stable")
+    assert version == "1.75.0"
+
+    version = await resolve_stdlib_version(mock_session, None)
+    assert version == "1.75.0"
+
+    # Test channel names
+    version = await resolve_stdlib_version(mock_session, "beta")
+    assert version == "beta"
+
+    version = await resolve_stdlib_version(mock_session, "nightly")
+    assert version == "nightly"
+
+    # Test specific version
+    version = await resolve_stdlib_version(mock_session, "1.74.0")
+    assert version == "1.74.0"
+
+
+def test_stdlib_url_construction():
+    """Test URL construction for standard library crates."""
+    # Test with channel names
+    url = get_stdlib_url("std", "stable")
+    assert url == "https://docs.rs/std/latest/std.json"
+
+    url = get_stdlib_url("core", "beta")
+    assert url == "https://docs.rs/core/latest/core.json"
+
+    url = get_stdlib_url("alloc", "nightly")
+    assert url == "https://docs.rs/alloc/latest/alloc.json"
+
+    # Test with specific version
+    url = get_stdlib_url("std", "1.75.0")
+    assert url == "https://docs.rs/std/1.75.0/std.json"
+
+    # Test underscores in crate names
+    url = get_stdlib_url("proc_macro", "1.75.0")
+    assert url == "https://docs.rs/proc_macro/1.75.0/proc_macro.json"
+
+
+@pytest.mark.asyncio
+async def test_fetch_current_stable_version():
+    """Test fetching current stable Rust version."""
+    # Test successful fetch
+    mock_session = MagicMock()
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.text = AsyncMock(return_value="1.75.0 (2023-12-28)")
+
+    mock_ctx_mgr = AsyncMock()
+    mock_ctx_mgr.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_ctx_mgr.__aexit__ = AsyncMock()
+    mock_session.get.return_value = mock_ctx_mgr
+
+    version = await fetch_current_stable_version(mock_session)
+    assert version == "1.75.0"
+
+    # Test version parsing with different formats
+    mock_response.text = AsyncMock(return_value="1.76.0")
+    version = await fetch_current_stable_version(mock_session)
+    assert version == "1.76.0"
+
+    # Test fallback on error - simulate network error
+    mock_session_error = MagicMock()
+    mock_session_error.get.side_effect = Exception("Network error")
+    
+    version = await fetch_current_stable_version(mock_session_error)
+    assert version == "1.75.0"  # Should return fallback version

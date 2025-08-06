@@ -28,6 +28,8 @@ from .config import (
     MAX_DECOMPRESSED_SIZE,
     MAX_DOWNLOAD_SIZE,
     MODEL_NAME,
+    RUST_VERSION_MANIFEST_URL,
+    STDLIB_CRATES,
 )
 from .database import get_db_path, init_database, store_crate_metadata
 
@@ -56,6 +58,71 @@ async def get_crate_lock(crate_name: str, version: str) -> asyncio.Lock:
     if key not in _crate_locks:
         _crate_locks[key] = asyncio.Lock()
     return _crate_locks[key]
+
+
+def is_stdlib_crate(crate_name: str) -> bool:
+    """Check if a crate name is a Rust standard library crate."""
+    return crate_name.lower() in STDLIB_CRATES
+
+
+async def fetch_current_stable_version(session: aiohttp.ClientSession) -> str:
+    """Fetch the current stable Rust version from the official channel."""
+    try:
+        async with session.get(
+            RUST_VERSION_MANIFEST_URL,
+            timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT),
+        ) as resp:
+            if resp.status != 200:
+                raise Exception(f"Failed to fetch Rust version: HTTP {resp.status}")
+
+            # The version file contains the version string directly
+            version_text = await resp.text()
+            # Extract version number (e.g., "1.75.0 (2023-12-28)" -> "1.75.0")
+            version_match = re.match(r"(\d+\.\d+\.\d+)", version_text.strip())
+            if version_match:
+                return version_match.group(1)
+            else:
+                raise Exception(f"Could not parse Rust version from: {version_text}")
+    except Exception as e:
+        logger.warning(f"Failed to fetch current stable version: {e}")
+        # Fallback to a known stable version
+        return "1.75.0"
+
+
+async def resolve_stdlib_version(
+    session: aiohttp.ClientSession, version: str | None = None
+) -> str:
+    """Resolve standard library version string to actual Rust version."""
+    if not version or version in ["latest", "stable"]:
+        return await fetch_current_stable_version(session)
+    elif version in ["beta", "nightly"]:
+        # For beta/nightly, we return the channel name
+        # The actual version will be determined by the channel manifest
+        return version
+    else:
+        # Assume it's a specific Rust version like "1.75.0"
+        return version
+
+
+def get_stdlib_url(crate_name: str, version: str) -> str:
+    """Construct the URL for downloading standard library rustdoc JSON.
+
+    Note: The standard library rustdoc JSON is distributed as part of
+    the rust-docs-json component. For now, we'll try to use docs.rs
+    which mirrors some stdlib crates.
+    """
+    # docs.rs mirrors std library crates with special version handling
+    # For std library, the version is typically the Rust version
+    json_name = crate_name.replace("-", "_")
+
+    # Try multiple URL patterns that might work for stdlib
+    # docs.rs sometimes uses 'latest' for stdlib crates
+    if version in ["stable", "beta", "nightly"]:
+        # For channel names, try 'latest' on docs.rs
+        return f"https://docs.rs/{crate_name}/latest/{json_name}.json"
+    else:
+        # For specific versions, use the version directly
+        return f"https://docs.rs/{crate_name}/{version}/{json_name}.json"
 
 
 @retry(
@@ -757,12 +824,24 @@ async def store_embeddings(
 async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
     """Ingest a crate's documentation and return the database path."""
     async with aiohttp.ClientSession() as session:
-        # Fetch crate info first for basic metadata
-        crate_info = await fetch_crate_info(session, crate_name)
+        # Check if this is a standard library crate
+        if is_stdlib_crate(crate_name):
+            # Handle stdlib crate specially
+            version = await resolve_stdlib_version(session, version)
+            crate_info = {
+                "name": crate_name,
+                "description": f"Rust standard library: {crate_name}",
+                "repository": "https://github.com/rust-lang/rust",
+                "documentation": f"https://doc.rust-lang.org/{crate_name}",
+                "max_stable_version": version,
+            }
+        else:
+            # Fetch crate info first for basic metadata (existing flow)
+            crate_info = await fetch_crate_info(session, crate_name)
 
-        # Resolve version using crate info if not specified
-        if not version or version == "latest":
-            version = await resolve_version_from_crate_info(crate_info, version)
+            # Resolve version using crate info if not specified
+            if not version or version == "latest":
+                version = await resolve_version_from_crate_info(crate_info, version)
 
         # Acquire per-crate lock to prevent duplicate ingestion
         lock = await get_crate_lock(crate_name, version)
@@ -812,11 +891,18 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
             # Try to download and process rustdoc JSON
             try:
-                # Resolve version and get rustdoc URL from docs.rs
+                # Resolve version and get rustdoc URL
                 logger.info(f"Resolving rustdoc URL for {crate_name}@{version}")
-                resolved_version, rustdoc_url = await resolve_version(
-                    session, crate_name, version
-                )
+
+                if is_stdlib_crate(crate_name):
+                    # For stdlib, we already have the version resolved
+                    resolved_version = version
+                    rustdoc_url = get_stdlib_url(crate_name, version)
+                else:
+                    # Use existing docs.rs resolution for third-party crates
+                    resolved_version, rustdoc_url = await resolve_version(
+                        session, crate_name, version
+                    )
 
                 # Download rustdoc (with compression support)
                 logger.info(f"Downloading rustdoc for {crate_name}@{resolved_version}")
@@ -873,7 +959,16 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     raise Exception("No items found in rustdoc JSON")
 
             except Exception as e:
-                logger.warning(f"Failed to process rustdoc JSON: {e}")
+                if is_stdlib_crate(crate_name):
+                    logger.error(
+                        f"Failed to download {crate_name} rustdoc JSON: {e}\n"
+                        f"Standard library documentation may not be available on docs.rs.\n"
+                        f"To generate it locally, try:\n"
+                        f"  rustup component add --toolchain nightly rust-docs-json\n"
+                        f"  Then use the generated JSON files from your Rust installation."
+                    )
+                else:
+                    logger.warning(f"Failed to process rustdoc JSON: {e}")
                 logger.info("Falling back to basic crate description embedding")
 
                 # Fallback: create a simple embedding from the crate description

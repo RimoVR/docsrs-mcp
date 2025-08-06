@@ -123,8 +123,8 @@ sequenceDiagram
         API->>Queue: Enqueue ingest task
         Queue->>Worker: Dequeue task
         Worker->>Worker: Acquire per-crate lock
-        Worker->>DocsRS: Resolve version via redirect
-        DocsRS-->>Worker: Actual version + rustdoc URL
+        Worker->>DocsRS: Resolve version via redirect (or detect stdlib crate)
+        DocsRS-->>Worker: Actual version + rustdoc URL (with channel resolution for stdlib)
         Worker->>DocsRS: GET compressed rustdoc (.zst/.gz/.json)
         DocsRS-->>Worker: Compressed rustdoc JSON
         Worker->>Worker: Stream decompress with size limits
@@ -406,6 +406,7 @@ mindmap
       aiohttp 3.9.5 (pinned for memory leak fix)
       orjson (JSON parsing)
       crates.io + docs.rs API integration
+      Standard library crate detection and channel resolution
       
     JSON Processing
       ijson (streaming parser)
@@ -450,8 +451,12 @@ stateDiagram-v2
     
     Ingest --> VersionResolve
     VersionResolve --> Download: Resolved
+    VersionResolve --> ChannelFallback: Stdlib channel unavailable
     VersionResolve --> Error404: Not found
     VersionResolve --> Error410: Yanked
+    
+    ChannelFallback --> Download: Fallback channel found
+    ChannelFallback --> Error404: All channels unavailable
     
     Download --> FormatCheck: Success
     FormatCheck --> TryZst: Check .json.zst
@@ -527,6 +532,9 @@ graph TB
 - Supports "latest" and specific version identifiers
 - Handles version disambiguation and canonicalization
 - Constructs proper rustdoc JSON URLs with crate name transformations
+- **Standard Library Support**: Detects standard library crates using STDLIB_CRATES set for special handling
+- **Channel Resolution**: Maps Rust version channels (stable/beta/nightly) to appropriate documentation versions
+- **Stdlib URL Construction**: Builds standard library documentation URLs from docs.rs using detected channel information
 
 **Compression Support**
 - **Zstandard (.json.zst)**: Primary format, best compression ratio
@@ -540,6 +548,8 @@ graph TB
 - Prevents duplicate ingestion across concurrent requests
 - Maintains lock state throughout application lifetime
 - Ensures data consistency during parallel processing
+- **Standard Library Integration**: Applies same locking mechanism to stdlib crates (std, core, alloc, etc.)
+- **Channel-Aware Locking**: Locks consider Rust channel versions to prevent conflicts between stable/beta/nightly docs
 
 **Enhanced Memory-Efficient Parsing with Metadata Extraction**
 - ijson streaming parser for large rustdoc JSON files (unchanged)
@@ -559,6 +569,32 @@ graph TB
 - Configurable size limits (default 2GB total cache)
 - Automatic cleanup when cache size exceeds limits
 - Preserves most recently accessed crate documentation
+
+### Standard Library Support Architecture
+
+**Standard Library Crate Detection**
+- Uses predefined STDLIB_CRATES set containing core standard library crates: `{'std', 'core', 'alloc', 'proc_macro', 'test'}`
+- Enables special handling for Rust's built-in crates that require different URL construction
+- Integrates seamlessly with existing crate detection pipeline with minimal code changes
+
+**Rust Channel Version Resolution**
+- **Channel Detection**: Identifies Rust version channels (stable, beta, nightly) from version strings
+- **Version Mapping**: Maps channel identifiers to appropriate documentation versions on docs.rs
+- **Fallback Strategy**: Defaults to stable channel when version cannot be determined
+- **URL Construction**: Builds channel-specific URLs for standard library documentation access
+
+**Integration with Existing Pipeline**
+- **95% Code Reuse**: Leverages existing ingestion, parsing, and storage infrastructure unchanged
+- **Minimal Architecture Changes**: Standard library support adds detection logic without modifying core data flow
+- **Same Storage Schema**: Standard library documentation uses identical database structure as regular crates
+- **Unified Caching**: Standard library docs cached using same LRU eviction strategy and size limits
+- **Consistent API**: No changes required to MCP tools or REST endpoints for standard library support
+
+**Fallback Mechanisms**
+- **Format Fallback**: Attempts .json.zst → .json.gz → .json formats same as regular crates
+- **Channel Fallback**: Falls back from nightly → beta → stable if specific channel documentation unavailable
+- **Error Handling**: Graceful degradation when standard library documentation cannot be retrieved
+- **Cache Resilience**: Maintains cached standard library docs even when upstream docs.rs is unavailable
 
 ## Performance Characteristics
 
@@ -757,9 +793,11 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - MCP manifest schemas use `anyOf` pattern to allow flexible parameter types while maintaining validation
 - Critical pattern: `'anyOf': [{'type': 'integer'}, {'type': 'string'}]` enables JSON Schema validation to pass so Pydantic can handle type coercion
 
-**MVP Focus: Crate Descriptions Only**
+**MVP Focus: Crate Descriptions Only (Enhanced with Standard Library Support)**
 - Basic ingestion pipeline processes crate metadata from crates.io API
+- Enhanced with standard library crate detection and channel-specific version resolution
 - Embeddings generated from crate descriptions for semantic search
+- Standard library crates (std, core, alloc, proc_macro, test) supported with 95% code reuse
 - Future expansion to full documentation planned for v2
 
 **File-Based Caching**
@@ -897,8 +935,8 @@ sequenceDiagram
         API->>Queue: Enqueue enhanced ingest task
         Queue->>Worker: Dequeue task
         Worker->>Worker: Acquire per-crate lock
-        Worker->>DocsRS: Resolve version via redirect
-        DocsRS-->>Worker: Actual version + rustdoc URL
+        Worker->>DocsRS: Resolve version via redirect (or detect stdlib crate)
+        DocsRS-->>Worker: Actual version + rustdoc URL (with channel resolution for stdlib)
         Worker->>DocsRS: GET compressed rustdoc (.zst/.gz/.json)
         DocsRS-->>Worker: Complete rustdoc JSON
         Worker->>Worker: Stream decompress with size limits

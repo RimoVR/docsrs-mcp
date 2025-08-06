@@ -446,6 +446,63 @@
             "implementation": "Detect workspace structure and adapt parsing accordingly"
           }
         }
+      },
+      "rustStandardLibrary": {
+        "rustDocsJson": {
+          "overview": "Rust standard library documentation available as JSON through rustup on nightly channel",
+          "component": "rust-docs-json",
+          "availability": "Via rustup component on nightly Rust builds",
+          "installation": "rustup component add rust-docs-json --toolchain nightly",
+          "formatCompatibility": {
+            "description": "Rustdoc JSON format is identical between stdlib and third-party crates",
+            "specification": "RFC 2963 - Rustdoc JSON format standardization",
+            "benefit": "Same parsing logic works for both stdlib and crates.io documentation",
+            "consistency": "No format differences between stdlib and third-party crate JSON"
+          },
+          "fileCharacteristics": {
+            "sizeWarning": "Standard library docs can be very large (100MB+ uncompressed)",
+            "compressionFormats": [".json", ".json.zst", ".json.gz"],
+            "recommendation": "Use streaming parsers to avoid memory issues",
+            "memoryConsiderations": "Requires careful memory management due to size"
+          },
+          "docsRsMirror": {
+            "description": "docs.rs mirrors some stdlib crates making them accessible via HTTP",
+            "benefit": "Standard library crates available through same API as third-party crates",
+            "examples": [
+              "std crate available at docs.rs/std/",
+              "core crate available at docs.rs/core/",
+              "alloc crate available at docs.rs/alloc/"
+            ],
+            "integration": "Allows uniform access pattern for all Rust documentation"
+          },
+          "versionManagement": {
+            "manifest": {
+              "url": "https://static.rust-lang.org/version",
+              "purpose": "Rust version manifest for tracking releases",
+              "content": "Current stable, beta, and nightly version information",
+              "usage": "Determine which Rust versions have stdlib JSON available"
+            },
+            "versionTracking": "Essential for maintaining compatibility across Rust releases"
+          },
+          "bestPractices": {
+            "streamingParsers": {
+              "library": "ijson",
+              "rationale": "Essential for handling 100MB+ stdlib JSON files",
+              "approach": "Stream parsing to avoid loading entire file into memory",
+              "implementation": "Use ijson.parse() for incremental processing"
+            },
+            "memoryManagement": {
+              "technique": "Process stdlib docs in chunks",
+              "benefit": "Prevents out-of-memory errors with large stdlib JSON",
+              "strategy": "Extract only needed sections rather than full parse"
+            },
+            "caching": {
+              "recommendation": "Cache parsed stdlib sections aggressively",
+              "rationale": "Stdlib parsing is expensive due to size",
+              "strategy": "Cache frequently accessed stdlib modules and types"
+            }
+          }
+        }
       }
     },
     "serverInfrastructure": {
@@ -826,7 +883,13 @@
       "Extract function and method signatures from inner.function.decl and inner.method.decl paths",
       "Use paths section mapping for parent ID resolution in rustdoc hierarchies",
       "Apply regex pattern r'```(?:rust)?\\s*\\n(.*?)```' for effective code example extraction",
-      "Use NULL defaults for new database columns to maintain backward compatibility"
+      "Use NULL defaults for new database columns to maintain backward compatibility",
+      "Install rust-docs-json component via rustup for standard library documentation access",
+      "Leverage docs.rs mirroring of stdlib crates for uniform API access to all Rust documentation",
+      "Use streaming parsers (ijson) for processing large stdlib JSON files (100MB+)",
+      "Monitor Rust version manifest at https://static.rust-lang.org/version for release tracking",
+      "Cache parsed stdlib sections aggressively due to expensive parsing overhead",
+      "Process stdlib docs in chunks to prevent out-of-memory errors with large files"
     ],
     "performance": [
       "Use semantic chunking with 50-200 tokens for optimal search granularity",

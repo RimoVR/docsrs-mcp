@@ -354,25 +354,40 @@
         "id": "idx-2",
         "title": "Add standard library support",
         "description": "Extend ingestion for Rust std documentation to provide comprehensive standard library search capabilities",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": [],
         "relatedTasks": ["idx-1"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-06T16:00:00Z",
+          "implementation": "Successfully implemented Rust standard library support with comprehensive stdlib crate detection and ingestion",
+          "notes": "Added detection for stdlib crates (std, core, alloc, proc_macro, test), implemented version resolution for Rust standard library, created URL construction for stdlib rustdoc JSON, modified ingestion pipeline to handle stdlib crates, added comprehensive error handling with helpful messages, updated MCP tool descriptions to document stdlib support, and added complete test coverage for all new functionality. All tests are passing and the implementation is complete."
+        },
         "subtasks": [
           {
             "id": "idx-2.1",
             "title": "Implement std library ingestion",
             "description": "Add support for ingesting Rust standard library documentation",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-06T16:00:00Z",
+              "implementation": "Added stdlib crate detection and URL construction for standard library rustdoc JSON files",
+              "notes": "Implemented is_stdlib_crate() function, resolve_stdlib_version() for version handling, and construct_stdlib_url() for building proper URLs to standard library documentation"
+            }
           },
           {
             "id": "idx-2.2",
             "title": "Handle std library versioning",
             "description": "Support multiple Rust versions and std library compatibility",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-06T16:00:00Z",
+              "implementation": "Added version resolution logic for Rust standard library with fallback handling",
+              "notes": "Implemented version mapping from user requests to available stdlib versions with appropriate fallbacks when specific versions are not available"
+            }
           }
         ]
       },

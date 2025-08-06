@@ -77,6 +77,8 @@ class GetCrateSummaryRequest(BaseModel):
     """
     Request for get_crate_summary tool.
 
+    Supports both third-party crates and Rust standard library crates (std, core, alloc).
+
     Example:
         ```json
         {
@@ -84,12 +86,20 @@ class GetCrateSummaryRequest(BaseModel):
             "version": "1.35.1"
         }
         ```
+
+    Standard library example:
+        ```json
+        {
+            "crate_name": "std",
+            "version": "latest"
+        }
+        ```
     """
 
     crate_name: str = Field(
         ...,
-        description="Name of the Rust crate (e.g., 'tokio', 'serde')",
-        examples=["tokio", "serde", "actix-web"],
+        description="Name of the Rust crate (e.g., 'tokio', 'serde') or stdlib crate ('std', 'core', 'alloc')",
+        examples=["tokio", "serde", "std", "core"],
     )
     version: str | None = Field(
         None,
