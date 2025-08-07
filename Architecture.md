@@ -57,6 +57,7 @@ graph LR
             APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata]
             ROUTES[routes.py<br/>Enhanced MCP endpoints<br/>Comprehensive docstrings]
             MODELS[models.py<br/>Enhanced Pydantic schemas<br/>Field validators<br/>MCP compatibility<br/>Auto-generated docs]
+            VALIDATION[validation.py<br/>Centralized validation utilities<br/>Precompiled regex patterns<br/>Type coercion functions]
             NAV[navigation.py<br/>Module tree operations<br/>Hierarchy traversal]
             MW[middleware.py<br/>Rate limiting]
         end
@@ -92,6 +93,7 @@ graph LR
     
     APP --> ROUTES
     ROUTES --> MODELS
+    MODELS --> VALIDATION
     APP --> MW
     ROUTES --> ING
     ROUTES --> NAV
@@ -1035,6 +1037,8 @@ graph LR
 | Crate prefix filter | < 3ms P95 | High selectivity (~1%) with idx_crate_prefix optimization |
 | **Rate limiting overhead** | **< 1ms P95** | **In-memory counter check and update with slowapi** |
 | **Rate limit storage** | **O(active IPs)** | **In-memory storage, resets on restart** |
+| **Parameter validation** | **< 2ms P95** | **Centralized validation with precompiled regex patterns** |
+| **Type coercion overhead** | **< 0.5ms P95** | **String-to-type conversion for MCP client compatibility** |
 | Cache hit latency | < 5ms P95 | LRU cache with TTL support |
 | Cache miss latency | < 100ms P95 | Full search + ranking + cache store |
 | Ingest latency | < 30s | Full rustdoc processing with streaming |
@@ -1052,20 +1056,72 @@ graph LR
 | Module hierarchy build | < 200ms | Path analysis and parent resolution during ingestion |
 | Hierarchy storage | +10% schema size | modules table with indexes on parent_id/depth |
 
-## Parameter Validation Architecture
+## Validation Architecture
+
+### Centralized Validation Module
+
+The system implements a centralized validation module (`validation.py`) that provides reusable validation utilities across all request models:
+
+```mermaid
+graph TB
+    subgraph "Validation Module (validation.py)"
+        PRECOMPILED[Precompiled Regex Patterns<br/>Performance optimization]
+        CRATE_VAL[validate_crate_name()<br/>Rust crate naming rules]
+        VERSION_VAL[validate_version_string()<br/>SemVer + latest support]
+        PATH_VAL[validate_rust_path()<br/>Module path validation]
+        INT_BOUNDS[coerce_to_int_with_bounds()<br/>Type coercion + constraints]
+        OPT_PATH[validate_optional_path()<br/>None-safe path validation]
+    end
+    
+    subgraph "Request Models"
+        SEARCH_REQ[SearchItemsRequest]
+        NAV_REQ[NavigateModulesRequest]
+        INGEST_REQ[IngestCrateRequest]
+        SIG_REQ[GetItemSignatureRequest]
+    end
+    
+    subgraph "Field Validators"
+        FIELD_VAL[@field_validator(mode='before')<br/>MCP compatibility layer]
+        TYPE_COERCE[String-to-type coercion]
+        CONSTRAINT[Bounds checking]
+    end
+    
+    PRECOMPILED --> CRATE_VAL
+    PRECOMPILED --> VERSION_VAL
+    PRECOMPILED --> PATH_VAL
+    
+    CRATE_VAL --> FIELD_VAL
+    VERSION_VAL --> FIELD_VAL
+    PATH_VAL --> FIELD_VAL
+    INT_BOUNDS --> FIELD_VAL
+    OPT_PATH --> FIELD_VAL
+    
+    FIELD_VAL --> SEARCH_REQ
+    FIELD_VAL --> NAV_REQ
+    FIELD_VAL --> INGEST_REQ
+    FIELD_VAL --> SIG_REQ
+    
+    FIELD_VAL --> TYPE_COERCE
+    TYPE_COERCE --> CONSTRAINT
+```
+
+### Enhanced Request Model Validation
+
+All request models now implement comprehensive field validators with MCP client compatibility:
 
 ```mermaid
 graph TD
     subgraph "MCP Client Parameter Handling"
-        CLIENT[MCP Client<br/>May send strings for integers]
+        CLIENT[MCP Client<br/>May send strings for integers/booleans]
         SERIALIZE[JSON Serialization<br/>Type coercion needed]
     end
     
     subgraph "Pydantic Validation Pipeline"
         FIELD_VAL[Field Validators<br/>@field_validator(mode='before')]
-        TYPE_COERCE[Type Coercion<br/>String → Integer conversion]
+        TYPE_COERCE[Type Coercion<br/>String → Integer/Boolean conversion]
         CONSTRAINT[Constraint Validation<br/>ge=1, le=20 bounds]
         MODEL_VAL[Model Validation<br/>extra='forbid' strict mode]
+        NONE_PRESERVE[None Value Preservation<br/>Application-layer defaults]
     end
     
     subgraph "Error Handling"
@@ -1079,6 +1135,7 @@ graph TD
     FIELD_VAL --> TYPE_COERCE
     TYPE_COERCE --> CONSTRAINT
     CONSTRAINT --> MODEL_VAL
+    MODEL_VAL --> NONE_PRESERVE
     
     TYPE_COERCE -.->|Invalid conversion| VALUE_ERR
     CONSTRAINT -.->|Bounds check fails| VALID_ERR
@@ -1086,78 +1143,208 @@ graph TD
     VALID_ERR --> ERROR_RESP
 ```
 
-### Parameter Validation Patterns
+### MCP Manifest Schema Updates
 
-**MCP Client Compatibility**
-- MCP clients may serialize all parameters as strings due to JSON-RPC transport limitations
-- Field validators with `mode='before'` handle type coercion before constraint validation
-- Critical for integer parameters like `k` (result count) that have numeric constraints
-- Module path parameters use SQL LIKE pattern validation for filtering capabilities
+The MCP manifest schema uses `anyOf` patterns for flexible parameter acceptance while maintaining validation:
 
-**MCP Manifest Schema Pattern**
-- MCP tool manifests require `anyOf` schema pattern for parameters that may arrive as different types
-- JSON Schema validation must pass to allow Pydantic validators to handle type coercion
-- Pattern: `'anyOf': [{'type': 'integer'}, {'type': 'string'}]` for integer parameters
-- This allows MCP clients to send either native integers or string representations
-- FastMCP automatically generates proper schemas from Pydantic field definitions
+```mermaid
+graph LR
+    subgraph "MCP Manifest Schema"
+        ANYOF[anyOf Pattern<br/>{"anyOf": [{"type": "integer"}, {"type": "string"}]}]
+        JSON_VALID[JSON Schema Validation<br/>Allows multiple types]
+        PYDANTIC[Pydantic Type Coercion<br/>Handles actual conversion]
+    end
+    
+    subgraph "Parameter Examples"
+        INT_PARAM[k parameter<br/>Result count limit]
+        BOOL_PARAM[deprecated parameter<br/>Filter deprecated items]
+        NUM_PARAM[min_doc_length<br/>Minimum documentation length]
+    end
+    
+    ANYOF --> JSON_VALID
+    JSON_VALID --> PYDANTIC
+    
+    INT_PARAM --> ANYOF
+    BOOL_PARAM --> ANYOF
+    NUM_PARAM --> ANYOF
+```
 
-**Implementation Example (SearchItemsRequest validation)**
+### Validation Best Practices Implementation
+
+The validation architecture follows these key principles:
+
+```mermaid
+graph TB
+    subgraph "API Boundary Validation"
+        ENTRY[Request Entry Point<br/>All validation at API boundaries only]
+        EARLY[Early Error Detection<br/>Fail fast with clear messages]
+        SECURITY[Security First<br/>extra='forbid' prevents injection]
+    end
+    
+    subgraph "Error Handling Strategy"
+        HELPFUL[Helpful Error Messages<br/>Include examples and guidance]
+        CHAINING[Error Chaining<br/>Preserve original context]
+        STANDARD[Standardized Responses<br/>Consistent error format]
+    end
+    
+    subgraph "Value Handling"
+        NONE_SAFE[None Value Preservation<br/>Maintain for default handling]
+        APP_DEFAULTS[Application-Layer Defaults<br/>Business logic handles None]
+        TYPE_SAFE[Type Safety<br/>Strong validation post-coercion]
+    end
+    
+    ENTRY --> EARLY
+    EARLY --> SECURITY
+    
+    HELPFUL --> CHAINING
+    CHAINING --> STANDARD
+    
+    NONE_SAFE --> APP_DEFAULTS
+    APP_DEFAULTS --> TYPE_SAFE
+    
+    SECURITY --> HELPFUL
+    STANDARD --> NONE_SAFE
+```
+
+### Validation Module Implementation
+
+The `validation.py` module provides centralized validation utilities with performance optimizations:
+
+#### Core Validation Functions
+
+**validate_crate_name(name: str) -> str**
+- Validates Rust crate naming conventions (lowercase, hyphens, underscores)
+- Uses precompiled regex pattern for performance
+- Raises ValueError with helpful error messages for invalid names
+
+**validate_version_string(version: str) -> str** 
+- Supports SemVer format validation (e.g., "1.0.0", "2.1.4-alpha")
+- Allows special version strings like "latest"
+- Precompiled regex patterns for efficiency
+
+**validate_rust_path(path: str) -> str**
+- Validates Rust module path format (e.g., "std::collections::HashMap")
+- Ensures proper "::" separator usage and valid identifiers
+- Used for module filtering and navigation
+
+**coerce_to_int_with_bounds(value, field_name: str, min_val: int = None, max_val: int = None) -> int**
+- Handles string-to-integer conversion for MCP client compatibility
+- Enforces optional bounds checking with clear error messages
+- Preserves None values for application-layer default handling
+
+**validate_optional_path(path: Optional[str]) -> Optional[str]**
+- None-safe path validation for optional parameters
+- Applies path validation only when path is not None
+- Used for optional module path parameters
+
+#### Performance Optimizations
+
+```python
+# Precompiled regex patterns for performance
+CRATE_NAME_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$')
+VERSION_PATTERN = re.compile(r'^(\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?|latest)$')
+RUST_PATH_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z_][a-zA-Z0-9_]*)*$')
+```
+
+### Enhanced Request Model Validation
+
+All request models implement comprehensive field validators using the centralized validation utilities:
+
+#### SearchItemsRequest Validation
+- **query**: Unicode NFKC normalization for search consistency
+- **k**: String-to-integer coercion with bounds (1-20)
+- **crate**: Crate name validation using centralized function
+- **version**: Version string validation with SemVer support
+- **module_path**: Optional Rust path validation
+- **deprecated**: String-to-boolean coercion for MCP compatibility
+
+#### Parameter Coercion Examples
+
 ```python
 @field_validator("k", mode="before")
 @classmethod
 def coerce_k_to_int(cls, v):
     """Convert string numbers to int for MCP client compatibility."""
-    if v is None:
-        return v
-    if isinstance(v, str):
-        try:
-            return int(v)
-        except ValueError as err:
-            raise ValueError(
-                f"k parameter must be a valid integer, got '{v}'"
-            ) from err
-    return v
+    return coerce_to_int_with_bounds(v, "k", min_val=1, max_val=20)
 
-@field_validator("query", mode="before")
+@field_validator("crate", mode="before") 
 @classmethod
-def normalize_query(cls, v):
-    """Normalize query text using Unicode NFKC form for search consistency."""
+def validate_crate_name_field(cls, v):
+    """Validate crate name using centralized validation."""
+    if v is None:
+        return v
+    return validate_crate_name(v)
+
+@field_validator("deprecated", mode="before")
+@classmethod  
+def coerce_deprecated_to_bool(cls, v):
+    """Convert various representations to boolean for MCP clients."""
     if v is None:
         return v
     if isinstance(v, str):
-        # Apply Unicode normalization for consistent search results
-        # NFKC form handles character variants and composed forms
-        import unicodedata
-        return unicodedata.normalize('NFKC', v)
-    return v
-
-@model_validator(mode="after")
-def validate_module_path_context(self):
-    """Cross-field validation: module_path requires matching crate context."""
-    if self.module_path is not None:
-        if self.crate is None:
-            raise ValueError(
-                "module_path parameter requires crate to be specified"
-            )
-    return self
+        if v.lower() in ('true', '1', 'yes'):
+            return True
+        elif v.lower() in ('false', '0', 'no'):
+            return False
+        else:
+            raise ValueError(f"Invalid boolean value: '{v}'")
+    return bool(v)
 ```
 
-**Key Design Principles**
-- **mode='before'**: Runs before Pydantic's built-in type validation
-- **Type Coercion**: Handles string-to-int conversion transparently
-- **Query Preprocessing**: Unicode normalization for search consistency
-- **Error Chaining**: Preserves original error context with `from err`
-- **Null Safety**: Explicit None handling for optional parameters
-- **Graceful Degradation**: Allows both native types and string representations
+### MCP Manifest Schema Patterns
 
-**Validation Flow**
-1. **Pre-validation**: Field validators with `mode='before'` handle type coercion and query preprocessing
-2. **Query Normalization**: Unicode NFKC normalization applied to search queries for consistency
-3. **Type Checking**: Pydantic validates coerced values against expected types
-4. **Constraint Validation**: Field constraints (ge, le, etc.) applied to typed values
-5. **Cross-field Validation**: Model validators ensure parameter consistency (e.g., module_path requires crate)
-6. **Model Validation**: `extra='forbid'` prevents injection of unknown parameters
-7. **Error Standardization**: All validation errors converted to consistent ErrorResponse format
+The MCP manifest schema uses `anyOf` patterns for flexible parameter acceptance:
+
+```json
+{
+  "k": {
+    "anyOf": [
+      {"type": "integer", "minimum": 1, "maximum": 20},
+      {"type": "string"}
+    ],
+    "description": "Number of results to return"
+  },
+  "deprecated": {
+    "anyOf": [
+      {"type": "boolean"},
+      {"type": "string"}
+    ],
+    "description": "Filter deprecated items"
+  }
+}
+```
+
+### Validation Best Practices
+
+**API Boundary Validation Only**
+- All validation occurs at API entry points
+- Business logic assumes validated data
+- No redundant validation in service layers
+
+**Error Message Standards**
+- Include parameter name and invalid value in error messages
+- Provide examples of valid formats
+- Chain original errors using `from err` for debugging context
+
+**None Value Handling**
+- Field validators preserve None values for optional parameters
+- Application layer handles default value assignment
+- Enables proper OpenAPI schema generation with optional parameters
+
+**Security Through Validation**
+- `extra='forbid'` on all request models prevents parameter injection
+- Strict type checking after coercion prevents type confusion attacks
+- Centralized validation reduces validation bypass vulnerabilities
+
+### Validation Flow Architecture
+
+1. **MCP Client Request** → JSON-RPC serialization (may convert types to strings)
+2. **JSON Schema Validation** → `anyOf` patterns allow multiple input types
+3. **Pydantic Field Validators** → `mode='before'` handles type coercion
+4. **Centralized Validation** → Reusable functions with precompiled patterns
+5. **Constraint Checking** → Bounds validation and format verification
+6. **Model Validation** → Cross-field validation and `extra='forbid'` security
+7. **Business Logic** → Receives validated, typed data
 
 ### Extended Numeric Parameter Validation
 

@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .validation import validate_crate_name, validate_rust_path, validate_version_string
+
 
 # MCP Manifest Models
 class MCPTool(BaseModel):
@@ -107,6 +109,18 @@ class GetCrateSummaryRequest(BaseModel):
         description="Specific version or 'latest' (default: latest)",
         examples=["1.35.1", "latest", None],
     )
+
+    @field_validator("crate_name", mode="before")
+    @classmethod
+    def validate_crate(cls, v: Any) -> str:
+        """Validate crate name follows Rust naming conventions."""
+        return validate_crate_name(v, field_name="crate_name")
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def validate_version(cls, v: Any) -> str | None:
+        """Validate version string or preserve None."""
+        return validate_version_string(v, field_name="version")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -500,6 +514,24 @@ class GetItemDocRequest(BaseModel):
         None, description="Specific version or 'latest' (default: latest)"
     )
 
+    @field_validator("crate_name", mode="before")
+    @classmethod
+    def validate_crate(cls, v: Any) -> str:
+        """Validate crate name follows Rust naming conventions."""
+        return validate_crate_name(v, field_name="crate_name")
+
+    @field_validator("item_path", mode="before")
+    @classmethod
+    def validate_path(cls, v: Any) -> str:
+        """Validate Rust item path syntax."""
+        return validate_rust_path(v, field_name="item_path")
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def validate_version(cls, v: Any) -> str | None:
+        """Validate version string or preserve None."""
+        return validate_version_string(v, field_name="version")
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -528,6 +560,47 @@ class GetModuleTreeRequest(BaseModel):
         description="Specific version or 'latest' (default: latest)",
         examples=["1.35.1", "latest", None],
     )
+
+    @field_validator("crate_name", mode="before")
+    @classmethod
+    def validate_crate(cls, v: Any) -> str:
+        """Validate crate name follows Rust naming conventions."""
+        return validate_crate_name(v, field_name="crate_name")
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def validate_version(cls, v: Any) -> str | None:
+        """Validate version string or preserve None."""
+        return validate_version_string(v, field_name="version")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ListVersionsRequest(BaseModel):
+    """
+    Request for list_versions resource.
+
+    Lists all cached versions of a specific Rust crate.
+
+    Example:
+        ```json
+        {
+            "crate_name": "tokio"
+        }
+        ```
+    """
+
+    crate_name: str = Field(
+        ...,
+        description="Name of the Rust crate to list versions for",
+        examples=["tokio", "serde", "actix-web"],
+    )
+
+    @field_validator("crate_name", mode="before")
+    @classmethod
+    def validate_crate(cls, v: Any) -> str:
+        """Validate crate name follows Rust naming conventions."""
+        return validate_crate_name(v, field_name="crate_name")
 
     model_config = ConfigDict(extra="forbid")
 

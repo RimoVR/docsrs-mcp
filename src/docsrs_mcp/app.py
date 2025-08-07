@@ -252,7 +252,7 @@ async def get_mcp_manifest(request: Request):
                             "description": "Name of the crate to get module tree for",
                         },
                         "version": {
-                            "type": "string",
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
                             "description": "Specific version (default: latest)",
                         },
                     },

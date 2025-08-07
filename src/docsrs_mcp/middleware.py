@@ -1,11 +1,10 @@
 """Rate limiting middleware for the docsrs MCP server."""
 
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
-
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # Create limiter with 30 req/s per IP
 limiter = Limiter(

@@ -589,6 +589,46 @@
           "relatedFiles": ["tests/test_app.py", "src/docsrs_mcp/models.py"]
         },
         {
+          "lesson": "MCP Double Validation Pattern requires anyOf schema flexibility",
+          "context": "MCP tools have both JSON Schema and Pydantic validation layers",
+          "details": "MCP protocol applies JSON Schema validation before Pydantic field validators can run. When clients send mixed types (e.g., string '5' for integer field), restrictive schemas block validation. Solution: Use anyOf patterns in JSON Schema for flexibility: {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}, then handle coercion in Pydantic field validators",
+          "impact": "Enables robust parameter handling across different MCP client implementations while maintaining type safety",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Decorator Order Critical for Pydantic field validators",
+          "context": "MCP parameter validation with custom field validators using classmethod decorator",
+          "details": "@field_validator must be placed BEFORE @classmethod decorator for proper decorator wrapping. Python decorators are applied bottom-up, so incorrect order (@classmethod @field_validator) prevents the validator from working properly. Correct pattern: @field_validator('field_name', mode='before') followed by @classmethod",
+          "impact": "Ensures field validators execute correctly and prevent runtime validation failures",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "None Value Preservation in MCP parameter validators",
+          "context": "Handling default values and None inputs in MCP parameter validation",
+          "details": "Converting None to default values (e.g., 'latest') in validators breaks application logic that expects None for different default handling. Solution: Preserve None values in validators, handle defaults at application layer (e.g., in ingest_crate function). This allows proper conditional logic based on None vs explicit values",
+          "impact": "Maintains proper application logic flow and enables different default handling strategies",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Error Message Best Practices for MCP parameter validation",
+          "context": "Providing helpful error messages in Pydantic field validators",
+          "details": "Comprehensive error messages should include: 1) Field name for context, 2) Examples of valid values for guidance, 3) What was actually received (truncated to 100 chars to prevent log spam), 4) Clear format pattern. Example: f'{field_name} must be X. Got: {repr(value)[:100]}. Examples: ...'. This helps users understand validation failures and correct their input",
+          "impact": "Reduces user confusion and support requests by providing clear, actionable error messages",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Testing MCP Compatibility with multiple input types",
+          "context": "Ensuring MCP parameter validation works across different client implementations",
+          "details": "Comprehensive MCP validation testing requires: 1) Test with both native types (int, float) and string representations, 2) Use model_validate() to simulate JSON deserialization from MCP clients, 3) Verify whitespace trimming and null handling, 4) Test edge cases like empty strings and whitespace-only inputs, 5) Validate both ValidationError (built-in constraints) and ValueError (custom validators) paths",
+          "impact": "Ensures compatibility with various MCP client implementations and prevents runtime failures",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["tests/test_app.py", "src/docsrs_mcp/models.py"]
+        },
+        {
           "lesson": "Check whitespace-only queries before stripping for proper error messages",
           "context": "Query preprocessing and user input validation",
           "details": "When validating user queries, check for whitespace-only content before stripping whitespace. This allows providing a specific error message for whitespace-only inputs instead of a generic 'empty query' message after stripping",
@@ -804,7 +844,12 @@
       "Error types: Expect ValidationError for built-in Pydantic constraints, ValueError for custom field_validator methods",
       "Float conversion: Use 'could not convert' in error checks for float string conversion, 'invalid literal' for int conversion",
       "Testing approach: Test both native type validation (Pydantic constraints) and string validation (custom validators) paths",
-      "Comprehensive validation: Handle integer-to-float conversion for float fields when clients send integer strings"
+      "Comprehensive validation: Handle integer-to-float conversion for float fields when clients send integer strings",
+      "MCP Double Validation: Use anyOf schema patterns to handle JSON Schema + Pydantic validation conflicts",
+      "Decorator ordering: @field_validator must come BEFORE @classmethod for proper wrapping",
+      "None preservation: Don't convert None to defaults in validators - handle at application layer",
+      "Error messages: Include field name, examples, and received value (truncated to 100 chars) for helpful feedback",
+      "Compatibility testing: Test with both native types and string representations using model_validate()"
     ],
     "queryPreprocessing": [
       "Check for whitespace-only queries before stripping to provide specific error messages",

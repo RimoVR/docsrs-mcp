@@ -664,6 +664,148 @@
         }
       }
     },
+    "validationLibraries": {
+      "pydantic": {
+        "version": "v2.11.7",
+        "core": "pydantic-core v2.38.0",
+        "performance": {
+          "improvement": "17x faster than Pydantic v1",
+          "backend": "pydantic-core written in Rust",
+          "benefit": "Significant performance gains for data validation workloads"
+        },
+        "fieldValidators": {
+          "modeBeforePattern": "@field_validator('field_name', mode='before')",
+          "purpose": "Preprocessing values before Pydantic's built-in type validation",
+          "execution": "Validators with mode='before' run before type checking and coercion",
+          "mcpCompatibility": {
+            "issue": "MCP clients send inconsistent parameter types (strings vs native)",
+            "solution": "Field validators handle type coercion after JSON Schema validation",
+            "pattern": "Use mode='before' to convert string parameters to expected types",
+            "benefit": "Seamless handling of MCP client parameter inconsistencies"
+          },
+          "crossFieldValidation": {
+            "feature": "ValidationInfo.data provides access to other field values",
+            "usage": "@field_validator('field') def validate(cls, v, info: ValidationInfo): info.data",
+            "benefit": "Enable validation logic that depends on multiple fields",
+            "timing": "ValidationInfo.data available during field validation"
+          },
+          "bestPractices": {
+            "typeFlexibility": "Handle both string and native types in validators",
+            "errorMessages": "Provide specific, actionable validation error messages",
+            "preprocessing": "Use for Unicode normalization, whitespace cleanup, type coercion",
+            "performance": "Precompile expensive operations like regex patterns outside validators"
+          }
+        },
+        "mcpParameterHandling": {
+          "clientInconsistency": {
+            "description": "MCP clients inconsistently send parameters as strings or native types",
+            "examples": [
+              "Integer parameters sometimes sent as strings: '10' instead of 10",
+              "Boolean parameters sometimes sent as strings: 'true' instead of true",
+              "Behavior varies by client implementation and parameter context"
+            ],
+            "impact": "Requires defensive parameter validation patterns"
+          },
+          "doubleValidation": {
+            "process": [
+              "1. MCP manifest JSON Schema validation (client-side)",
+              "2. FastMCP JSON Schema validation (server-side)",
+              "3. Pydantic model validation (application-side)"
+            ],
+            "solution": "anyOf schemas in JSON Schema + field validators in Pydantic",
+            "benefit": "Handles type mismatches at both validation layers"
+          },
+          "anyOfSchemaPattern": {
+            "description": "JSON Schema anyOf patterns required for flexible parameter types",
+            "example": "anyOf: [{type: 'string'}, {type: 'integer'}]",
+            "purpose": "Accommodates MCP client parameter serialization inconsistencies",
+            "implementation": "Use Union types in Pydantic models to generate anyOf schemas"
+          }
+        }
+      },
+      "semanticVersion": {
+        "library": "semantic-version",
+        "purpose": "Strict Semantic Versioning 2.0.0 validation",
+        "features": [
+          "Complete SemVer 2.0.0 specification compliance",
+          "Pre-release and build metadata support",
+          "Version comparison and ordering",
+          "Parsing and validation of version strings"
+        ],
+        "regexPattern": {
+          "semverRegex": "^(?P<major>0|[1-9]\\d*)\\.(?P<minor>0|[1-9]\\d*)\\.(?P<patch>0|[1-9]\\d*)(?:-(?P<prerelease>(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
+          "usage": "Validate version strings against SemVer 2.0.0 specification",
+          "groups": "Named groups for major, minor, patch, prerelease, buildmetadata"
+        },
+        "specialValues": {
+          "latest": {
+            "support": "Handle 'latest' as special version value",
+            "pattern": "Validation logic should accept 'latest' alongside valid SemVer strings",
+            "useCase": "API endpoints that support both specific versions and latest"
+          }
+        },
+        "validationBestPractices": {
+          "pydanticIntegration": {
+            "pattern": "@field_validator('version') def validate_version(cls, v): semantic_version.Version(v)",
+            "errorHandling": "Catch ValueError and re-raise as ValidationError with clear message",
+            "specialCases": "Handle 'latest' before SemVer validation"
+          },
+          "performanceOptimization": {
+            "regexCompilation": "Precompile regex patterns outside validation functions",
+            "caching": "Consider caching validation results for frequently used versions",
+            "overhead": "SemVer validation typically < 1ms per version string"
+          }
+        }
+      },
+      "validationBestPractices": {
+        "serviceBoundaries": {
+          "principle": "Validate at service boundaries only",
+          "rationale": "Avoid redundant validation within trusted system boundaries",
+          "implementation": "Input validation at API endpoints, skip internal validation",
+          "performance": "Reduces validation overhead in internal processing"
+        },
+        "errorMessages": {
+          "specificity": "Provide specific error messages with examples",
+          "examples": [
+            "'Version must be valid SemVer format (e.g., '1.2.3')' instead of 'Invalid version'",
+            "'Query must be 1-500 characters long' instead of 'Validation error'"
+          ],
+          "userExperience": "Clear error messages improve API developer experience",
+          "internationalization": "Consider localized error messages for global APIs"
+        },
+        "defaultHandling": {
+          "noneValues": {
+            "approach": "Maintain None values for application defaults",
+            "rationale": "Allows application logic to determine appropriate defaults",
+            "pattern": "Don't convert None to default values during validation",
+            "flexibility": "Enables context-sensitive default behavior"
+          },
+          "emptyStrings": {
+            "decision": "Explicit handling of empty strings vs None",
+            "options": ["Reject empty strings", "Convert to None", "Accept as valid"],
+            "documentation": "Document empty string behavior clearly in API specification"
+          }
+        },
+        "performanceOptimization": {
+          "regexPrecompilation": {
+            "technique": "Precompile regex patterns for repeated validation",
+            "implementation": "Define compiled patterns at module level, reuse in validators",
+            "benefit": "Significant performance improvement for regex-heavy validation",
+            "example": "SEMVER_PATTERN = re.compile(r'...') # Compile once, use many times"
+          },
+          "validationCaching": {
+            "approach": "Cache validation results for frequently used values",
+            "tradeoff": "Memory usage vs CPU savings for expensive validations",
+            "applicability": "Most effective for validation of repeated constant values"
+          },
+          "lazyValidation": {
+            "concept": "Defer expensive validation until value is actually used",
+            "implementation": "Store unvalidated values, validate on access",
+            "useCase": "When validation is expensive and not all values are accessed"
+          }
+        }
+      }
+    },
     "memoryManagement": {
       "monitoring": {
         "library": "psutil",
@@ -1485,6 +1627,17 @@
       "Test query preprocessing with realistic Unicode edge cases and international character sets",
       "Leverage C-optimized unicodedata module for < 1ms normalization overhead per query",
       "Apply query normalization as first step in preprocessing pipeline before other validations",
+      "Use Pydantic v2.11.7 with pydantic-core v2.38.0 for 17x performance improvement over v1",
+      "Implement @field_validator with mode='before' for MCP parameter preprocessing and type coercion",
+      "Use ValidationInfo.data for cross-field validation when one field depends on another",
+      "Handle MCP client parameter inconsistencies with anyOf schema patterns in JSON Schema",
+      "Design Union types in Pydantic models to generate flexible anyOf schemas automatically",
+      "Use semantic-version library for strict SemVer 2.0.0 validation with prerelease support",
+      "Support 'latest' as special version value alongside standard SemVer strings",
+      "Validate only at service boundaries to avoid redundant validation overhead",
+      "Provide specific error messages with examples instead of generic validation errors",
+      "Maintain None values for application defaults rather than converting during validation",
+      "Precompile regex patterns outside validation functions for performance optimization",
       "Use docs.rs /crate/{crate-name}/{version}/json URL pattern for accessing rustdoc JSON API",
       "Detect zstd compression by checking magic bytes 0x28, 0xb5, 0x2f, 0xfd in API responses",
       "Handle docs.rs to static.docs.rs redirects for optimized file delivery",
