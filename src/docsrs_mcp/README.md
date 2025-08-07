@@ -6,6 +6,23 @@ A high-performance MCP server for querying Rust crate documentation with memory-
 
 This module provides a Model Context Protocol (MCP) server that enables efficient ingestion and querying of Rust crate documentation. The server features memory-optimized streaming processing, adaptive batch sizing, and comprehensive memory monitoring to handle large-scale documentation processing.
 
+## MCP Compatibility
+
+This server provides enhanced MCP (Model Context Protocol) compatibility with flexible parameter type handling:
+
+### Boolean Parameter Support
+- **Flexible Type Input**: Boolean parameters (`has_examples`, `deprecated`) accept both native boolean values and string representations
+- **Automatic Type Conversion**: String values are automatically converted to booleans using the following mappings:
+  - `"true"`, `"1"`, `"yes"` → `true`
+  - `"false"`, `"0"`, `"no"` → `false`
+- **Client Compatibility**: MCP clients can send boolean values in their preferred format without worrying about type mismatches
+- **Backward Compatibility**: Maintains full compatibility with existing MCP clients that send native boolean values
+
+### Parameter Flexibility
+- **Numeric Parameters**: Parameters like `k` and `min_doc_length` support both integer and string input with automatic conversion
+- **Consistent Patterns**: All parameter types use `anyOf` patterns in the MCP manifest for maximum client compatibility
+- **Validation**: Type conversion includes proper validation to ensure only valid values are accepted
+
 ## Search Ranking System
 
 The docsrs-mcp server now includes an enhanced search ranking system that improves result relevance through multi-factor scoring:
@@ -291,3 +308,47 @@ os.environ["DOCSRS_MEMORY_THRESHOLD_HIGH"] = "75"
 - **Critical Memory (> 90%)**: Maximum safety with minimum viable performance
 
 The streaming architecture ensures consistent, predictable performance while maintaining system stability under memory pressure.
+
+## API Parameters
+
+### search_items Parameters
+
+The `search_items` function supports flexible parameter types for better MCP client compatibility:
+
+#### Boolean Parameters
+- **`has_examples`**: Filter items that have code examples
+  - Accepts: `true`, `false`, `"true"`, `"false"`, `"1"`, `"0"`, `"yes"`, `"no"`
+  - Type: `boolean | string`
+  - Automatic conversion to boolean internally
+
+- **`deprecated`**: Include or exclude deprecated items
+  - Accepts: `true`, `false`, `"true"`, `"false"`, `"1"`, `"0"`, `"yes"`, `"no"`
+  - Type: `boolean | string`
+  - Automatic conversion to boolean internally
+
+#### Numeric Parameters
+- **`k`**: Number of results to return
+  - Accepts: Integer values or string representations of integers
+  - Type: `integer | string`
+  - Automatic conversion to integer internally
+
+- **`min_doc_length`**: Minimum documentation length filter
+  - Accepts: Integer values or string representations of integers
+  - Type: `integer | string`
+  - Automatic conversion to integer internally
+
+### Technical Implementation
+
+The MCP manifest uses `anyOf` patterns for type flexibility:
+```json
+{
+  "has_examples": {
+    "anyOf": [
+      {"type": "boolean"},
+      {"type": "string"}
+    ]
+  }
+}
+```
+
+This approach maintains backward compatibility while providing the flexibility needed for diverse MCP client implementations.

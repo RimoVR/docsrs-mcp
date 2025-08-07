@@ -351,6 +351,29 @@
           "dateEncountered": "2025-08-07",
           "relatedFiles": ["tests/test_app.py", "src/docsrs_mcp/models.py"],
           "resolutionStatus": "Float conversion error patterns identified and test assertions updated"
+        },
+        {
+          "error": "MCP Manifest vs Implementation Discrepancy",
+          "context": "Code review identified issues with boolean parameters that were actually handled correctly in implementation",
+          "solution": "Update MCP manifest to use anyOf patterns for boolean parameters matching the approach for numeric parameters. Boolean parameters should use anyOf: [{'type': 'boolean'}, {'type': 'string'}] to handle string-to-boolean conversion",
+          "prevention": "Always ensure MCP manifest schema matches the actual validation capabilities. When Pydantic validators can handle type coercion, the MCP manifest should use anyOf patterns to prevent JSON Schema validation from blocking the conversion",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "resolutionStatus": "Investigation complete - manifest schema alignment with implementation validation needed"
+        },
+        {
+          "error": "MCP boolean parameter validation errors with string inputs",
+          "context": "MCP clients sending boolean parameters as strings (e.g., 'true', 'false') caused validation errors in search_items tool",
+          "solution": "Use anyOf pattern in MCP manifest schema: {'anyOf': [{'type': 'boolean'}, {'type': 'string'}]} to allow both boolean and string types through JSON Schema validation, then let Pydantic field validators handle conversion with mode='before'",
+          "prevention": "FastMCP performs double validation - JSON Schema first, then Pydantic. anyOf patterns must be in the manifest schema to allow flexible types through to Pydantic validators. Follow existing numeric parameter patterns for consistency",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "additionalInfo": {
+            "serverTesting": "Use --mode rest with docsrs-mcp to test MCP manifest endpoints at localhost:8000 (not 8080)",
+            "validationFlow": "MCP manifest anyOf → FastMCP JSON Schema validation → Pydantic field_validator with mode='before' → Boolean conversion",
+            "patternConsistency": "Follow existing numeric parameter anyOf patterns for all flexible types"
+          },
+          "resolutionStatus": "Fixed and tested - boolean parameters now accept both native booleans and string representations"
         }
       ]
     },
@@ -726,6 +749,16 @@
           "relatedFiles": ["src/docsrs_mcp/models.py", "tests/test_app.py"]
         },
         {
+          "lesson": "MCP manifest boolean parameter anyOf pattern implementation",
+          "context": "Fixing MCP client boolean parameter validation errors in search_items tool",
+          "details": "MCP clients can send boolean parameters as strings ('true', 'false') which fails JSON Schema validation. Solution requires anyOf pattern in manifest: {'anyOf': [{'type': 'boolean'}, {'type': 'string'}]}. This allows FastMCP's JSON Schema validation to pass so Pydantic field validators can perform conversion with mode='before'. Server testing shows port 8000 (not 8080) for REST mode endpoints",
+          "impact": "Enables compatibility with MCP clients that serialize boolean parameters as strings while maintaining type safety through Pydantic validation",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "validationFlow": "MCP manifest anyOf → FastMCP JSON Schema → Pydantic field_validator → Boolean conversion",
+          "testingNotes": "Use --mode rest to test MCP manifest endpoints at localhost:8000"
+        },
+        {
           "lesson": "Code example extraction performance optimization",
           "context": "Implementation of search_examples functionality for retrieving code examples",
           "details": "search_examples successfully returns results in ~200ms for warm queries. Language detection adds minimal overhead during ingestion. Deduplication by hash is efficient for preventing duplicates during batch processing",
@@ -922,7 +955,8 @@
       "Alternative MCP: nohup uvx docsrs-mcp > server.log 2>&1 & echo $!",
       "Alternative REST: nohup uvx docsrs-mcp --mode rest > server.log 2>&1 & echo $!",
       "Kill server: kill <PID>",
-      "Test REST endpoints: curl -s http://localhost:8000/endpoint | jq .",
+      "Test REST endpoints: curl -s http://localhost:8000/endpoint | jq . (server runs on port 8000, not 8080)",
+      "Test MCP manifest: Use --mode rest to test MCP manifest endpoints at localhost:8000",
       "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\""
     ],
     "mcpServer": [

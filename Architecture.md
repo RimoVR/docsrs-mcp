@@ -1185,24 +1185,26 @@ graph TD
 
 ### MCP Manifest Schema Updates
 
-The MCP manifest schema uses `anyOf` patterns for flexible parameter acceptance while maintaining validation:
+The MCP manifest schema uses `anyOf` patterns for flexible parameter acceptance while maintaining validation. This architectural decision enables consistent handling of boolean parameters alongside the existing numeric parameter pattern:
 
 ```mermaid
 graph LR
     subgraph "MCP Manifest Schema"
-        ANYOF[anyOf Pattern<br/>{"anyOf": [{"type": "integer"}, {"type": "string"}]}]
+        ANYOF[anyOf Pattern<br/>{"anyOf": [{"type": "integer"}, {"type": "string"}]}<br/>{"anyOf": [{"type": "boolean"}, {"type": "string"}]}]
         JSON_VALID[JSON Schema Validation<br/>Allows multiple types]
         PYDANTIC[Pydantic Type Coercion<br/>Handles actual conversion]
+        FASTMCP[FastMCP Double Validation<br/>Passes both types through]
     end
     
     subgraph "Parameter Examples"
         INT_PARAM[k parameter<br/>Result count limit]
-        BOOL_PARAM[deprecated parameter<br/>Filter deprecated items]
+        BOOL_PARAM[deprecated parameter<br/>Filter deprecated items<br/>Boolean anyOf pattern]
         NUM_PARAM[min_doc_length<br/>Minimum documentation length]
     end
     
     ANYOF --> JSON_VALID
-    JSON_VALID --> PYDANTIC
+    JSON_VALID --> FASTMCP
+    FASTMCP --> PYDANTIC
     
     INT_PARAM --> ANYOF
     BOOL_PARAM --> ANYOF
@@ -1333,7 +1335,7 @@ def coerce_deprecated_to_bool(cls, v):
 
 ### MCP Manifest Schema Patterns
 
-The MCP manifest schema uses `anyOf` patterns for flexible parameter acceptance:
+The MCP manifest schema uses consistent `anyOf` patterns for flexible parameter acceptance across all type-flexible parameters. This architectural decision ensures uniform handling of MCP client serialization variations:
 
 ```json
 {
@@ -1353,6 +1355,14 @@ The MCP manifest schema uses `anyOf` patterns for flexible parameter acceptance:
   }
 }
 ```
+
+**Boolean Parameter Handling Architecture**
+- **anyOf Pattern**: Consistent with numeric parameters using `[{"type": "boolean"}, {"type": "string"}]`
+- **JSON Schema Validation**: Allows both native booleans and string representations to pass initial validation
+- **FastMCP Compatibility**: Double validation system properly handles both types in MCP manifest generation
+- **Pydantic Conversion**: Field validators with `mode="before"` handle string-to-boolean conversion
+- **Client Flexibility**: Enables MCP clients to send boolean parameters as either native booleans or strings
+- **Type Safety**: Maintains strict type validation after coercion phase
 
 ### Validation Best Practices
 
@@ -1454,6 +1464,10 @@ The MCP manifest schema has been updated to use anyOf patterns for numeric param
     "description": "Minimum documentation length",
     "minimum": 100,
     "maximum": 10000
+  },
+  "deprecated": {
+    "anyOf": [{"type": "boolean"}, {"type": "string"}],
+    "description": "Filter deprecated items"
   }
 }
 ```
@@ -1492,6 +1506,31 @@ graph LR
     CS --> MM
 ```
 
+### Fuzzy Path Resolution (Future Enhancement)
+
+This enhancement would integrate RapidFuzz for intelligent path suggestions when exact path matches fail:
+
+```mermaid
+graph LR
+    subgraph "Fuzzy Path Resolution Pipeline"
+        USER_REQ[User Request<br/>crate/module path]
+        EXACT_MATCH[Exact Match Check<br/>validation.py]
+        FUZZY_MATCHER[RapidFuzz Matcher<br/>Path similarity scoring]
+        SUGGESTIONS[Path Suggestions<br/>Ranked by similarity]
+    end
+    
+    USER_REQ --> EXACT_MATCH
+    EXACT_MATCH -->|Match Found| SUGGESTIONS
+    EXACT_MATCH -->|Match Failed| FUZZY_MATCHER
+    FUZZY_MATCHER --> SUGGESTIONS
+```
+
+**Integration Points:**
+- **validation.py**: Add fuzzy path validation fallback for failed exact matches
+- **database.py**: Query existing paths for fuzzy matching candidates
+- **Error Responses**: Include suggested corrections in validation error messages
+- **Performance**: Cache common path patterns and suggestions
+
 ## Dual-Mode Server Implementation
 
 ### Architecture Overview
@@ -1523,6 +1562,8 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - Preserves all business logic, validation, and error handling
 - Maintains compatibility with existing FastAPI middleware
 - Generates MCP-compatible JSON schemas with `anyOf` patterns for flexible parameter types
+- **Boolean Parameter Support**: Manifest generation uses consistent `anyOf: [{"type": "boolean"}, {"type": "string"}]` patterns
+- **Double Validation System**: FastMCP's validation layer properly allows both boolean types to pass through to Pydantic
 
 **Protocol Isolation**
 - MCP mode uses stderr exclusively for logging to avoid stdout contamination
@@ -1537,6 +1578,22 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - Maintenance overhead minimized through code reuse
 
 ## Implementation Decisions
+
+### Recent Architectural Decisions
+
+**Boolean Parameter Handling in MCP Manifest (2025-08-07)**
+- **Decision**: Boolean parameters in MCP manifest now use `anyOf` patterns for type flexibility
+- **Pattern**: `anyOf: [{"type": "boolean"}, {"type": "string"}]` consistent with existing numeric parameter handling
+- **Technical Implementation**:
+  - MCP manifest schema generation uses consistent `anyOf` patterns for boolean parameters
+  - Pydantic field validators handle string-to-boolean conversion with `mode="before"`
+  - FastMCP's double validation system properly allows both types through validation pipeline
+- **Benefits**:
+  - Enables MCP clients to send boolean parameters as either native booleans or strings
+  - Maintains consistency with existing numeric parameter validation patterns
+  - Preserves type safety through Pydantic's validation after coercion
+  - Supports varied MCP client serialization approaches without breaking changes
+- **Integration**: Seamless integration with existing validation architecture without code duplication
 
 ### Key Architectural Choices Made
 
@@ -1564,12 +1621,14 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 
 **Robust Parameter Validation with MCP Compatibility**
 - Pydantic field validators with `mode='before'` for type coercion
-- Handles MCP client parameter serialization differences (string-to-int conversion)
+- Handles MCP client parameter serialization differences (string-to-int, string-to-boolean conversion)
 - Maintains strict validation with `extra='forbid'` to prevent parameter injection
 - Graceful error handling with detailed error messages for debugging
 - Supports both native types and string representations for maximum compatibility
-- MCP manifest schemas use `anyOf` pattern to allow flexible parameter types while maintaining validation
-- Critical pattern: `'anyOf': [{'type': 'integer'}, {'type': 'string'}]` enables JSON Schema validation to pass so Pydantic can handle type coercion
+- MCP manifest schemas use consistent `anyOf` patterns for all type-flexible parameters
+- **Critical Architecture Pattern**: `anyOf: [{"type": "boolean"}, {"type": "string"}]` for booleans matches existing numeric pattern
+- **Schema Consistency**: Uniform approach across integers, floats, and booleans enables predictable MCP client behavior
+- **Double Validation Flow**: JSON Schema validation → FastMCP processing → Pydantic type coercion ensures compatibility
 
 **MVP Focus: Crate Descriptions Only (Enhanced with Standard Library Support)**
 - Basic ingestion pipeline processes crate metadata from crates.io API

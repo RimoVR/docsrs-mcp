@@ -125,6 +125,86 @@
               ]
             }
           }
+        },
+        "mcpManifestCompatibility": {
+          "overview": "Research findings on MCP client compatibility and parameter handling variations",
+          "clientVariations": {
+            "parameterSerialization": {
+              "issue": "MCP clients inconsistently send boolean parameters - some as native booleans, others as strings",
+              "examples": [
+                "Claude Desktop: sends native boolean values (true/false)",
+                "Claude Code: may send boolean parameters as strings ('true'/'false')",
+                "Parameter context affects serialization behavior"
+              ],
+              "impact": "Requires server-side handling of both string and native boolean types"
+            },
+            "anyOfSupport": {
+              "claudeDesktop": "Full support for anyOf patterns with mixed types",
+              "claudeCode": "Limited support - may have issues with complex anyOf schemas",
+              "recommendation": "Use simple anyOf patterns for maximum compatibility across all MCP clients"
+            }
+          },
+          "doubleValidationPipeline": {
+            "description": "FastMCP implements double validation - JSON Schema validation occurs before Pydantic field validators",
+            "validationFlow": [
+              "1. MCP client sends parameters (may be inconsistent types)",
+              "2. FastMCP JSON Schema validation validates against MCP manifest",
+              "3. Parameters passed to Pydantic model for application validation",
+              "4. Pydantic field validators handle any remaining type coercion"
+            ],
+            "solution": "anyOf schemas accommodate client variations, field validators handle final type coercion",
+            "benefit": "Robust parameter handling across different MCP client implementations"
+          },
+          "jsonSchemaPatterns": {
+            "currentStandard": "JSON Schema Draft 2020-12 per MCP specification",
+            "booleanFlexibility": {
+              "pattern": "anyOf: [{\"type\": \"boolean\"}, {\"type\": \"string\"}]",
+              "purpose": "Handle both native boolean and string representations of boolean values",
+              "implementation": "Use Union[bool, str] in Pydantic models to generate appropriate anyOf schemas",
+              "clientCompatibility": "Maximizes compatibility with diverse MCP client parameter serialization approaches"
+            },
+            "bestPractices": {
+              "consistency": "Use consistent anyOf patterns across all flexible parameters in API",
+              "simplicity": "Keep anyOf schemas minimal and focused - avoid overly complex patterns",
+              "documentation": "Document expected parameter variations clearly in MCP tool descriptions"
+            }
+          },
+          "typeCoercionStrategies": {
+            "pydanticIntegration": {
+              "fieldValidators": "Use @field_validator with mode='before' for pre-processing type coercion",
+              "stringToBooleanConversion": {
+                "trueValues": ["true", "1", "yes", "on"],
+                "falseValues": ["false", "0", "no", "off"],
+                "caseInsensitive": "Always perform case-insensitive string boolean conversion",
+                "errorHandling": "Provide clear validation errors for unrecognized boolean string representations"
+              },
+              "example": "@field_validator('boolean_param', mode='before') def validate_bool(cls, v): return str(v).lower() == 'true' if isinstance(v, str) else bool(v)"
+            },
+            "backwardCompatibility": {
+              "principle": "Maintain compatibility with clients sending native boolean types",
+              "implementation": "Field validators should handle both string and native inputs gracefully",
+              "testing": "Test with both string ('true'/'false') and native (true/false) boolean parameters"
+            }
+          },
+          "implementationGuidelines": {
+            "manifestDesign": {
+              "flexibleParameters": "Use anyOf patterns for parameters that may vary by client implementation",
+              "schema": "Keep JSON Schema patterns simple and well-documented",
+              "validation": "Rely on Pydantic field validators for robust type coercion after schema validation"
+            },
+            "productionReadiness": {
+              "testing": "Test with multiple MCP client implementations to verify compatibility",
+              "monitoring": "Monitor for parameter validation errors that indicate client compatibility issues",
+              "documentation": "Document parameter variations and expected formats clearly in API documentation"
+            }
+          },
+          "sources": [
+            "MCP specification: https://modelcontextprotocol.io/specification/2025-06-18",
+            "Pydantic JSON Schema docs: https://docs.pydantic.dev/latest/concepts/json_schema/",
+            "JSON Schema anyOf reference: https://json-schema.org/understanding-json-schema/reference/combining",
+            "FastMCP boolean parameter validation implementation analysis",
+            "Claude Desktop and Claude Code client behavior testing"
+          ]
         }
       },
       "documentationRequirements": {
@@ -1558,6 +1638,116 @@
           "maintenance": "Minimal maintenance required - built on standard library functionality",
           "compatibility": "Works across Python versions and platforms without dependencies",
           "documentation": "Well-documented behavior with extensive Unicode consortium specifications"
+        }
+      }
+    },
+    "fuzzy_path_resolution": {
+      "rapidfuzz": {
+        "overview": "High-performance fuzzy string matching library for Python",
+        "performanceAdvantages": {
+          "comparison": "RapidFuzz vs FuzzyWuzzy performance comparison",
+          "rapidfuzzPerformance": "20ms for 1M elements",
+          "fuzzywuzzyPerformance": "7s for 1M elements",
+          "speedup": "350x performance improvement over FuzzyWuzzy",
+          "implementation": "Written in C++ with Python bindings for optimal performance"
+        },
+        "features": [
+          "Levenshtein distance calculation",
+          "Fuzzy string matching algorithms",
+          "Unicode-aware string comparison",
+          "Multiple similarity metrics (ratio, partial_ratio, token_sort_ratio)",
+          "C++ backend for maximum performance"
+        ],
+        "fuzzyMatchingThresholds": {
+          "optimalRange": "60-80% similarity threshold for fuzzy path matching",
+          "conservative": "80% threshold for high precision, lower recall",
+          "balanced": "70% threshold for balanced precision and recall",
+          "liberal": "60% threshold for high recall, lower precision",
+          "rationale": "Balances false positives vs missed matches in documentation path resolution"
+        },
+        "bestPractices": {
+          "thresholdSelection": {
+            "documentation": "Use 70-80% threshold for documentation path matching",
+            "reason": "Documentation paths have consistent structure, higher thresholds work well",
+            "userInput": "Use 60-70% threshold for user-provided path queries to handle typos"
+          },
+          "preprocessing": [
+            "Normalize paths to consistent format before matching",
+            "Handle case sensitivity appropriately for target system",
+            "Remove or normalize path separators for consistent comparison"
+          ],
+          "performanceOptimization": [
+            "Use RapidFuzz process.extractOne() for single best match",
+            "Leverage process.extract() with limit parameter for multiple candidates",
+            "Consider caching results for frequently queried paths"
+          ]
+        }
+      },
+      "mcpManifestParameterHandling": {
+        "booleanParameterPatterns": {
+          "anyOfSchema": {
+            "pattern": "anyOf: [{\"type\": \"boolean\"}, {\"type\": \"string\"}]",
+            "purpose": "Handle MCP client boolean parameter inconsistencies",
+            "rationale": "MCP clients sometimes send boolean values as strings ('true'/'false') vs native booleans (true/false)"
+          },
+          "pydanticValidation": {
+            "approach": "Use field validators with mode='before' for boolean type coercion",
+            "pattern": "@field_validator('boolean_field', mode='before') def validate_bool(cls, v): return str(v).lower() == 'true' if isinstance(v, str) else bool(v)",
+            "benefit": "Seamlessly handles both string and native boolean parameter types from MCP clients"
+          },
+          "stringToBoolean": {
+            "trueValues": ["true", "1", "yes", "on"],
+            "falseValues": ["false", "0", "no", "off"],
+            "caseInsensitive": "Always use case-insensitive comparison for string boolean conversion",
+            "errorHandling": "Raise clear validation error for unrecognized boolean string values"
+          }
+        },
+        "parameterFlexibility": {
+          "unionTypes": {
+            "description": "Use Union types in Pydantic models for flexible parameter acceptance",
+            "example": "Union[bool, str] generates anyOf schema automatically in FastMCP",
+            "benefit": "Automatically generates appropriate JSON Schema for MCP manifest",
+            "mcpCompatibility": "Essential for robust MCP client parameter handling"
+          },
+          "anyOfPattern": {
+            "jsonSchema": "anyOf patterns provide parameter type flexibility in MCP manifests",
+            "implementation": "Union types in Pydantic models automatically generate anyOf schemas",
+            "useCase": "Accommodates different MCP client serialization behaviors for same logical parameter"
+          }
+        }
+      },
+      "pathResolutionBestPractices": {
+        "fuzzyMatchingIntegration": {
+          "workflow": [
+            "1. Exact path matching first (fastest)",
+            "2. Case-insensitive exact matching second",
+            "3. Fuzzy matching with RapidFuzz as fallback (most flexible)",
+            "4. Return ranked candidates with similarity scores"
+          ],
+          "thresholdStrategy": {
+            "exactMatch": "100% similarity - direct path match",
+            "nearExactMatch": "95-99% similarity - minor typos or case differences",
+            "goodMatch": "80-94% similarity - reasonable path variations",
+            "possibleMatch": "60-79% similarity - significant differences but potentially valid",
+            "noMatch": "< 60% similarity - likely unrelated paths"
+          }
+        },
+        "documentationSystems": {
+          "pathNormalization": {
+            "separators": "Normalize path separators (/, \\, ::) for consistent comparison",
+            "caseHandling": "Consider target system case sensitivity (case-insensitive for Windows-style paths)",
+            "whitespace": "Trim and normalize whitespace in path components"
+          },
+          "hierarchicalMatching": {
+            "approach": "Match path components hierarchically for better accuracy",
+            "benefit": "Higher accuracy for deeply nested documentation structures",
+            "implementation": "Compare individual path segments with appropriate weighting"
+          },
+          "contextualRelevance": {
+            "consideration": "Weight matches based on documentation context and user intent",
+            "implementation": "Boost scores for matches in recently accessed sections",
+            "userExperience": "Present most contextually relevant matches first"
+          }
         }
       }
     },

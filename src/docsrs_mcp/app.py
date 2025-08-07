@@ -200,7 +200,7 @@ async def get_mcp_manifest(request: Request):
                             "description": "Filter results to specific module path within the crate",
                         },
                         "has_examples": {
-                            "type": "boolean",
+                            "anyOf": [{"type": "boolean"}, {"type": "string"}],
                             "description": "Filter to only items with code examples",
                         },
                         "min_doc_length": {
@@ -215,7 +215,7 @@ async def get_mcp_manifest(request: Request):
                             "enum": ["public", "private", "crate"],
                         },
                         "deprecated": {
-                            "type": "boolean",
+                            "anyOf": [{"type": "boolean"}, {"type": "string"}],
                             "description": "Filter by deprecation status (true=deprecated only, false=non-deprecated only)",
                         },
                     },

@@ -34,11 +34,11 @@ all through the open MCP tool-calling standard, **without** proprietary services
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `get_crate_summary`       | Return crate name, resolved version, README/description (≤ 1 k chars), comprehensive item index, module hierarchy, and tool links.                             |
 | `search_items`            | k-NN cosine search across all documented items with type filtering (functions, structs, traits, modules). Default k = 5.                                        |
-| `get_item_doc`            | Complete markdown/HTML for a single item, incl. code blocks.                                                                                                     |
+| `get_item_doc`            | Complete markdown/HTML for a single item, incl. code blocks. Supports fuzzy path matching with helpful suggestions when exact paths fail.                      |
 | `get_module_tree`         | Navigate module hierarchy with structured tree representation and item counts.                                                                                   |
 | `search_examples`         | Search and retrieve code examples from documentation with context.                                                                                               |
 | `list_versions`           | List all published versions (`yanked` flag, latest default).                                                                                                     |
-| MCP discovery             | `/mcp/manifest`, `/mcp/tools/*` per MCP 2025-06-18 spec.                                                                                                         |
+| MCP discovery             | `/mcp/manifest`, `/mcp/tools/*` per MCP 2025-06-18 spec with enhanced boolean parameter declarations using anyOf patterns for better client compatibility.     |
 | On-disk cache             | One **SQLite + VSS** file per `crate@version`, auto-evicted LRU when total > 2 GiB.                                                                              |
 | **Reliability hardening** | \* Per-crate ingest lock prevents duplicate downloads. \* Graceful fallback when rustdoc JSON is unavailable (see §6.2). \* Batch writes keep peak RAM in check. |
 
@@ -78,7 +78,7 @@ all through the open MCP tool-calling standard, **without** proprietary services
         cache/*.db
 ```
 
-**Runtime stack**: Python 3.10+, FastAPI, Uvicorn + uvloop, `sqlite-vss` (FAISS), FastEmbed (ONNX model `BAAI/bge-small-en-v1.5`, 384 d).
+**Runtime stack**: Python 3.10+, FastAPI, Uvicorn + uvloop, `sqlite-vss` (FAISS), FastEmbed (ONNX model `BAAI/bge-small-en-v1.5`, 384 d), RapidFuzz (fuzzy path matching).
 **Launch**: `uvx` executes console-script directly from PyPI or a Git ref (zero install).
 
 ---
@@ -92,13 +92,13 @@ all through the open MCP tool-calling standard, **without** proprietary services
 | `/mcp/manifest`                | GET    | Static MCP manifest listing tools & JSON schemas. | JSON                                             |
 | `/mcp/tools/get_crate_summary` | POST   | Resolve version & return comprehensive summary.   | JSON with item index & module tree              |
 | `/mcp/tools/search_items`      | POST   | Vector search with type filtering.                | JSON array `{score, item_path, item_type, header, snippet}` |
-| `/mcp/tools/get_item_doc`      | POST   | Full rustdoc for `item_path`.                     | `text/markdown`                                  |
+| `/mcp/tools/get_item_doc`      | POST   | Full rustdoc for `item_path` with fuzzy matching. | `text/markdown` or suggestions JSON on path miss |
 | `/mcp/tools/get_module_tree`   | POST   | Navigate module hierarchy.                        | JSON tree structure with item counts            |
 | `/mcp/tools/search_examples`   | POST   | Search code examples in documentation.           | JSON array `{score, item_path, example_text, context}` |
 | `/mcp/resources/versions`      | GET    | List published versions.                          | JSON                                             |
 | `/health`                      | GET    | Liveness/readiness probe.                         | `200 OK`                                         |
 
-Responses validate against in-repo JSON Schema before send (pydantic).
+Responses validate against in-repo JSON Schema before send (pydantic). MCP manifest uses anyOf patterns for boolean parameters to ensure consistent client compatibility across different MCP implementations.
 
 ---
 
@@ -178,7 +178,8 @@ LIMIT :k;
 * **Origin allow-list:** only fetch from `https://docs.rs/…`.
 * **Size caps:** 30 MiB compressed / 100 MiB decompressed.
 * **Path safety:** databases saved as `cache/{crate}/{version}.db` using sanitised names.
-* **Input validation:** strict pydantic models with comprehensive parameter validation; reject unknown fields (`extra="forbid"`). All numeric parameters (k, limit, offset) validate against reasonable bounds and types using anyOf schema patterns.
+* **Input validation:** strict pydantic models with comprehensive parameter validation; reject unknown fields (`extra="forbid"`). All numeric parameters (k, limit, offset) validate against reasonable bounds and types using anyOf schema patterns. Boolean parameters (has_examples, deprecated) use consistent anyOf declarations matching numeric parameter handling.
+* **Fuzzy path resolution:** when exact item paths are not found, RapidFuzz provides intelligent path suggestions with similarity scoring to guide users to the intended documentation items.
 * **Error model**
 
 | Condition            | HTTP | Body                               |
@@ -189,6 +190,7 @@ LIMIT :k;
 | upstream timeout     | 504  | `{"error":"upstream_timeout"}`     |
 | rate-limit           | 429  | `{"error":"too_many_requests"}`    |
 | bad input            | 400  | pydantic validation obj            |
+| item path not found  | 404  | `{"error":"item_not_found", "suggestions":["similar_path1", "similar_path2"]}` |
 
 ---
 
@@ -220,7 +222,8 @@ dependencies = [
   "aiohttp>=3.9",
   "orjson>=3.9",
   "zstandard>=0.22",
-  "slowapi>=0.1"
+  "slowapi>=0.1",
+  "rapidfuzz>=3.0"
 ]
 
 [project.scripts]
@@ -288,11 +291,14 @@ uvx docsrs-mcp@latest
 5. `POST /mcp/tools/get_module_tree` for crate **tokio** returns structured hierarchy with item counts per module.
 6. `POST /mcp/tools/search_examples` with query `"async"` returns ≥ 1 code example from tokio documentation.
 7. `POST /mcp/tools/get_item_doc` with `item_path="tokio::spawn"` returns markdown including a runnable example.
+7b. `POST /mcp/tools/get_item_doc` with a slightly misspelled `item_path="tokio::spwan"` returns fuzzy match suggestions including `"tokio::spawn"`.
 8. Cold ingest of crate **serde** (< 5 MiB compressed) with full item indexing and example extraction completes in ≤ 2 s on an M1/Ryzen 5; crates up to 10 MiB complete in ≤ 3 s.
 9. After ingesting 50 average crates with comprehensive indexing, `cache/` ≤ 2 GiB and server RSS ≤ 1 GiB.
 10. A single IP exceeding 30 requests/s receives HTTP 429.
 11. All numeric parameters (k, limit, type filters) are properly validated with helpful error messages.
-12. All package management operations use `uv` exclusively (no pip/conda mixing).
+12. Boolean parameters in MCP manifest use anyOf patterns consistent with numeric parameters for improved client compatibility.
+13. Fuzzy path matching provides helpful suggestions when exact item paths are not found, with similarity scores ≥ 0.6.
+14. All package management operations use `uv` exclusively (no pip/conda mixing).
 
 ---
 
