@@ -404,6 +404,135 @@ graph TD
 - Clear deployment options with resource requirements
 - Troubleshooting guidance integrated into main documentation flow
 
+## Rate Limiting Architecture
+
+The system implements comprehensive rate limiting using slowapi (FastAPI port of Flask-Limiter) with in-memory storage for efficient request rate control.
+
+### Rate Limiting Implementation
+
+```mermaid
+graph TB
+    subgraph "Rate Limiting Middleware"
+        MW[middleware.py]
+        LIMITER[slowapi.Limiter<br/>In-memory storage]
+        HANDLER[rate_limit_handler<br/>HTTP 429 responses]
+    end
+    
+    subgraph "FastAPI Application"
+        APP[app.py]
+        STATE[app.state.limiter]
+        ROUTES[routes.py<br/>@limiter.limit decorators]
+        HEALTH[/health endpoint<br/>Exempt from limiting]
+    end
+    
+    subgraph "REST Endpoints"
+        SEARCH["/mcp/tools/search_documentation"<br/>30/minute per IP]
+        NAV["/mcp/tools/navigate_modules"<br/>30/minute per IP]
+        EXAMPLES["/mcp/tools/get_examples"<br/>30/minute per IP]
+        SIGNATURE["/mcp/tools/get_item_signature"<br/>30/minute per IP]
+        INGEST["/mcp/tools/ingest_crate"<br/>30/minute per IP]
+        MODULE_TREE["/mcp/tools/get_module_tree"<br/>30/minute per IP]
+    end
+    
+    subgraph "Error Responses"
+        ERROR_429[HTTP 429 Too Many Requests<br/>X-RateLimit headers<br/>JSON error format]
+    end
+    
+    MW --> LIMITER
+    MW --> HANDLER
+    APP --> STATE
+    STATE --> LIMITER
+    ROUTES --> LIMITER
+    
+    ROUTES --> SEARCH
+    ROUTES --> NAV
+    ROUTES --> EXAMPLES
+    ROUTES --> SIGNATURE
+    ROUTES --> INGEST
+    ROUTES --> MODULE_TREE
+    
+    LIMITER -.->|Rate exceeded| HANDLER
+    HANDLER --> ERROR_429
+    
+    HEALTH -.->|Bypasses| LIMITER
+```
+
+### Rate Limiting Configuration
+
+**Rate Limits**
+- **Default Rate**: 30 requests per minute per IP address
+- **Applied To**: All REST API endpoints except `/health`
+- **Storage**: In-memory (non-persistent, resets on restart)
+- **Identification**: Based on client IP address
+
+**HTTP 429 Error Response Format**
+```json
+{
+  "error": "Rate limit exceeded",
+  "message": "30 per 1 minute",
+  "retry_after": 45
+}
+```
+
+**Response Headers**
+- `X-RateLimit-Limit`: Maximum requests allowed per window
+- `X-RateLimit-Remaining`: Requests remaining in current window
+- `X-RateLimit-Reset`: Time when rate limit window resets
+- `Retry-After`: Seconds to wait before next request (on 429 only)
+
+### Implementation Details
+
+**Middleware Integration Pattern**
+1. **Limiter Creation**: `Limiter` instance created in `middleware.py` with in-memory storage
+2. **FastAPI State**: Limiter attached to `app.state.limiter` for application-wide access
+3. **Exception Handler**: `rate_limit_handler` registered for `RateLimitExceeded` exceptions
+4. **Decorator Application**: `@limiter.limit("30/minute")` applied to REST endpoints
+5. **Request Parameter**: `request: Request` parameter required by slowapi for client identification
+
+**Mode-Specific Application**
+- **REST Mode (`--mode rest`)**: Rate limiting fully active on all endpoints
+- **MCP Mode (default)**: Rate limiting not applied (STDIO transport, no HTTP requests)
+- **Health Endpoint**: Exempt from rate limiting for monitoring systems
+
+**Storage and Persistence**
+- Uses in-memory storage for request counters (faster than Redis for single-instance deployment)
+- Rate limit counters reset on application restart
+- No database or external dependencies required
+- Suitable for single-instance deployments
+
+### Error Handling Flow Integration
+
+The rate limiting integrates into the existing error handling flow:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Request
+    Request --> Validation
+    
+    Validation --> RateLimit: Valid
+    Validation --> Error400: Invalid
+    
+    RateLimit --> Processing: Under limit
+    RateLimit --> Error429: Over limit (NEW)
+    
+    Processing --> CacheCheck
+    CacheCheck --> CacheHit: Found
+    CacheCheck --> Ingest: Not found
+    
+    CacheHit --> Success
+    
+    Error400 --> [*]
+    Error429 --> [*]
+    Success --> [*]
+```
+
+**Integration Benefits**
+- **Protection**: Prevents API abuse and DoS attacks
+- **Resource Conservation**: Limits resource consumption per client
+- **Fair Usage**: Ensures equitable access across multiple clients
+- **Monitoring Integration**: Compatible with health check systems
+- **Zero Configuration**: Works out-of-the-box with sensible defaults
+
 ## Technology Stack
 
 ```mermaid
@@ -904,6 +1033,8 @@ graph LR
 | Type filter | < 10ms P95 | Medium selectivity (~40% for functions) with idx_public_functions |
 | Example filter | < 8ms P95 | Medium selectivity (~30%) with idx_has_examples partial index |
 | Crate prefix filter | < 3ms P95 | High selectivity (~1%) with idx_crate_prefix optimization |
+| **Rate limiting overhead** | **< 1ms P95** | **In-memory counter check and update with slowapi** |
+| **Rate limit storage** | **O(active IPs)** | **In-memory storage, resets on restart** |
 | Cache hit latency | < 5ms P95 | LRU cache with TTL support |
 | Cache miss latency | < 100ms P95 | Full search + ranking + cache store |
 | Ingest latency | < 30s | Full rustdoc processing with streaming |

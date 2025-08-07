@@ -659,6 +659,30 @@
           "impact": "Prevents terminal hanging during server testing and enables clean process cleanup, improving development workflow",
           "dateLearned": "2025-08-07",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "SlowAPI rate limiting implementation gotchas",
+          "context": "Implementing rate limiting with SlowAPI middleware in FastAPI applications",
+          "details": "SlowAPI requires: 1) Request parameter MUST be included in endpoint function signatures or rate limiting won't work, 2) Middleware order matters - last added is outermost, 3) Memory backend doesn't share state between workers, use Redis for production, 4) Use limiter.limit() decorator on each endpoint that needs rate limiting, 5) Set app.state.limiter after app initialization for proper integration",
+          "impact": "Ensures proper rate limiting implementation and prevents common configuration issues that lead to ineffective rate limiting",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/middleware.py", "src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Rate limiting testing requires concurrent request patterns",
+          "context": "Testing rate limiting functionality to ensure proper enforcement",
+          "details": "Effective rate limiting tests require: 1) Use concurrent requests (asyncio.gather) to test rate limiting behavior, 2) Verify both successful responses (200) and rate-limited responses (429), 3) Check that health/monitoring endpoints remain unprotected, 4) Test rate limit headers (X-RateLimit-*) in responses, 5) Validate that rate limits reset properly over time",
+          "impact": "Ensures rate limiting works correctly under realistic concurrent load conditions and provides proper feedback to clients",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["tests/test_app.py", "src/docsrs_mcp/middleware.py"]
+        },
+        {
+          "lesson": "Rate limiting integration patterns for clean code organization",
+          "context": "Organizing rate limiting code for maintainability and separation of concerns",
+          "details": "Best practices for rate limiting integration: 1) Create dedicated middleware.py for clean separation from main app logic, 2) Use limiter.limit() decorator on individual endpoints for granular control, 3) Set app.state.limiter after app initialization to ensure proper middleware access, 4) Add custom exception handler for RateLimitExceeded to provide consistent error responses, 5) Configure different limits for different endpoint types (search vs health checks)",
+          "impact": "Maintains clean code architecture while enabling flexible and maintainable rate limiting configuration",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/middleware.py", "src/docsrs_mcp/app.py"]
         }
       ]
     }
@@ -739,9 +763,20 @@
       "Preserve full data structures when building hierarchies to maintain context information"
     ],
     "rateLimiting": [
-      "Ensure Redis is running for distributed limiting",
-      "Check IP extraction middleware ordering",
-      "Verify rate limit headers in responses"
+      "MUST include Request parameter in endpoint function signatures or rate limiting won't work",
+      "Middleware order matters - last added middleware is outermost in execution order",
+      "Memory backend doesn't share state between workers - use Redis for production/multi-worker scenarios",
+      "Use limiter.limit() decorator on each endpoint that needs rate limiting for granular control",
+      "Set app.state.limiter after app initialization for proper middleware integration",
+      "Create dedicated middleware.py for clean separation of rate limiting logic",
+      "Add custom exception handler for RateLimitExceeded to provide consistent error responses",
+      "Test rate limiting with concurrent requests using asyncio.gather to verify proper enforcement",
+      "Verify both successful (200) and rate-limited (429) responses in tests",
+      "Check that health/monitoring endpoints remain unprotected from rate limiting",
+      "Test rate limit headers (X-RateLimit-*) are properly included in responses",
+      "Ensure Redis is running for distributed limiting in production environments",
+      "Check IP extraction middleware ordering for proper client identification",
+      "Verify rate limit headers in responses for client feedback"
     ],
     "serverManagement": [
       "Start MCP server (default): nohup uv run docsrs-mcp > server.log 2>&1 & echo $!",

@@ -756,9 +756,118 @@
       },
       "rateLimiting": {
         "library": "slowapi",
-        "version": ">=0.1",
-        "backend": "Redis for distributed",
-        "limit": "30 requests/second per IP"
+        "version": "0.1.10",
+        "versionDetails": {
+          "status": "Latest stable version as of August 2025",
+          "maturity": "Alpha quality but production-used by multiple organizations",
+          "stability": "Stable API with active maintenance and bug fixes"
+        },
+        "backend": {
+          "inMemory": {
+            "description": "Built-in memory storage for single-worker deployments",
+            "suitability": "Sufficient for single-worker FastAPI applications",
+            "limitation": "Does not persist across application restarts",
+            "implementation": "Default storage when no Redis backend configured"
+          },
+          "redis": {
+            "description": "Redis backend for distributed rate limiting",
+            "use_case": "Multi-worker or multi-instance deployments",
+            "scalability": "Supports horizontal scaling and load balancing",
+            "persistence": "Rate limit state persists across application restarts"
+          }
+        },
+        "limit": "30 requests/second per IP",
+        "algorithmOptimization": {
+          "tokenBucket": {
+            "description": "Token bucket algorithm optimal for handling burst traffic",
+            "benefit": "Allows short bursts while maintaining average rate limits",
+            "implementation": "Smooths out traffic spikes and provides better user experience",
+            "rationale": "More flexible than sliding window for API rate limiting"
+          }
+        },
+        "implementationRequirements": {
+          "requestParameter": {
+            "requirement": "Must explicitly pass Request parameter to rate-limited endpoints",
+            "reason": "SlowAPI requires access to request object for client identification",
+            "example": "async def endpoint(request: Request, ...): # Required for rate limiting",
+            "criticality": "Rate limiting will not function without explicit Request parameter"
+          },
+          "limiterState": {
+            "requirement": "Must set app.state.limiter for proper operation",
+            "implementation": "app.state.limiter = limiter # Required in FastAPI app setup",
+            "reason": "SlowAPI requires limiter instance to be accessible via application state",
+            "timing": "Configure during FastAPI application initialization"
+          }
+        },
+        "bestPractices": {
+          "middlewareAvoidance": {
+            "recommendation": "Avoid BaseHTTPMiddleware for rate limiting implementation",
+            "performanceImpact": "70-80% performance hit when using BaseHTTPMiddleware",
+            "reason": "BaseHTTPMiddleware processes each request synchronously regardless of async handlers",
+            "preferredApproach": "Use SlowAPI decorator-based rate limiting for optimal performance"
+          },
+          "responseHeaders": {
+            "retryAfter": {
+              "header": "Retry-After",
+              "purpose": "Inform clients when they can retry after rate limit exceeded",
+              "format": "Seconds until next allowed request",
+              "benefit": "Improves client experience and reduces unnecessary retry attempts"
+            },
+            "rateLimitHeaders": {
+              "xRateLimitLimit": "Maximum requests per time window",
+              "xRateLimitRemaining": "Remaining requests in current window",
+              "xRateLimitReset": "Time when rate limit window resets",
+              "standard": "Industry standard headers for rate limit communication"
+            }
+          },
+          "errorHandling": {
+            "customExceptionHandler": {
+              "purpose": "Implement custom exception handler for consistent rate limit error format",
+              "benefit": "Provides uniform error responses across all rate-limited endpoints",
+              "implementation": "Use FastAPI exception handlers to format rate limit exceptions",
+              "consistency": "Ensures predictable API behavior when rate limits are exceeded"
+            }
+          }
+        },
+        "implementationPatterns": {
+          "decoratorBased": {
+            "pattern": "@limiter.limit('requests/timeunit')",
+            "description": "Apply rate limiting using SlowAPI decorators on FastAPI endpoints",
+            "benefit": "Fine-grained control over rate limiting per endpoint",
+            "flexibility": "Different endpoints can have different rate limits based on usage patterns"
+          },
+          "globalConfiguration": {
+            "approach": "Configure limiter once and apply to multiple endpoints",
+            "consistency": "Ensures uniform rate limiting behavior across application",
+            "maintenance": "Centralized configuration simplifies rate limit management"
+          },
+          "clientIdentification": {
+            "defaultStrategy": "IP-based identification for client rate limiting",
+            "alternatives": ["API key-based limiting", "User-based limiting", "Custom identifier extraction"],
+            "extensibility": "SlowAPI supports custom key extraction functions for advanced identification"
+          }
+        },
+        "productionConsiderations": {
+          "singleWorkerDeployments": {
+            "recommendation": "In-memory storage sufficient for single-worker FastAPI deployments",
+            "rationale": "Avoids Redis dependency complexity when not needed for scaling",
+            "limitation": "Rate limits reset on application restart"
+          },
+          "multiWorkerDeployments": {
+            "requirement": "Redis backend mandatory for multi-worker or distributed deployments",
+            "reason": "Shared rate limit state required across multiple application instances",
+            "configuration": "Configure Redis connection string in SlowAPI initialization"
+          },
+          "performanceMonitoring": {
+            "metrics": [
+              "Rate limit hit frequency by endpoint",
+              "Average response time impact of rate limiting",
+              "Redis backend latency (if applicable)",
+              "False positive rate limit triggers"
+            ],
+            "alerting": "Monitor for unusual rate limit patterns that might indicate attacks or misconfigurations"
+          }
+        }
       },
       "compression": {
         "library": "zstandard",
@@ -1267,6 +1376,14 @@
       "Use MATCH operator syntax for sqlite-vec queries",
       "Implement connection pooling for aiohttp from start",
       "Set up proper asyncio task management",
+      "Use SlowAPI 0.1.10 for production-ready rate limiting with token bucket algorithm",
+      "Explicitly pass Request parameter to rate-limited endpoints for SlowAPI functionality",
+      "Set app.state.limiter during FastAPI initialization for proper SlowAPI operation", 
+      "Avoid BaseHTTPMiddleware for rate limiting due to 70-80% performance penalty",
+      "Use SlowAPI decorator-based approach (@limiter.limit()) for optimal performance",
+      "Include Retry-After headers in rate limit responses for better client experience",
+      "Implement custom exception handlers for consistent rate limit error formatting",
+      "Use in-memory storage for single-worker deployments, Redis for multi-worker scaling",
       "Use streaming decompression for large rustdoc files",
       "Prefer zstd decompression over gzip for docs.rs files for better performance",
       "Start with simple crate description parsing for MVP",

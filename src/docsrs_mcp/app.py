@@ -4,11 +4,13 @@ import logging
 from pathlib import Path
 
 import aiosqlite
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from slowapi.errors import RateLimitExceeded
 
 from .database import get_module_tree as get_module_tree_from_db
 from .database import search_embeddings
 from .ingest import get_embedding_model, ingest_crate
+from .middleware import limiter, rate_limit_handler
 from .models import (
     CrateModule,
     GetCrateSummaryRequest,
@@ -82,6 +84,10 @@ For more information, see the [GitHub repository](https://github.com/peterkloibe
     openapi_url="/openapi.json",
 )
 
+# Configure rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+
 
 @app.get(
     "/health",
@@ -105,7 +111,8 @@ async def health_check():
     summary="Service Information",
     response_description="Basic service metadata",
 )
-async def root():
+@limiter.limit("30/second")
+async def root(request: Request):
     """
     Get basic service information.
 
@@ -127,7 +134,8 @@ async def root():
     summary="Get MCP Manifest",
     response_description="Complete MCP server manifest",
 )
-async def get_mcp_manifest():
+@limiter.limit("30/second")
+async def get_mcp_manifest(request: Request):
     """
     Get the Model Context Protocol server manifest.
 
@@ -270,7 +278,8 @@ async def get_mcp_manifest():
     response_description="Crate metadata and module structure",
     operation_id="getCrateSummary",
 )
-async def get_crate_summary(request: GetCrateSummaryRequest):
+@limiter.limit("30/second")
+async def get_crate_summary(request: Request, params: GetCrateSummaryRequest):
     """
     Get summary information about a Rust crate.
 
@@ -282,7 +291,7 @@ async def get_crate_summary(request: GetCrateSummaryRequest):
     """
     try:
         # Ingest crate if not already done
-        db_path = await ingest_crate(request.crate_name, request.version)
+        db_path = await ingest_crate(params.crate_name, params.version)
 
         # Fetch crate metadata from database
         async with aiosqlite.connect(db_path) as db:
@@ -335,7 +344,8 @@ async def get_crate_summary(request: GetCrateSummaryRequest):
     response_description="Ranked search results",
     operation_id="searchItems",
 )
-async def search_items(request: SearchItemsRequest):
+@limiter.limit("30/second")
+async def search_items(request: Request, params: SearchItemsRequest):
     """
     Search for items in a crate's documentation using semantic similarity.
 
@@ -348,24 +358,24 @@ async def search_items(request: SearchItemsRequest):
     """
     try:
         # Ingest crate if not already done
-        db_path = await ingest_crate(request.crate_name, request.version)
+        db_path = await ingest_crate(params.crate_name, params.version)
 
         # Generate embedding for query
         model = get_embedding_model()
-        query_embedding = list(model.embed([request.query]))[0]
+        query_embedding = list(model.embed([params.query]))[0]
 
         # Search embeddings with filters
         results = await search_embeddings(
             db_path,
             query_embedding,
-            k=request.k or 5,
-            type_filter=request.item_type,
-            crate_filter=request.crate_filter,
-            module_path=request.module_path,
-            has_examples=request.has_examples,
-            min_doc_length=request.min_doc_length,
-            visibility=request.visibility,
-            deprecated=request.deprecated,
+            k=params.k or 5,
+            type_filter=params.item_type,
+            crate_filter=params.crate_filter,
+            module_path=params.module_path,
+            has_examples=params.has_examples,
+            min_doc_length=params.min_doc_length,
+            visibility=params.visibility,
+            deprecated=params.deprecated,
         )
 
         # Convert to response format
@@ -393,7 +403,8 @@ async def search_items(request: SearchItemsRequest):
     response_description="Complete item documentation",
     operation_id="getItemDoc",
 )
-async def get_item_doc(request: GetItemDocRequest):
+@limiter.limit("30/second")
+async def get_item_doc(request: Request, params: GetItemDocRequest):
     """
     Get complete documentation for a specific item in a crate.
 
@@ -405,13 +416,13 @@ async def get_item_doc(request: GetItemDocRequest):
     """
     try:
         # Ingest crate if not already done
-        db_path = await ingest_crate(request.crate_name, request.version)
+        db_path = await ingest_crate(params.crate_name, params.version)
 
         # Search for the specific item
         async with aiosqlite.connect(db_path) as db:
             cursor = await db.execute(
                 "SELECT content FROM embeddings WHERE item_path = ? LIMIT 1",
-                (request.item_path,),
+                (params.item_path,),
             )
             row = await cursor.fetchone()
 
@@ -420,7 +431,7 @@ async def get_item_doc(request: GetItemDocRequest):
             else:
                 # If not found in embeddings, return a helpful message
                 return {
-                    "content": f"Documentation for `{request.item_path}` not found in the current index. Try searching for it using the search_items tool.",
+                    "content": f"Documentation for `{params.item_path}` not found in the current index. Try searching for it using the search_items tool.",
                     "format": "markdown",
                 }
 
@@ -436,7 +447,8 @@ async def get_item_doc(request: GetItemDocRequest):
     response_description="Module hierarchy tree structure",
     operation_id="getModuleTree",
 )
-async def get_module_tree(request: GetModuleTreeRequest):
+@limiter.limit("30/second")
+async def get_module_tree(request: Request, params: GetModuleTreeRequest):
     """
     Get the module hierarchy tree for a Rust crate.
 
@@ -447,7 +459,7 @@ async def get_module_tree(request: GetModuleTreeRequest):
     """
     try:
         # Ingest crate if not already done
-        db_path = await ingest_crate(request.crate_name, request.version)
+        db_path = await ingest_crate(params.crate_name, params.version)
 
         # Get crate ID
         async with aiosqlite.connect(db_path) as db:
@@ -482,7 +494,7 @@ async def get_module_tree(request: GetModuleTreeRequest):
         tree = build_tree(modules)
 
         return {
-            "crate_name": request.crate_name,
+            "crate_name": params.crate_name,
             "modules": tree,
             "total_modules": len(modules),
         }
@@ -501,7 +513,8 @@ async def get_module_tree(request: GetModuleTreeRequest):
     response_description="Available crate versions",
     operation_id="listVersions",
 )
-async def list_versions(crate_name: str):
+@limiter.limit("30/second")
+async def list_versions(request: Request, crate_name: str):
     """
     List all locally cached versions of a crate.
 
