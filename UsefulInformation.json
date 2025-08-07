@@ -109,6 +109,46 @@
           "prevention": "Implement graceful degradation with fallback values for external API dependencies",
           "dateEncountered": "2025-08-06",
           "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Rustdoc JSON URL pattern redirecting unexpectedly",
+          "context": "Initial URL pattern /crate/{crate}/latest was redirecting to different endpoints",
+          "solution": "Use new docs.rs API pattern /crate/{crate-name}/{version}/json for direct access",
+          "prevention": "Always use version-specific URLs for docs.rs API to avoid redirect overhead",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Zstd compression not detected in HTTP responses",
+          "context": "JSON responses were compressed but compression detection was failing",
+          "solution": "Check magic bytes (0x28, 0xb5, 0x2f, 0xfd) to detect zstd compression instead of relying on headers",
+          "prevention": "Always check magic bytes for compression detection as headers may be unreliable",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Module extraction receiving strings instead of dictionaries",
+          "context": "build_module_hierarchy was receiving string paths instead of full path_info dictionaries",
+          "solution": "Store full path_info dict in paths_data for hierarchy building instead of just path strings",
+          "prevention": "Always preserve full data structures when building hierarchies to maintain context information",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Item kind field not directly available in rustdoc index",
+          "context": "Kind field was not found directly in rustdoc JSON index items",
+          "solution": "Extract kind from inner field as single-key dictionary instead of direct access",
+          "prevention": "Always inspect rustdoc JSON structure carefully as fields may be nested unexpectedly",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Module names empty in hierarchy extraction",
+          "context": "Module names were showing as empty in the extracted hierarchy structure",
+          "solution": "Module name is last element of path array, not a separate name field",
+          "prevention": "Understand rustdoc JSON path structure where item names are derived from path arrays",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
         }
       ]
     },
@@ -598,7 +638,13 @@
       "Use integration tests to validate streaming pipeline error recovery",
       "Always load sqlite-vec extension before testing vector operations to prevent 'no such function' errors",
       "Create partial indexes for common filter patterns to dramatically improve query performance",
-      "Use progressive filtering only for small result sets (<10K items) - prefer database-level filtering for large datasets"
+      "Use progressive filtering only for small result sets (<10K items) - prefer database-level filtering for large datasets",
+      "Use version-specific docs.rs URLs (/crate/{name}/{version}/json) to avoid redirect overhead",
+      "Check magic bytes (0x28, 0xb5, 0x2f, 0xfd) for zstd compression detection instead of relying on headers",
+      "Store full path_info dictionaries instead of just path strings when building module hierarchies",
+      "Extract item kind from inner field as single-key dictionary in rustdoc JSON parsing",
+      "Module names are derived from last element of path arrays, not separate name fields",
+      "Preserve full data structures when building hierarchies to maintain context information"
     ],
     "rateLimiting": [
       "Ensure Redis is running for distributed limiting",

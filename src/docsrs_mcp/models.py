@@ -398,18 +398,73 @@ class GetItemDocRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class GetModuleTreeRequest(BaseModel):
+    """
+    Request for get_module_tree tool.
+
+    Retrieves the hierarchical module structure of a Rust crate.
+
+    Example:
+        ```json
+        {
+            "crate_name": "tokio",
+            "version": "1.35.1"
+        }
+        ```
+    """
+
+    crate_name: str = Field(
+        ...,
+        description="Name of the Rust crate to get module tree for",
+        examples=["tokio", "serde", "actix-web"],
+    )
+    version: str | None = Field(
+        None,
+        description="Specific version or 'latest' (default: latest)",
+        examples=["1.35.1", "latest", None],
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 # Response Models
 class CrateModule(BaseModel):
     """
-    Crate module information.
+    Crate module information with hierarchy support.
 
-    Represents a module within a Rust crate, including its name and path.
+    Represents a module within a Rust crate, including its name, path,
+    and hierarchical relationships.
     """
 
     name: str = Field(..., description="Module name")
     path: str = Field(..., description="Full module path within the crate")
+    parent_id: int | None = Field(None, description="Parent module ID")
+    depth: int = Field(0, description="Depth in module hierarchy (0 = root)")
+    item_count: int = Field(0, description="Number of items in this module")
 
     model_config = ConfigDict(extra="forbid")
+
+
+class ModuleTreeNode(BaseModel):
+    """
+    Hierarchical module tree node for tree structure responses.
+
+    Represents a module with its children in a tree structure.
+    """
+
+    name: str = Field(..., description="Module name")
+    path: str = Field(..., description="Full module path within the crate")
+    depth: int = Field(0, description="Depth in module hierarchy (0 = root)")
+    item_count: int = Field(0, description="Number of items in this module")
+    children: list["ModuleTreeNode"] = Field(
+        default_factory=list, description="Child modules"
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# Forward reference resolution for recursive model
+ModuleTreeNode.model_rebuild()
 
 
 class GetCrateSummaryResponse(BaseModel):

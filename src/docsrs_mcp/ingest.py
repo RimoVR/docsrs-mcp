@@ -32,7 +32,7 @@ from .config import (
     RUST_VERSION_MANIFEST_URL,
     STDLIB_CRATES,
 )
-from .database import get_db_path, init_database, store_crate_metadata
+from .database import get_db_path, init_database, store_crate_metadata, store_modules
 from .memory_utils import (
     MemoryMonitor,
     get_adaptive_batch_size,
@@ -144,38 +144,39 @@ async def resolve_version(
     Uses docs.rs redirect to resolve 'latest' or other version selectors.
     Returns the resolved version and the URL to the rustdoc JSON file.
     """
-    # Construct the URL for version resolution
-    base_url = f"https://docs.rs/crate/{crate_name}/{version}"
-
-    # Make a HEAD request to get the redirect without downloading content
-    timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
-    async with session.head(
-        base_url, timeout=timeout, allow_redirects=True
-    ) as response:
-        if response.status != 200:
-            raise Exception(
-                f"Failed to resolve version for {crate_name}: HTTP {response.status}"
-            )
-
-        # Extract the final URL after redirects
-        final_url = str(response.url)
-
-        # Parse the version from the URL
-        # Format: https://docs.rs/{crate_name}/{version}/{crate_name}/
-        parts = final_url.strip("/").split("/")
-        if len(parts) >= 5 and parts[3] == crate_name:
-            resolved_version = parts[4]
-
-            # Construct the rustdoc JSON URL
-            # Convert crate name underscores for the JSON filename
-            json_name = crate_name.replace("-", "_")
-            rustdoc_url = (
-                f"https://docs.rs/{crate_name}/{resolved_version}/{json_name}.json"
-            )
-
+    # Use the new rustdoc JSON API pattern introduced in May 2025
+    # Direct JSON URL without needing to resolve redirects first
+    if version == "latest":
+        # For latest, use the direct JSON endpoint
+        rustdoc_url = f"https://docs.rs/crate/{crate_name}/latest/json"
+        
+        # Make a HEAD request to get the actual version from redirect
+        timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
+        async with session.head(
+            rustdoc_url, timeout=timeout, allow_redirects=True
+        ) as response:
+            if response.status != 200:
+                raise Exception(
+                    f"Failed to resolve version for {crate_name}: HTTP {response.status}"
+                )
+            
+            # Extract version from redirected URL
+            # Format: https://static.docs.rs/{crate_name}/{version}/json
+            final_url = str(response.url)
+            parts = final_url.strip("/").split("/")
+            
+            # Try to extract version from the URL
+            if "static.docs.rs" in final_url and len(parts) >= 5:
+                resolved_version = parts[4]
+            else:
+                # Fallback: use "latest" if we can't parse
+                resolved_version = "latest"
+                
             return resolved_version, rustdoc_url
-        else:
-            raise Exception(f"Unexpected URL format from docs.rs redirect: {final_url}")
+    else:
+        # For specific versions, use the direct pattern
+        rustdoc_url = f"https://docs.rs/crate/{crate_name}/{version}/json"
+        return version, rustdoc_url
 
 
 @retry(
@@ -235,19 +236,24 @@ async def download_rustdoc(
     urls_to_try = []
 
     # If URL already has a compressed extension, use it as-is
-    if rustdoc_url.endswith((".json.zst", ".json.gz")):
+    if rustdoc_url.endswith((".json.zst", ".json.gz", ".gz")):
         urls_to_try.append(rustdoc_url)
     else:
-        # Remove .json extension if present to get base URL
-        base_url = (
-            rustdoc_url.rstrip(".json")
-            if rustdoc_url.endswith(".json")
-            else rustdoc_url
-        )
-        # Try compressed formats first (preferred for size), then uncompressed
-        urls_to_try.extend(
-            [f"{base_url}.json.zst", f"{base_url}.json.gz", f"{base_url}.json"]
-        )
+        # For the new JSON API pattern (/crate/{name}/{version}/json)
+        # We can append .gz for gzip compression
+        if rustdoc_url.endswith("/json"):
+            # Try zstd (default), then gzip
+            urls_to_try.extend([rustdoc_url, f"{rustdoc_url}.gz"])
+        else:
+            # Fallback for old-style URLs
+            base_url = (
+                rustdoc_url.rstrip(".json")
+                if rustdoc_url.endswith(".json")
+                else rustdoc_url
+            )
+            urls_to_try.extend(
+                [f"{base_url}.json.zst", f"{base_url}.json.gz", f"{base_url}.json"]
+            )
 
     last_error = None
     for url in urls_to_try:
@@ -320,7 +326,11 @@ async def decompress_content(content: bytes, url: str) -> str:
 
     Returns the decompressed JSON string.
     """
-    if url.endswith(".json.zst"):
+    # Check if content is zstd compressed (default for /json endpoint)
+    # zstd magic bytes: 0x28, 0xb5, 0x2f, 0xfd
+    is_zstd = content[:4] == b'\x28\xb5\x2f\xfd' if len(content) >= 4 else False
+    
+    if url.endswith(".json.zst") or (url.endswith("/json") and is_zstd):
         # Zstandard decompression
         dctx = zstandard.ZstdDecompressor(max_window_size=2**31)
 
@@ -348,7 +358,7 @@ async def decompress_content(content: bytes, url: str) -> str:
         )
         return decompressed.decode("utf-8")
 
-    elif url.endswith(".json.gz"):
+    elif url.endswith(".json.gz") or url.endswith("/json.gz"):
         # Gzip decompression
         decompressed = gzip.decompress(content)
 
@@ -465,6 +475,81 @@ def extract_signature(item: dict) -> str | None:
     return None
 
 
+def build_module_hierarchy(paths: dict) -> dict:
+    """Build complete module hierarchy from paths dictionary.
+
+    Args:
+        paths: Dictionary from rustdoc JSON paths section (id -> path_info dict)
+
+    Returns:
+        dict: Module ID -> module info with parent relationships
+    """
+    modules = {}
+    total_entries = 0
+    module_count = 0
+
+    try:
+        for id_str, path_info in paths.items():
+            total_entries += 1
+            if not isinstance(path_info, dict):
+                continue
+
+            # Check if it's a module
+            kind = path_info.get("kind")
+            if isinstance(kind, str) and kind.lower() in ["module", "mod"]:
+                module_count += 1
+                path_parts = path_info.get("path", [])
+                
+                # Module name is the last part of the path
+                name = path_parts[-1] if path_parts else ""
+
+                # The path already includes the module name
+                full_path_parts = path_parts
+
+                full_path = "::".join(full_path_parts)
+
+                # Determine parent
+                parent_id = None
+                depth = len(full_path_parts)
+
+                if depth > 1:
+                    # Find parent module by path
+                    parent_path_parts = full_path_parts[:-1]
+                    parent_path = "::".join(parent_path_parts)
+
+                    # Search for parent module ID
+                    for pid, pinfo in paths.items():
+                        if isinstance(pinfo, dict):
+                            pkind = pinfo.get("kind", "")
+                            if isinstance(pkind, str) and pkind.lower() in [
+                                "module",
+                                "mod",
+                            ]:
+                                pname = pinfo.get("name", "")
+                                ppath = pinfo.get("path", [])
+                                if pname and pname not in ppath:
+                                    p_full = "::".join(ppath + [pname])
+                                else:
+                                    p_full = "::".join(ppath)
+                                if p_full == parent_path:
+                                    parent_id = pid
+                                    break
+
+                modules[id_str] = {
+                    "name": name,
+                    "path": full_path,
+                    "parent_id": parent_id,
+                    "depth": depth - 1,  # 0-indexed depth (crate root = 0)
+                    "item_count": 0,  # Will be updated during index pass
+                }
+
+    except Exception as e:
+        logger.warning(f"Error building module hierarchy: {e}")
+
+    logger.info(f"Processed {total_entries} path entries, found {module_count} modules, built {len(modules)} module records")
+    return modules
+
+
 def resolve_parent_id(item: dict, paths: dict) -> str | None:
     """Resolve the parent module/struct ID for an item."""
     try:
@@ -526,7 +611,7 @@ def extract_visibility(item: dict) -> str:
                 return "public"
             elif visibility == "crate":
                 return "crate"
-            elif visibility == "private" or visibility == "restricted":
+            elif visibility in {"private", "restricted"}:
                 return "private"
 
         # Check inner visibility
@@ -602,14 +687,22 @@ async def parse_rustdoc_items_streaming(json_content: str):
 
     # First pass: collect paths (required for reference resolution)
     id_to_path = {}
+    paths_data = {}  # Full path info for module hierarchy
+    modules = {}
     with MemoryMonitor("parse_rustdoc_paths"):
         try:
             parser = ijson.kvitems(io.BytesIO(json_content.encode()), "paths")
             for item_id, path_info in parser:
                 if isinstance(path_info, dict) and "path" in path_info:
                     id_to_path[item_id] = "::".join(path_info["path"])
+                    paths_data[item_id] = path_info  # Store full info
         except Exception as e:
             logger.warning(f"Error parsing paths section: {e}")
+
+    # Build module hierarchy from collected paths
+    logger.info(f"Collected {len(paths_data)} paths entries")
+    modules = build_module_hierarchy(paths_data)
+    logger.info(f"Built hierarchy with {len(modules)} modules")
 
     # Second pass: stream items from index
     item_count = 0
@@ -624,20 +717,25 @@ async def parse_rustdoc_items_streaming(json_content: str):
 
                 # Extract relevant fields
                 name = item_info.get("name", "")
-                kind = item_info.get("kind", "")
                 docs = item_info.get("docs", "")
+                inner = item_info.get("inner", {})
 
                 # Get the path from our mapping
                 path = id_to_path.get(item_id, "")
 
-                # Filter to relevant item types
-                if isinstance(kind, str):
-                    kind_lower = kind.lower()
-                elif isinstance(kind, dict) and len(kind) == 1:
-                    # Handle {"variant_name": data} format
-                    kind_lower = list(kind.keys())[0].lower()
+                # Extract kind from inner field
+                if isinstance(inner, dict) and len(inner) == 1:
+                    # The kind is the single key in the inner dict
+                    kind_lower = list(inner.keys())[0].lower()
                 else:
-                    continue
+                    # Fallback: check if there's a direct kind field (older format?)
+                    kind = item_info.get("kind", "")
+                    if isinstance(kind, str):
+                        kind_lower = kind.lower()
+                    elif isinstance(kind, dict) and len(kind) == 1:
+                        kind_lower = list(kind.keys())[0].lower()
+                    else:
+                        continue
 
                 # Check if it's a type we want to index
                 indexable_kinds = [
@@ -682,9 +780,13 @@ async def parse_rustdoc_items_streaming(json_content: str):
                         full_path = path or name
 
                     # Extract additional metadata using helper functions
-                    item_type = normalize_item_type(kind)
-                    signature = extract_signature(item_info)
+                    item_type = normalize_item_type(kind_lower)
+                    signature = extract_signature(inner if inner else item_info)
                     parent_id = resolve_parent_id(item_info, id_to_path)
+
+                    # Update item count for parent module
+                    if parent_id and parent_id in modules:
+                        modules[parent_id]["item_count"] += 1
                     examples = extract_code_examples(docs)
                     visibility = extract_visibility(item_info)
                     deprecated = extract_deprecated(item_info)
@@ -717,12 +819,17 @@ async def parse_rustdoc_items_streaming(json_content: str):
 
     logger.info(f"Streamed {item_count} items from rustdoc JSON")
 
+    # Return modules as final yield with special marker
+    yield {"_modules": modules}
+
 
 async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:
     """Parse rustdoc JSON and return a list of items (backwards compatible)."""
     items = []
     async for item in parse_rustdoc_items_streaming(json_content):
-        items.append(item)
+        # Skip the special modules marker
+        if "_modules" not in item:
+            items.append(item)
     return items
 
 
@@ -1064,7 +1171,7 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 crate_info.get("documentation") or f"https://docs.rs/{crate_name}"
             )
 
-            await store_crate_metadata(
+            crate_id = await store_crate_metadata(
                 db_path,
                 crate_name,
                 version,
@@ -1105,14 +1212,24 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
                 # Collect items from streaming parser
                 items = []
+                modules = {}
                 async for item in parse_rustdoc_items_streaming(json_content):
-                    items.append(item)
+                    # Check for special modules marker
+                    if "_modules" in item:
+                        modules = item["_modules"]
+                    else:
+                        items.append(item)
 
                 if not items:
                     logger.warning("No items found in rustdoc JSON")
                     raise Exception("No items found in rustdoc JSON")
 
                 logger.info(f"Collected {len(items)} rustdoc items")
+
+                # Store module hierarchy
+                if modules:
+                    await store_modules(db_path, crate_id, modules)
+                    logger.info(f"Stored {len(modules)} modules with hierarchy")
 
                 # Transform items to chunks
                 chunks = []

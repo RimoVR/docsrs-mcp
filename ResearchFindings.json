@@ -233,10 +233,24 @@
         "insertBatchSize": 1000,
         "indexCommand": "CREATE INDEX (for sqlite-vec)",
         "searchMethod": "k-NN cosine similarity with MATCH operator",
+        "hierarchicalDataModeling": {
+          "adjacencyList": {
+            "description": "Industry standard SQLite approach for hierarchical data",
+            "implementation": "Store parent-child relationships in table columns",
+            "benefit": "Efficient storage and querying of module tree structures",
+            "optimization": "Recursive CTEs for tree traversal queries"
+          },
+          "performanceOptimizations": {
+            "recursiveCTEs": "Recommended for SQLite tree traversal operations",
+            "indexing": "Index parent_id columns for efficient hierarchy queries",
+            "batchInsertion": "Use transactions with batch operations for performance"
+          }
+        },
         "asyncDatabase": {
           "library": "aiosqlite",
           "purpose": "Async SQLite operations for better performance",
-          "installation": "pip install aiosqlite"
+          "installation": "pip install aiosqlite",
+          "moduleHierarchy": "Essential for non-blocking module hierarchy extraction and storage"
         },
         "batchInsertion": {
           "sqliteParameterLimit": {
@@ -387,7 +401,24 @@
         "availability": "Started 2025-05-23",
         "formats": [".json", ".json.zst", ".json.gz"],
         "urlPattern": "https://docs.rs/{crate}/{version}/{crate_name}.json[.zst|.gz]",
+        "apiUrlPattern": "/crate/{crate-name}/{version}/json",
         "compressionPreference": ".zst (zstandard) - better compression than gzip",
+        "compressionDetails": {
+          "zstd": {
+            "magicBytes": ["0x28", "0xb5", "0x2f", "0xfd"],
+            "description": "Default compression format for docs.rs Rustdoc JSON API",
+            "performance": "Better compression ratio than gzip"
+          },
+          "gzip": {
+            "suffix": ".gz",
+            "description": "Alternative compression format available",
+            "usage": "Use when zstd is not supported"
+          }
+        },
+        "deliveryMechanism": {
+          "redirect": "docs.rs redirects to static.docs.rs for file delivery",
+          "cdnOptimization": "Static delivery optimized for performance"
+        },
         "fileSizes": {
           "compressed": "Varies significantly by crate",
           "uncompressed": "Can exceed 100MB for large crates",
@@ -438,6 +469,48 @@
             "purpose": "rustdoc JSON uses FORMAT_VERSION field for tracking schema changes",
             "importance": "Essential for maintaining parsing compatibility across rustdoc versions",
             "implementation": "Check FORMAT_VERSION before processing any rustdoc JSON file"
+          },
+          "jsonStructure": {
+            "moduleHierarchy": {
+              "pathsSection": "Module information stored in 'paths' section with kind='module'",
+              "indexSection": "Item details stored in 'index' section with kind in inner field",
+              "innerFieldStructure": "Inner field contains single-key dict with item type",
+              "hierarchyExtraction": "Use paths section for building complete module tree structure"
+            },
+            "performanceOptimizations": {
+              "ijsonStreaming": {
+                "backend": "yajl2_c",
+                "performanceGain": "656x improvement over pure Python implementation",
+                "benefit": "Enables processing of large rustdoc JSON files without memory issues"
+              },
+              "adjacencyList": {
+                "model": "Industry standard for SQLite hierarchical data representation",
+                "benefit": "Efficient storage and querying of module hierarchy"
+              },
+              "recursiveCTEs": {
+                "usage": "Recommended approach for tree traversal in SQLite",
+                "performance": "Optimized for hierarchical queries"
+              },
+              "batchInsertion": {
+                "technique": "Batch insertions with transactions",
+                "benefit": "Significantly improved database insertion performance"
+              }
+            }
+          },
+          "libraryVersions": {
+            "ijson": {
+              "purpose": "Streaming JSON parsing for memory efficiency",
+              "backend": "yajl2_c for optimal performance",
+              "benefit": "Handles large files without loading entire structure into memory"
+            },
+            "zstandard": {
+              "purpose": "zstd decompression for docs.rs files",
+              "method": "Streaming decompression to avoid memory spikes"
+            },
+            "aiosqlite": {
+              "purpose": "Async SQLite operations for better concurrency",
+              "benefit": "Non-blocking database operations in async applications"
+            }
           },
           "structuralPatterns": {
             "itemTypes": {
@@ -711,6 +784,11 @@
           "performanceGain": "656x over pure Python implementation",
           "implementation": "Use ijson with yajl2_c backend for maximum performance",
           "significance": "Critical for processing large rustdoc JSON files efficiently",
+          "moduleHierarchyExtraction": {
+            "findings": "656x performance improvement enables real-time processing of module hierarchies",
+            "technique": "Stream parsing of rustdoc paths and index sections separately",
+            "benefit": "Efficient extraction of module tree structure from large crate documentation"
+          },
           "memoryOptimization": {
             "streamProcessing": {
               "benefit": "Reduces memory from O(file_size) to O(batch_size)",
@@ -1289,7 +1367,18 @@
       "Monitor query preprocessing latency and normalization success rates in production",
       "Test query preprocessing with realistic Unicode edge cases and international character sets",
       "Leverage C-optimized unicodedata module for < 1ms normalization overhead per query",
-      "Apply query normalization as first step in preprocessing pipeline before other validations"
+      "Apply query normalization as first step in preprocessing pipeline before other validations",
+      "Use docs.rs /crate/{crate-name}/{version}/json URL pattern for accessing rustdoc JSON API",
+      "Detect zstd compression by checking magic bytes 0x28, 0xb5, 0x2f, 0xfd in API responses",
+      "Handle docs.rs to static.docs.rs redirects for optimized file delivery",
+      "Extract module hierarchy from rustdoc 'paths' section with kind='module' for navigation",
+      "Parse rustdoc 'index' section for item details with kind information in inner field structure",
+      "Use adjacency list model in SQLite for efficient hierarchical module data storage",
+      "Implement recursive CTEs for optimal SQLite tree traversal operations in module hierarchies",
+      "Leverage ijson with yajl2_c backend for 656x JSON parsing performance improvement",
+      "Use aiosqlite for async SQLite operations during module hierarchy extraction and storage",
+      "Apply zstandard library for efficient zstd decompression of docs.rs compressed JSON files",
+      "Implement batch insertions with transactions to improve database insertion performance for hierarchical data"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

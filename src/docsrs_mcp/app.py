@@ -6,6 +6,7 @@ from pathlib import Path
 import aiosqlite
 from fastapi import FastAPI, HTTPException
 
+from .database import get_module_tree as get_module_tree_from_db
 from .database import search_embeddings
 from .ingest import get_embedding_model, ingest_crate
 from .models import (
@@ -13,9 +14,11 @@ from .models import (
     GetCrateSummaryRequest,
     GetCrateSummaryResponse,
     GetItemDocRequest,
+    GetModuleTreeRequest,
     MCPManifest,
     MCPResource,
     MCPTool,
+    ModuleTreeNode,
     SearchItemsRequest,
     SearchItemsResponse,
     SearchResult,
@@ -226,6 +229,24 @@ async def get_mcp_manifest():
                     "required": ["crate_name", "item_path"],
                 },
             ),
+            MCPTool(
+                name="get_module_tree",
+                description="Get the module hierarchy tree for a Rust crate",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "crate_name": {
+                            "type": "string",
+                            "description": "Name of the crate to get module tree for",
+                        },
+                        "version": {
+                            "type": "string",
+                            "description": "Specific version (default: latest)",
+                        },
+                    },
+                    "required": ["crate_name"],
+                },
+            ),
         ],
         resources=[
             MCPResource(
@@ -271,12 +292,19 @@ async def get_crate_summary(request: GetCrateSummaryRequest):
 
             name, version, description, repository, documentation = row
 
-            # Fetch modules
+            # Fetch modules with hierarchy information
             cursor = await db.execute(
-                "SELECT name, path FROM modules WHERE crate_id = 1"
+                "SELECT name, path, parent_id, depth, item_count FROM modules WHERE crate_id = 1"
             )
             modules = [
-                CrateModule(name=row[0], path=row[1]) for row in await cursor.fetchall()
+                CrateModule(
+                    name=row[0],
+                    path=row[1],
+                    parent_id=row[2],
+                    depth=row[3],
+                    item_count=row[4],
+                )
+                for row in await cursor.fetchall()
             ]
 
             return GetCrateSummaryResponse(
@@ -393,6 +421,71 @@ async def get_item_doc(request: GetItemDocRequest):
 
     except Exception as e:
         logger.error(f"Error in get_item_doc: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post(
+    "/mcp/tools/get_module_tree",
+    tags=["tools"],
+    summary="Get Module Tree",
+    response_description="Module hierarchy tree structure",
+    operation_id="getModuleTree",
+)
+async def get_module_tree(request: GetModuleTreeRequest):
+    """
+    Get the module hierarchy tree for a Rust crate.
+
+    Returns a hierarchical tree structure of all modules in the specified crate,
+    including parent-child relationships, depth levels, and item counts per module.
+
+    **Note**: First-time ingestion may take 1-10 seconds depending on crate size.
+    """
+    try:
+        # Ingest crate if not already done
+        db_path = await ingest_crate(request.crate_name, request.version)
+
+        # Get crate ID
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute("SELECT id FROM crate_metadata LIMIT 1")
+            row = await cursor.fetchone()
+
+            if not row:
+                raise HTTPException(status_code=404, detail="Crate not found")
+
+            crate_id = row[0]
+
+        # Get module tree from database
+        modules = await get_module_tree_from_db(db_path, crate_id)
+
+        # Build hierarchical tree structure
+        def build_tree(modules_list, parent_id=None):
+            """Build tree structure from flat module list."""
+            nodes = []
+            for module in modules_list:
+                if module["parent_id"] == parent_id:
+                    node = ModuleTreeNode(
+                        name=module["name"],
+                        path=module["path"],
+                        depth=module["depth"],
+                        item_count=module["item_count"],
+                        children=build_tree(modules_list, module["id"]),
+                    )
+                    nodes.append(node)
+            return nodes
+
+        # Build and return tree
+        tree = build_tree(modules)
+
+        return {
+            "crate_name": request.crate_name,
+            "modules": tree,
+            "total_modules": len(modules),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_module_tree: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

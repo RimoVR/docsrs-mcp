@@ -125,7 +125,11 @@ async def init_database(db_path: Path) -> None:
                 name TEXT NOT NULL,
                 path TEXT NOT NULL,
                 crate_id INTEGER,
-                FOREIGN KEY (crate_id) REFERENCES crate_metadata(id)
+                parent_id INTEGER,
+                depth INTEGER DEFAULT 0,
+                item_count INTEGER DEFAULT 0,
+                FOREIGN KEY (crate_id) REFERENCES crate_metadata(id),
+                FOREIGN KEY (parent_id) REFERENCES modules(id)
             )
         """)
 
@@ -150,6 +154,22 @@ async def init_database(db_path: Path) -> None:
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
                 embedding float[{EMBEDDING_DIM}]
             )
+        """)
+
+        # Create indexes for module hierarchy
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_modules_parent
+            ON modules(parent_id)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_modules_depth
+            ON modules(depth)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_modules_crate
+            ON modules(crate_id, parent_id)
         """)
 
         # Create composite index for filtering performance
@@ -218,6 +238,141 @@ async def store_crate_metadata(
         )
         await db.commit()
         return cursor.lastrowid
+
+
+async def store_modules(db_path: Path, crate_id: int, modules: dict) -> None:
+    """Store module hierarchy for a crate.
+
+    Args:
+        db_path: Path to database
+        crate_id: ID of the parent crate
+        modules: Dict of module_id -> module info
+    """
+    if not modules:
+        return
+
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Build module ID mapping (rustdoc ID -> database ID)
+        id_mapping = {}
+
+        # First, insert all modules without parent_id
+        for module_id, module_info in modules.items():
+            cursor = await db.execute(
+                """
+                INSERT INTO modules (name, path, crate_id, depth, item_count)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    module_info["name"],
+                    module_info["path"],
+                    crate_id,
+                    module_info["depth"],
+                    module_info["item_count"],
+                ),
+            )
+            id_mapping[module_id] = cursor.lastrowid
+
+        # Update parent_id references
+        for module_id, module_info in modules.items():
+            parent_rustdoc_id = module_info.get("parent_id")
+            if parent_rustdoc_id and parent_rustdoc_id in id_mapping:
+                await db.execute(
+                    """
+                    UPDATE modules SET parent_id = ? WHERE id = ?
+                    """,
+                    (id_mapping[parent_rustdoc_id], id_mapping[module_id]),
+                )
+
+        await db.commit()
+        logger.info(f"Stored {len(modules)} modules with hierarchy")
+
+
+async def get_module_tree(db_path: Path, crate_id: int | None = None) -> list[dict]:
+    """Get the module hierarchy tree for a crate.
+
+    Args:
+        db_path: Path to database
+        crate_id: Optional crate ID to filter modules
+
+    Returns:
+        List of module dictionaries with hierarchy info
+    """
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        if crate_id:
+            # Get modules for specific crate with recursive CTE
+            query = """
+                WITH RECURSIVE module_tree AS (
+                    -- Anchor: root modules (no parent)
+                    SELECT id, name, path, parent_id, depth, item_count, 0 as level
+                    FROM modules
+                    WHERE crate_id = ? AND parent_id IS NULL
+
+                    UNION ALL
+
+                    -- Recursive: child modules
+                    SELECT m.id, m.name, m.path, m.parent_id, m.depth, m.item_count, mt.level + 1
+                    FROM modules m
+                    INNER JOIN module_tree mt ON m.parent_id = mt.id
+                )
+                SELECT * FROM module_tree ORDER BY path
+            """
+            cursor = await db.execute(query, (crate_id,))
+        else:
+            # Get all modules
+            query = """
+                SELECT id, name, path, parent_id, depth, item_count
+                FROM modules
+                ORDER BY path
+            """
+            cursor = await db.execute(query)
+
+        rows = await cursor.fetchall()
+
+        # Convert to list of dicts
+        modules = []
+        for row in rows:
+            modules.append(
+                {
+                    "id": row[0],
+                    "name": row[1],
+                    "path": row[2],
+                    "parent_id": row[3],
+                    "depth": row[4],
+                    "item_count": row[5],
+                }
+            )
+
+        return modules
+
+
+async def get_module_by_path(db_path: Path, module_path: str) -> dict | None:
+    """Get a specific module by its path.
+
+    Args:
+        db_path: Path to database
+        module_path: Module path (e.g., "tokio::runtime")
+
+    Returns:
+        Module dict or None if not found
+    """
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        cursor = await db.execute(
+            "SELECT id, name, path, parent_id, depth, item_count FROM modules WHERE path = ?",
+            (module_path,),
+        )
+        row = await cursor.fetchone()
+
+        if row:
+            return {
+                "id": row[0],
+                "name": row[1],
+                "path": row[2],
+                "parent_id": row[3],
+                "depth": row[4],
+                "item_count": row[5],
+            }
+
+        return None
 
 
 async def search_embeddings(
