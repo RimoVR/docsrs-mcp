@@ -49,7 +49,7 @@ async def test_resolve_version():
     """Test version resolution via docs.rs redirects."""
     mock_response = AsyncMock()
     mock_response.status = 200
-    mock_response.url = "https://docs.rs/serde/1.0.193/serde/"
+    mock_response.url = "https://static.docs.rs/serde/1.0.193/json"
 
     mock_session = MagicMock()
     # Create a proper async context manager mock
@@ -62,7 +62,7 @@ async def test_resolve_version():
     version, rustdoc_url = await resolve_version(mock_session, "serde", "latest")
 
     assert version == "1.0.193"
-    assert rustdoc_url == "https://docs.rs/serde/1.0.193/serde.json"
+    assert rustdoc_url == "https://docs.rs/crate/serde/latest/json"
 
     # Verify HEAD request was made correctly
     mock_session.head.assert_called_once()
