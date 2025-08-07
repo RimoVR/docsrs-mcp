@@ -4,8 +4,10 @@ from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from docsrs_mcp.app import app
+from docsrs_mcp.models import ErrorResponse, SearchResult
 
 
 @pytest.mark.asyncio
@@ -257,3 +259,144 @@ async def test_mcp_manifest_includes_filter_parameters():
 
         assert "crate_filter" in schema["properties"]
         assert schema["properties"]["crate_filter"]["type"] == "string"
+
+
+@pytest.mark.asyncio
+async def test_error_response_status_code_validation():
+    """Test that ErrorResponse status_code accepts strings and validates bounds."""
+    # Test valid integer status codes
+    error = ErrorResponse(error="NotFound", status_code=404)
+    assert error.status_code == 404
+
+    error = ErrorResponse(error="ServerError", status_code=500)
+    assert error.status_code == 500
+
+    # Test string conversion
+    error = ErrorResponse.model_validate({"error": "BadRequest", "status_code": "400"})
+    assert error.status_code == 400
+
+    error = ErrorResponse.model_validate(
+        {"error": "TooManyRequests", "status_code": "429"}
+    )
+    assert error.status_code == 429
+
+    # Test default value when None
+    error = ErrorResponse.model_validate({"error": "UnknownError", "status_code": None})
+    assert error.status_code == 500
+
+    # Test out of range values with integers (Pydantic's built-in validation)
+    with pytest.raises(ValidationError, match="greater than or equal to 400"):
+        ErrorResponse(error="Invalid", status_code=399)
+
+    with pytest.raises(ValidationError, match="less than or equal to 599"):
+        ErrorResponse(error="Invalid", status_code=600)
+
+    # Test out of range values with strings
+    with pytest.raises(ValueError, match="must be at least 400"):
+        ErrorResponse.model_validate({"error": "Invalid", "status_code": "300"})
+
+    with pytest.raises(ValueError, match="cannot exceed 599"):
+        ErrorResponse.model_validate({"error": "Invalid", "status_code": "700"})
+
+    # Test invalid string
+    with pytest.raises(ValueError, match="must be a valid HTTP error code"):
+        ErrorResponse.model_validate({"error": "Invalid", "status_code": "invalid"})
+
+
+@pytest.mark.asyncio
+async def test_search_result_score_validation():
+    """Test that SearchResult score accepts strings and validates bounds."""
+    # Test valid float scores
+    result = SearchResult(
+        score=0.9,
+        item_path="tokio::spawn",
+        header="spawn function",
+        snippet="Spawn a future",
+    )
+    assert result.score == 0.9
+
+    # Test string conversion
+    result = SearchResult.model_validate(
+        {
+            "score": "0.75",
+            "item_path": "tokio::spawn",
+            "header": "spawn function",
+            "snippet": "Spawn a future",
+        }
+    )
+    assert result.score == 0.75
+
+    # Test integer to float conversion
+    result = SearchResult.model_validate(
+        {
+            "score": 1,
+            "item_path": "tokio::spawn",
+            "header": "spawn function",
+            "snippet": "Spawn a future",
+        }
+    )
+    assert result.score == 1.0
+
+    # Test boundary values
+    result = SearchResult.model_validate(
+        {
+            "score": "0.0",
+            "item_path": "tokio::spawn",
+            "header": "spawn function",
+            "snippet": "Spawn a future",
+        }
+    )
+    assert result.score == 0.0
+
+    result = SearchResult.model_validate(
+        {
+            "score": "1.0",
+            "item_path": "tokio::spawn",
+            "header": "spawn function",
+            "snippet": "Spawn a future",
+        }
+    )
+    assert result.score == 1.0
+
+    # Test out of range values
+    with pytest.raises(ValueError, match="must be at least 0.0"):
+        SearchResult.model_validate(
+            {
+                "score": "-0.1",
+                "item_path": "path",
+                "header": "header",
+                "snippet": "snippet",
+            }
+        )
+
+    with pytest.raises(ValueError, match="cannot exceed 1.0"):
+        SearchResult.model_validate(
+            {
+                "score": "1.5",
+                "item_path": "path",
+                "header": "header",
+                "snippet": "snippet",
+            }
+        )
+
+    # Test invalid string
+    with pytest.raises(ValueError, match="must be a valid number"):
+        SearchResult.model_validate(
+            {
+                "score": "invalid",
+                "item_path": "path",
+                "header": "header",
+                "snippet": "snippet",
+            }
+        )
+
+    # Test None is not allowed (score is required)
+    with pytest.raises(ValueError, match="Score is required"):
+        SearchResult.model_validate(
+            {
+                "score": None,
+                "item_path": "path",
+                "header": "header",
+                "snippet": "snippet",
+            }
+        )

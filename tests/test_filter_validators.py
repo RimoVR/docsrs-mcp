@@ -121,18 +121,54 @@ def test_min_doc_length_validator():
     req = SearchItemsRequest(crate_name="tokio", query="spawn", min_doc_length=10000)
     assert req.min_doc_length == 10000
 
+    # Test string conversion
+    req = SearchItemsRequest.model_validate(
+        {"crate_name": "tokio", "query": "spawn", "min_doc_length": "100"}
+    )
+    assert req.min_doc_length == 100
+
+    req = SearchItemsRequest.model_validate(
+        {"crate_name": "tokio", "query": "spawn", "min_doc_length": "5000"}
+    )
+    assert req.min_doc_length == 5000
+
+    req = SearchItemsRequest.model_validate(
+        {"crate_name": "tokio", "query": "spawn", "min_doc_length": "10000"}
+    )
+    assert req.min_doc_length == 10000
+
     # Test None value
     req = SearchItemsRequest(crate_name="tokio", query="spawn", min_doc_length=None)
     assert req.min_doc_length is None
 
-    # Test out of range values
+    # Test out of range values with integers (Pydantic's built-in validation)
     with pytest.raises(ValidationError) as exc_info:
         SearchItemsRequest(crate_name="tokio", query="spawn", min_doc_length=99)
-    assert "greater than or equal to 100" in str(exc_info.value).lower()
+    assert "greater than or equal to 100" in str(exc_info.value)
 
     with pytest.raises(ValidationError) as exc_info:
         SearchItemsRequest(crate_name="tokio", query="spawn", min_doc_length=10001)
-    assert "less than or equal to 10000" in str(exc_info.value).lower()
+    assert "less than or equal to 10000" in str(exc_info.value)
+
+    # Test out of range values with strings
+    with pytest.raises(ValidationError) as exc_info:
+        SearchItemsRequest.model_validate(
+            {"crate_name": "tokio", "query": "spawn", "min_doc_length": "99"}
+        )
+    assert "must be at least 100" in str(exc_info.value)
+
+    with pytest.raises(ValidationError) as exc_info:
+        SearchItemsRequest.model_validate(
+            {"crate_name": "tokio", "query": "spawn", "min_doc_length": "10001"}
+        )
+    assert "cannot exceed 10000" in str(exc_info.value)
+
+    # Test invalid string
+    with pytest.raises(ValidationError) as exc_info:
+        SearchItemsRequest.model_validate(
+            {"crate_name": "tokio", "query": "spawn", "min_doc_length": "invalid"}
+        )
+    assert "must be a valid integer" in str(exc_info.value)
 
 
 def test_multiple_filters_together():

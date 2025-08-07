@@ -251,6 +251,15 @@
           "relatedFiles": ["src/docsrs_mcp/models.py"]
         },
         {
+          "error": "Pydantic field_validator decorator ordering with @classmethod",
+          "context": "MCP parameter validation with custom field validators using @classmethod decorator",
+          "solution": "Always use @field_validator BEFORE @classmethod decorator, not after. The correct order is: @field_validator('field_name', mode='before') followed by @classmethod",
+          "prevention": "Remember decorator execution order: decorators are applied bottom-up, so @field_validator must come first to properly wrap the classmethod",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py"],
+          "resolutionStatus": "Critical decorator ordering pattern established for all future MCP parameter validators"
+        },
+        {
           "error": "MCP tool schema validation preventing field validator execution",
           "context": "searchItems tool fails with validation error when k parameter provided as string '5' by MCP clients. Error: \"'5' is not valid under any of the given schemas\"",
           "solution": "Update MCP manifest schema to use anyOf pattern accepting both string and integer types: 'anyOf': [{'type': 'integer'}, {'type': 'string'}]. This allows JSON Schema validation to pass so Pydantic field validator can perform type coercion",
@@ -258,6 +267,33 @@
           "dateEncountered": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
           "resolutionStatus": "Fixed and tested on 2025-08-05. Solution confirmed working with both integer and string k parameters"
+        },
+        {
+          "error": "MCP client string parameter conversion validation patterns",
+          "context": "Implementing robust parameter validation for MCP clients that send numeric values as strings",
+          "solution": "Use comprehensive validation pattern: 1) Check for None first (return None or default), 2) Check if already correct type (return as-is), 3) Handle string conversion with try/catch, 4) Provide helpful error messages with examples, 5) Handle integer-to-float conversion for float fields",
+          "prevention": "Always implement the full validation pattern for any numeric parameter that might arrive as a string from MCP clients. Test both native type and string conversion paths",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py"],
+          "resolutionStatus": "Comprehensive validation pattern established and tested with various input types"
+        },
+        {
+          "error": "ValidationError vs ValueError in custom Pydantic validators",
+          "context": "Testing MCP parameter validation with different error types from built-in vs custom validators",
+          "solution": "Built-in Pydantic constraints raise ValidationError for direct type violations, while custom field_validator methods raise ValueError for string conversion failures. Test accordingly: expect ValidationError for direct types, ValueError for string conversion",
+          "prevention": "Understand the distinction between Pydantic's built-in validation (ValidationError) and custom validator errors (ValueError) when writing tests",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["tests/test_app.py", "src/docsrs_mcp/models.py"],
+          "resolutionStatus": "Error type patterns documented and test cases updated accordingly"
+        },
+        {
+          "error": "Float string conversion error message patterns",
+          "context": "Testing float parameter validation with invalid string inputs",
+          "solution": "Use 'could not convert' in error message checks instead of 'invalid literal' for float string conversion failures. Python's float() function uses different error messages than int()",
+          "prevention": "When testing string-to-float conversion errors, use appropriate error message patterns specific to float conversion",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["tests/test_app.py", "src/docsrs_mcp/models.py"],
+          "resolutionStatus": "Float conversion error patterns identified and test assertions updated"
         }
       ]
     },
@@ -537,6 +573,22 @@
           "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"]
         },
         {
+          "lesson": "MCP parameter validation requires specific decorator ordering and validation patterns",
+          "context": "Implementing robust parameter validation for MCP protocol compatibility",
+          "details": "MCP parameter validation follows specific patterns: 1) Use @field_validator(mode='before') BEFORE @classmethod decorator (order matters!), 2) Check None first, then correct type, then string conversion, 3) Use anyOf schema in MCP manifest: {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}, 4) Provide helpful error messages with examples, 5) Test both ValidationError (built-in constraints) and ValueError (custom validators)",
+          "impact": "Enables robust parameter handling across different MCP client implementations while maintaining type safety and clear error reporting",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "src/docsrs_mcp/app.py", "tests/test_app.py"]
+        },
+        {
+          "lesson": "Float vs integer string conversion have different error patterns",
+          "context": "Testing numeric parameter validation with different data types",
+          "details": "When testing string-to-numeric conversion failures: int() raises ValueError with 'invalid literal' message, while float() raises ValueError with 'could not convert' message. Test assertions must account for these different error message patterns",
+          "impact": "Ensures comprehensive test coverage for numeric parameter validation across different data types",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["tests/test_app.py", "src/docsrs_mcp/models.py"]
+        },
+        {
           "lesson": "Check whitespace-only queries before stripping for proper error messages",
           "context": "Query preprocessing and user input validation",
           "details": "When validating user queries, check for whitespace-only content before stripping whitespace. This allows providing a specific error message for whitespace-only inputs instead of a generic 'empty query' message after stripping",
@@ -711,7 +763,13 @@
       "FastMCP conversion: Use FastMCP.from_fastapi() for automatic REST-to-MCP conversion",
       "Parameter type issues: MCP clients may send numeric parameters as strings - use Pydantic field validators with mode='before' for type coercion",
       "Double validation conflicts: When MCP manifest schema is too restrictive, it prevents Pydantic field validators from running - use anyOf schema patterns for flexible type acceptance",
-      "Schema flexibility: Use anyOf: [{'type': 'integer'}, {'type': 'string'}] in MCP manifests for parameters that may arrive as strings from different clients"
+      "Schema flexibility: Use anyOf: [{'type': 'integer'}, {'type': 'string'}] in MCP manifests for parameters that may arrive as strings from different clients",
+      "Decorator ordering: Always use @field_validator BEFORE @classmethod decorator, not after - decorator execution is bottom-up",
+      "Validation patterns: Check None first, then correct type, then string conversion with try/catch and helpful error messages",
+      "Error types: Expect ValidationError for built-in Pydantic constraints, ValueError for custom field_validator methods",
+      "Float conversion: Use 'could not convert' in error checks for float string conversion, 'invalid literal' for int conversion",
+      "Testing approach: Test both native type validation (Pydantic constraints) and string validation (custom validators) paths",
+      "Comprehensive validation: Handle integer-to-float conversion for float fields when clients send integer strings"
     ],
     "queryPreprocessing": [
       "Check for whitespace-only queries before stripping to provide specific error messages",

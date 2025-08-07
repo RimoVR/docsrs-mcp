@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-07T15:30:00Z",
+    "lastUpdated": "2025-08-07T16:00:00Z",
     "priorities": ["high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked"]
   },
@@ -671,25 +671,30 @@
         "id": "param-1",
         "title": "Extend parameter validation patterns",
         "description": "Apply to all numeric MCP parameters to ensure consistent validation across all endpoints",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": ["mcp-2"],
         "relatedTasks": ["param-2"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-07T15:30:00Z",
+          "implementation": "Extended parameter validation to all numeric MCP parameters with comprehensive validators",
+          "notes": "Added validators for min_doc_length in SearchItemsRequest, status_code in ErrorResponse, weight parameters in RankingConfig (vector_weight, type_weight, quality_weight, examples_weight), and score in SearchResult. Updated MCP manifest schema for min_doc_length to use anyOf pattern. Added comprehensive tests for all new validators. All code formatted with ruff and linting issues resolved. All tests passing."
+        },
         "subtasks": [
           {
             "id": "param-1.1",
             "title": "Audit all numeric parameters",
             "description": "Identify all numeric parameters across MCP endpoints that need validation",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "param-1.2",
             "title": "Apply consistent validation patterns",
             "description": "Extend the k parameter validation pattern to other numeric parameters",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           }
         ]
       },

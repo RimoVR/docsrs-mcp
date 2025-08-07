@@ -444,7 +444,10 @@ async def test_module_path_validation_errors():
                     assert response.status_code == 422
                     data = response.json()
                     assert "detail" in data
-                    assert "trailing" in str(data["detail"]).lower() or "not allowed" in str(data["detail"]).lower()
+                    assert (
+                        "trailing" in str(data["detail"]).lower()
+                        or "not allowed" in str(data["detail"]).lower()
+                    )
 
                     # Test module_path with crate_filter mismatch
                     response = await client.post(

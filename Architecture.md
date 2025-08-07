@@ -1028,6 +1028,87 @@ def validate_module_path_context(self):
 6. **Model Validation**: `extra='forbid'` prevents injection of unknown parameters
 7. **Error Standardization**: All validation errors converted to consistent ErrorResponse format
 
+### Extended Numeric Parameter Validation
+
+The following numeric parameters now have comprehensive string-to-numeric conversion support for MCP client compatibility:
+
+**1. SearchItemsRequest.min_doc_length**
+- **Type**: integer
+- **Bounds**: 100-10000  
+- **Validator**: coerce_min_doc_length_to_int
+- **Accepts**: both integers and numeric strings
+- **Purpose**: Minimum documentation length filtering for search results
+
+**2. ErrorResponse.status_code**
+- **Type**: integer
+- **Bounds**: 400-599 (HTTP error codes)
+- **Validator**: coerce_status_code_to_int
+- **Accepts**: both integers and numeric strings
+- **Defaults**: to 500 when None
+- **Purpose**: Standardized HTTP error code handling
+
+**3. RankingConfig weights**
+- **Fields**: vector_weight, type_weight, quality_weight, examples_weight
+- **Type**: float
+- **Bounds**: 0.0-1.0
+- **Validator**: coerce_weights_to_float
+- **Accepts**: strings, integers, and floats
+- **Handles**: integer-to-float conversion
+- **Purpose**: Search result ranking weight configuration
+
+**4. SearchResult.score**
+- **Type**: float
+- **Bounds**: 0.0-1.0
+- **Validator**: coerce_score_to_float
+- **Accepts**: strings, integers, and floats
+- **Required**: field (cannot be None)
+- **Purpose**: Search relevance scoring
+
+**Implementation Pattern**
+
+All validators use @field_validator(mode='before') pattern to intercept and convert string inputs before Pydantic's built-in type validation:
+
+```python
+@field_validator("min_doc_length", mode="before")
+@classmethod
+def coerce_min_doc_length_to_int(cls, v):
+    """Convert string numbers to int for MCP client compatibility."""
+    if v is None:
+        return v
+    if isinstance(v, str):
+        try:
+            return int(v)
+        except ValueError as err:
+            raise ValueError(
+                f"min_doc_length parameter must be a valid integer, got '{v}'"
+            ) from err
+    return v
+```
+
+**MCP Manifest Schema Updates**
+
+The MCP manifest schema has been updated to use anyOf patterns for numeric parameters that may arrive as strings:
+
+```json
+{
+  "min_doc_length": {
+    "anyOf": [{"type": "integer"}, {"type": "string"}],
+    "description": "Minimum documentation length",
+    "minimum": 100,
+    "maximum": 10000
+  }
+}
+```
+
+**Benefits**
+- **MCP Client Compatibility**: Handles various client serialization approaches
+- **Type Safety**: Maintains strict type validation after conversion
+- **Error Clarity**: Provides detailed error messages for invalid conversions
+- **Schema Flexibility**: anyOf pattern allows multiple input formats while preserving validation
+- **Backward Compatibility**: Existing code continues to work with native types
+
+This ensures compatibility with various MCP client implementations that may serialize parameters differently while maintaining strict type safety and validation.
+
 ## Security Model
 
 ```mermaid

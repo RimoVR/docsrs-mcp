@@ -267,6 +267,36 @@ class SearchItemsRequest(BaseModel):
                 raise
         return v
 
+    @field_validator("min_doc_length", mode="before")
+    @classmethod
+    def coerce_min_doc_length_to_int(cls, v):
+        """Convert string numbers to int for MCP client compatibility."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            try:
+                value = int(v)
+                # Provide helpful guidance if value is out of bounds
+                if value < 100:
+                    raise ValueError(
+                        f"min_doc_length parameter must be at least 100 (requested: {value}). "
+                        "Use min_doc_length=100 for minimal documentation or increase for more comprehensive docs."
+                    )
+                if value > 10000:
+                    raise ValueError(
+                        f"min_doc_length parameter cannot exceed 10000 (requested: {value}). "
+                        "Very long documentation filters may exclude most results. Consider using min_doc_length=1000 for substantial docs."
+                    )
+                return value
+            except ValueError as err:
+                if "invalid literal" in str(err):
+                    raise ValueError(
+                        f"min_doc_length parameter must be a valid integer, got '{v}'. "
+                        "Examples: min_doc_length=500 for medium docs, min_doc_length=1000 for comprehensive documentation."
+                    ) from err
+                raise
+        return v
+
     @field_validator("item_type", mode="before")
     @classmethod
     def coerce_item_type(cls, v):
@@ -311,24 +341,24 @@ class SearchItemsRequest(BaseModel):
 
         # Convert to string and strip whitespace
         module_path = str(v).strip()
-        
+
         # Store original for error messages
         original_path = module_path
 
-        # Check for trailing :: which is invalid 
+        # Check for trailing :: which is invalid
         if module_path.endswith("::") and module_path != "::":
             raise ValueError(
                 f"Invalid module path '{original_path}': trailing '::' is not allowed. "
                 "Module paths should be like 'runtime' or 'sync::mpsc'."
             )
-        
+
         # Check for leading :: which is invalid
         if module_path.startswith("::") and module_path != "::":
             raise ValueError(
                 f"Invalid module path '{original_path}': leading '::' is not allowed. "
                 "Module paths should be like 'runtime' or 'sync::mpsc'."
             )
-        
+
         # Check for empty segments in the middle
         if ":::" in module_path:
             raise ValueError(
@@ -599,6 +629,45 @@ class RankingConfig(BaseModel):
     )
 
     @field_validator(
+        "vector_weight",
+        "type_weight",
+        "quality_weight",
+        "examples_weight",
+        mode="before",
+    )
+    @classmethod
+    def coerce_weights_to_float(cls, v):
+        """Convert string numbers to float for MCP client compatibility."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            try:
+                value = float(v)
+                # Provide helpful guidance if value is out of bounds
+                if value < 0.0:
+                    raise ValueError(
+                        f"Weight parameter must be at least 0.0 (requested: {value}). "
+                        "Weights must be non-negative values between 0.0 and 1.0."
+                    )
+                if value > 1.0:
+                    raise ValueError(
+                        f"Weight parameter cannot exceed 1.0 (requested: {value}). "
+                        "Weights must be normalized values between 0.0 and 1.0."
+                    )
+                return value
+            except ValueError as err:
+                if "could not convert" in str(err):
+                    raise ValueError(
+                        f"Weight parameter must be a valid number, got '{v}'. "
+                        "Examples: 0.7 for high weight, 0.15 for medium weight, 0.05 for low weight."
+                    ) from err
+                raise
+        # Handle integer to float conversion
+        if isinstance(v, int):
+            return float(v)
+        return v
+
+    @field_validator(
         "vector_weight", "type_weight", "quality_weight", "examples_weight"
     )
     @classmethod
@@ -633,6 +702,39 @@ class SearchResult(BaseModel):
     item_path: str = Field(..., description="Full path to the documented item")
     header: str = Field(..., description="Item header/signature")
     snippet: str = Field(..., description="Documentation excerpt (max 200 chars)")
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def coerce_score_to_float(cls, v):
+        """Convert string numbers to float for MCP client compatibility."""
+        if v is None:
+            raise ValueError("Score is required and cannot be None")
+        if isinstance(v, str):
+            try:
+                value = float(v)
+                # Provide helpful guidance if value is out of bounds
+                if value < 0.0:
+                    raise ValueError(
+                        f"Score must be at least 0.0 (requested: {value}). "
+                        "Similarity scores must be between 0.0 and 1.0, where 1.0 is a perfect match."
+                    )
+                if value > 1.0:
+                    raise ValueError(
+                        f"Score cannot exceed 1.0 (requested: {value}). "
+                        "Similarity scores must be between 0.0 and 1.0, where 1.0 is a perfect match."
+                    )
+                return value
+            except ValueError as err:
+                if "could not convert" in str(err):
+                    raise ValueError(
+                        f"Score must be a valid number, got '{v}'. "
+                        "Scores represent similarity: 0.9+ (excellent), 0.7-0.9 (good), 0.5-0.7 (fair)."
+                    ) from err
+                raise
+        # Handle integer to float conversion
+        if isinstance(v, int):
+            return float(v)
+        return v
 
     model_config = ConfigDict(extra="forbid")
 
@@ -702,5 +804,35 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error type/category")
     detail: str | None = Field(None, description="Detailed error message for debugging")
     status_code: int = Field(500, description="HTTP status code", ge=400, le=599)
+
+    @field_validator("status_code", mode="before")
+    @classmethod
+    def coerce_status_code_to_int(cls, v):
+        """Convert string numbers to int for MCP client compatibility."""
+        if v is None:
+            return 500  # Default to 500 if None
+        if isinstance(v, str):
+            try:
+                value = int(v)
+                # Provide helpful guidance if value is out of bounds
+                if value < 400:
+                    raise ValueError(
+                        f"status_code must be at least 400 (requested: {value}). "
+                        "HTTP error codes start at 400. Use 400 for client errors, 500 for server errors."
+                    )
+                if value > 599:
+                    raise ValueError(
+                        f"status_code cannot exceed 599 (requested: {value}). "
+                        "HTTP error codes end at 599. Use 400-499 for client errors, 500-599 for server errors."
+                    )
+                return value
+            except ValueError as err:
+                if "invalid literal" in str(err):
+                    raise ValueError(
+                        f"status_code must be a valid HTTP error code, got '{v}'. "
+                        "Examples: 400 (Bad Request), 404 (Not Found), 500 (Internal Server Error)."
+                    ) from err
+                raise
+        return v
 
     model_config = ConfigDict(extra="forbid")

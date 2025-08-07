@@ -43,6 +43,47 @@ class TestRankingConfig:
                 examples_weight=0.2,  # Sum = 1.1
             )
 
+    def test_weight_string_conversion(self):
+        """Test that weight parameters accept strings and convert to float."""
+        # Test string conversion for all weight parameters
+        config = RankingConfig.model_validate(
+            {
+                "vector_weight": "0.6",
+                "type_weight": "0.2",
+                "quality_weight": "0.15",
+                "examples_weight": "0.05",
+            }
+        )
+        assert config.vector_weight == 0.6
+        assert config.type_weight == 0.2
+        assert config.quality_weight == 0.15
+        assert config.examples_weight == 0.05
+
+        # Test integer to float conversion
+        config = RankingConfig.model_validate(
+            {
+                "vector_weight": 0,
+                "type_weight": 1,
+                "quality_weight": 0,
+                "examples_weight": 0,
+            }
+        )
+        assert config.vector_weight == 0.0
+        assert config.type_weight == 1.0
+        assert config.quality_weight == 0.0
+        assert config.examples_weight == 0.0
+
+        # Test out of range values with strings
+        with pytest.raises(ValueError, match="must be at least 0.0"):
+            RankingConfig.model_validate({"vector_weight": "-0.1"})
+
+        with pytest.raises(ValueError, match="cannot exceed 1.0"):
+            RankingConfig.model_validate({"vector_weight": "1.1"})
+
+        # Test invalid string
+        with pytest.raises(ValueError, match="must be a valid number"):
+            RankingConfig.model_validate({"vector_weight": "invalid"})
+
 
 class TestScoringFormula:
     """Test the composite scoring formula."""

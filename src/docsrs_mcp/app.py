@@ -193,7 +193,7 @@ async def get_mcp_manifest():
                             "description": "Filter to only items with code examples",
                         },
                         "min_doc_length": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Minimum documentation length in characters",
                             "minimum": 100,
                             "maximum": 10000,
