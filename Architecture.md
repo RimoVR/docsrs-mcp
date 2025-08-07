@@ -119,6 +119,7 @@ sequenceDiagram
     participant DB as SQLite+VSS
     
     Client->>API: POST /mcp/tools/search_items
+    API->>API: Query preprocessing (Unicode normalization NFKC)
     API->>DB: Check if crate@version exists
     
     alt Cache Miss
@@ -145,7 +146,7 @@ sequenceDiagram
         end
     end
     
-    API->>DB: Vector search query with ranking
+    API->>DB: Vector search query with ranking (using normalized query)
     DB->>DB: sqlite-vec MATCH similarity
     DB->>DB: Multi-factor scoring (vector 70% + type 15% + quality 10% + examples 5%)
     DB->>DB: Type-aware boost (functions 1.2x, traits 1.15x, structs 1.1x)
@@ -668,7 +669,7 @@ graph TB
 
 ### Enhanced Validation with MCP Compatibility
 
-The filter validation system provides comprehensive parameter validation while maintaining MCP client compatibility:
+The filter validation system provides comprehensive parameter validation while maintaining MCP client compatibility. This includes query preprocessing for search consistency:
 
 ```mermaid
 graph LR
@@ -682,11 +683,13 @@ graph LR
     subgraph "MCP Parameter Handling"
         STRING_PARAMS[String Parameters<br/>from MCP clients]
         TYPE_COERCE[Field Validators<br/>mode='before']
+        QUERY_PREPROCESS[Query Preprocessing<br/>Unicode normalization NFKC]
         CONSTRAINT_CHECK[Constraint Validation<br/>enum values, ranges]
     end
     
     STRING_PARAMS --> TYPE_COERCE
-    TYPE_COERCE --> INPUT
+    TYPE_COERCE --> QUERY_PREPROCESS
+    QUERY_PREPROCESS --> INPUT
     INPUT --> VALIDATE
     VALIDATE --> OPTIMIZE
     OPTIMIZE --> EXECUTE
@@ -775,9 +778,41 @@ graph TB
     NORMALIZE --> RANK
 ```
 
+### Query Preprocessing Pipeline
+
+The query preprocessing system ensures consistent search results through Unicode normalization:
+
+```mermaid
+graph LR
+    subgraph "Query Preprocessing"
+        RAW_QUERY[Raw Query Text<br/>from client request]
+        UNICODE_NORM[Unicode Normalization<br/>NFKC form application]
+        NORMALIZED[Normalized Query<br/>consistent character forms]
+    end
+    
+    subgraph "Cache Integration"
+        CACHE_KEY[Cache Key Generation<br/>using normalized query]
+        CACHE_LOOKUP[Cache Lookup<br/>improved hit rates]
+        SEARCH_EXECUTION[Vector Search<br/>with normalized text]
+    end
+    
+    RAW_QUERY --> UNICODE_NORM
+    UNICODE_NORM --> NORMALIZED
+    NORMALIZED --> CACHE_KEY
+    CACHE_KEY --> CACHE_LOOKUP
+    NORMALIZED --> SEARCH_EXECUTION
+```
+
+**Key Benefits:**
+- **Search Consistency**: NFKC normalization handles character variants (e.g., combining diacritics, fullwidth characters)
+- **Cache Efficiency**: Normalized queries improve cache hit rates by eliminating character encoding variations
+- **Cross-Platform Compatibility**: Consistent results across different operating systems and input methods
+- **Transparent Processing**: Normalization happens at validation layer with no API changes
+- **Performance Impact**: Minimal overhead (~1ms) for typical query lengths
+
 ### Caching Layer with TTL Support
 
-The enhanced caching system provides intelligent result caching with time-to-live (TTL) support:
+The enhanced caching system provides intelligent result caching with time-to-live (TTL) support and benefits from query preprocessing:
 
 ```mermaid
 graph LR
@@ -827,6 +862,7 @@ graph LR
 | Component | Target | Notes |
 |-----------|--------|-------|
 | Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH + multi-factor ranking + progressive filtering |
+| Query preprocessing | < 1ms | Unicode NFKC normalization for search consistency |
 | Ranking overhead | < 20ms P95 | Multi-factor scoring with type weights and normalization |
 | Filter latency | < 15ms P95 | Progressive filtering with selectivity analysis and partial indexes |
 | Deprecated filter | < 5ms P95 | High selectivity (~5%) with idx_non_deprecated partial index |
@@ -895,7 +931,7 @@ graph TD
 - This allows MCP clients to send either native integers or string representations
 - FastMCP automatically generates proper schemas from Pydantic field definitions
 
-**Implementation Example (SearchItemsRequest.k field)**
+**Implementation Example (SearchItemsRequest validation)**
 ```python
 @field_validator("k", mode="before")
 @classmethod
@@ -911,21 +947,36 @@ def coerce_k_to_int(cls, v):
                 f"k parameter must be a valid integer, got '{v}'"
             ) from err
     return v
+
+@field_validator("query", mode="before")
+@classmethod
+def normalize_query(cls, v):
+    """Normalize query text using Unicode NFKC form for search consistency."""
+    if v is None:
+        return v
+    if isinstance(v, str):
+        # Apply Unicode normalization for consistent search results
+        # NFKC form handles character variants and composed forms
+        import unicodedata
+        return unicodedata.normalize('NFKC', v)
+    return v
 ```
 
 **Key Design Principles**
 - **mode='before'**: Runs before Pydantic's built-in type validation
 - **Type Coercion**: Handles string-to-int conversion transparently
+- **Query Preprocessing**: Unicode normalization for search consistency
 - **Error Chaining**: Preserves original error context with `from err`
 - **Null Safety**: Explicit None handling for optional parameters
 - **Graceful Degradation**: Allows both native types and string representations
 
 **Validation Flow**
-1. **Pre-validation**: Field validators with `mode='before'` handle type coercion
-2. **Type Checking**: Pydantic validates coerced values against expected types
-3. **Constraint Validation**: Field constraints (ge, le, etc.) applied to typed values
-4. **Model Validation**: `extra='forbid'` prevents injection of unknown parameters
-5. **Error Standardization**: All validation errors converted to consistent ErrorResponse format
+1. **Pre-validation**: Field validators with `mode='before'` handle type coercion and query preprocessing
+2. **Query Normalization**: Unicode NFKC normalization applied to search queries for consistency
+3. **Type Checking**: Pydantic validates coerced values against expected types
+4. **Constraint Validation**: Field constraints (ge, le, etc.) applied to typed values
+5. **Model Validation**: `extra='forbid'` prevents injection of unknown parameters
+6. **Error Standardization**: All validation errors converted to consistent ErrorResponse format
 
 ## Security Model
 

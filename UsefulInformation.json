@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-06",
+  "lastUpdated": "2025-08-07",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "commonErrors": {
@@ -495,6 +495,38 @@
           "impact": "Ensures compatibility with various MCP client implementations that may serialize parameters differently",
           "dateLearned": "2025-08-06",
           "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Check whitespace-only queries before stripping for proper error messages",
+          "context": "Query preprocessing and user input validation",
+          "details": "When validating user queries, check for whitespace-only content before stripping whitespace. This allows providing a specific error message for whitespace-only inputs instead of a generic 'empty query' message after stripping",
+          "impact": "Provides more helpful and accurate error messages to users, improving user experience",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "NFKC normalization is irreversible but ideal for search and indexing",
+          "context": "Unicode text normalization for search queries",
+          "details": "Unicode NFKC (Normalization Form Compatibility Composition) is irreversible but excellent for search/indexing use cases. It handles ligatures (ﬀ → ff), fractions (½ → 1⁄2), superscripts/subscripts, and other compatibility characters. While information is lost, it creates consistent searchable text",
+          "impact": "Improves search accuracy and consistency by normalizing varied Unicode representations to canonical forms",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Preserve special technical characters during Unicode normalization",
+          "context": "Technical query processing with programming symbols",
+          "details": "Technical queries often contain important special characters like :: (scope resolution), <> (generics), # (doc comments). Unicode NFKC normalization preserves these characters while still handling compatibility issues with ligatures and fractions",
+          "impact": "Ensures technical search queries remain accurate while benefiting from Unicode normalization",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Provide helpful error messages with examples in Pydantic validators",
+          "context": "User input validation and error reporting",
+          "details": "Pydantic validators should include specific examples in error messages to help users understand what input is expected. For example, 'Query cannot be empty or contain only whitespace. Example: \"Vec::new\"' is more helpful than just 'Invalid query'",
+          "impact": "Reduces user confusion and support requests by providing clear guidance on correct input format",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
         }
       ]
     }
@@ -594,6 +626,15 @@
       "Parameter type issues: MCP clients may send numeric parameters as strings - use Pydantic field validators with mode='before' for type coercion",
       "Double validation conflicts: When MCP manifest schema is too restrictive, it prevents Pydantic field validators from running - use anyOf schema patterns for flexible type acceptance",
       "Schema flexibility: Use anyOf: [{'type': 'integer'}, {'type': 'string'}] in MCP manifests for parameters that may arrive as strings from different clients"
+    ],
+    "queryPreprocessing": [
+      "Check for whitespace-only queries before stripping to provide specific error messages",
+      "Use Unicode NFKC normalization for consistent search text while preserving technical characters",
+      "Technical symbols (::, <>, #) are preserved during NFKC normalization",
+      "NFKC handles ligatures (ﬀ → ff), fractions (½ → 1⁄2), and compatibility characters",
+      "Include specific examples in Pydantic validator error messages for better user experience",
+      "Test normalization with various Unicode inputs including mathematical symbols and ligatures",
+      "Verify that programming syntax elements remain intact after normalization"
     ]
   },
   "performanceMetrics": {

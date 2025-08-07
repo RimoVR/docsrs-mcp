@@ -166,6 +166,63 @@ async def test_search_items_filter_validation():
 
 
 @pytest.mark.asyncio
+async def test_query_normalization_integration():
+    """Test that query normalization works correctly in the API endpoint."""
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Test whitespace normalization
+        response = await client.post(
+            "/mcp/tools/search_items",
+            json={"crate_name": "tokio", "query": "  async   runtime  "},
+        )
+        assert response.status_code == 200
+        # The normalized query is used for search
+
+        # Test Unicode normalization
+        response = await client.post(
+            "/mcp/tools/search_items",
+            json={"crate_name": "tokio", "query": "café"},
+        )
+        assert response.status_code == 200
+
+        # Test special characters are preserved
+        response = await client.post(
+            "/mcp/tools/search_items",
+            json={"crate_name": "tokio", "query": "tokio::spawn"},
+        )
+        assert response.status_code == 200
+
+        # Test empty query is rejected
+        response = await client.post(
+            "/mcp/tools/search_items",
+            json={"crate_name": "tokio", "query": ""},
+        )
+        assert response.status_code == 422
+        error = response.json()
+        assert "Query cannot be empty" in str(error)
+
+        # Test whitespace-only query is rejected
+        response = await client.post(
+            "/mcp/tools/search_items",
+            json={"crate_name": "tokio", "query": "   \t\n   "},
+        )
+        assert response.status_code == 422
+        error = response.json()
+        assert "Query cannot be empty after normalization" in str(error)
+
+        # Test query too long is rejected
+        long_query = "a" * 501
+        response = await client.post(
+            "/mcp/tools/search_items",
+            json={"crate_name": "tokio", "query": long_query},
+        )
+        assert response.status_code == 422
+        error = response.json()
+        assert "Query too long" in str(error)
+
+
+@pytest.mark.asyncio
 async def test_mcp_manifest_includes_filter_parameters():
     """Test that the MCP manifest includes the new filter parameters."""
     transport = ASGITransport(app=app)

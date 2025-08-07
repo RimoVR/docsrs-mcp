@@ -6,6 +6,7 @@ following the Model Context Protocol (MCP) specification. All models use
 strict validation with `extra="forbid"` to prevent injection attacks.
 """
 
+import unicodedata
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -172,6 +173,64 @@ class SearchItemsRequest(BaseModel):
         None,
         description="Filter by deprecation status (true=deprecated only, false=non-deprecated only)",
     )
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def preprocess_query(cls, v: Any) -> str:
+        """
+        Preprocess and normalize search query for consistent matching.
+
+        Applies Unicode normalization (NFKC) and whitespace normalization
+        to improve search consistency and cache hit rates.
+        """
+        # Step 1: Convert to string (but don't strip yet to detect whitespace-only)
+        if v is None:
+            raise ValueError(
+                "Query cannot be empty. "
+                "Please provide a search term, e.g., 'async runtime', 'spawn task', 'deserialize JSON'."
+            )
+        query = str(v)
+
+        # Step 2: Check if query is only whitespace before stripping
+        if not query.strip():
+            if query:  # Has content but it's all whitespace
+                raise ValueError(
+                    "Query cannot be empty after normalization. "
+                    "The query may have contained only whitespace or special characters."
+                )
+            else:  # Empty string
+                raise ValueError(
+                    "Query cannot be empty. "
+                    "Please provide a search term, e.g., 'async runtime', 'spawn task', 'deserialize JSON'."
+                )
+
+        # Step 3: Strip leading/trailing whitespace
+        query = query.strip()
+
+        # Step 4: Length validation
+        if len(query) > 500:
+            raise ValueError(
+                f"Query too long ({len(query)} characters). Maximum 500 characters allowed. "
+                "Consider using more specific search terms to narrow your query."
+            )
+
+        # Step 5: Unicode normalization (NFKC for search)
+        # NFKC converts compatibility characters (e.g., ﬀ → ff) and normalizes
+        # Unicode combining characters for consistent matching
+        query = unicodedata.normalize("NFKC", query)
+
+        # Step 6: Whitespace normalization
+        # Replace multiple spaces, tabs, newlines with single space
+        query = " ".join(query.split())
+
+        # Step 7: Final validation after normalization
+        if len(query) < 1:
+            raise ValueError(
+                "Query cannot be empty after normalization. "
+                "The query may have contained only whitespace or special characters."
+            )
+
+        return query
 
     @field_validator("k", mode="before")
     @classmethod

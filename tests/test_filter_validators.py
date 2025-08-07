@@ -1,5 +1,7 @@
 """Tests for new filter validators in SearchItemsRequest."""
 
+import unicodedata
+
 import pytest
 from pydantic import ValidationError
 
@@ -171,3 +173,119 @@ def test_empty_string_handling():
     assert req.has_examples is None
     assert req.visibility is None
     assert req.deprecated is None
+
+
+def test_query_preprocessing():
+    """Test query field preprocessing and normalization."""
+    # Test basic query
+    req = SearchItemsRequest(crate_name="tokio", query="async runtime")
+    assert req.query == "async runtime"
+
+    # Test whitespace normalization
+    req = SearchItemsRequest(crate_name="tokio", query="  async   runtime  ")
+    assert req.query == "async runtime"
+
+    req = SearchItemsRequest(crate_name="tokio", query="async\t\nruntime")
+    assert req.query == "async runtime"
+
+    # Test Unicode normalization (NFKC)
+    # Composed character é vs decomposed e + combining acute
+    req = SearchItemsRequest(crate_name="tokio", query="café")
+    normalized = unicodedata.normalize("NFKC", "café")
+    assert req.query == normalized
+
+    # Test compatibility characters
+    req = SearchItemsRequest(crate_name="tokio", query="ﬀ ﬁ ﬂ")  # ff fi fl ligatures
+    assert req.query == "ff fi fl"
+
+    # Test special characters are preserved
+    req = SearchItemsRequest(crate_name="tokio", query="tokio::spawn")
+    assert req.query == "tokio::spawn"
+
+    req = SearchItemsRequest(crate_name="tokio", query="Result<T, E>")
+    assert req.query == "Result<T, E>"
+
+    req = SearchItemsRequest(crate_name="tokio", query="#[derive(Debug)]")
+    assert req.query == "#[derive(Debug)]"
+
+    # Test length after normalization
+    long_query = "a" * 499
+    req = SearchItemsRequest(crate_name="tokio", query=long_query)
+    assert len(req.query) == 499
+
+
+def test_query_validation_errors():
+    """Test query validation error cases."""
+    # Test empty query
+    with pytest.raises(ValidationError) as exc_info:
+        SearchItemsRequest(crate_name="tokio", query="")
+    assert "Query cannot be empty" in str(exc_info.value)
+
+    # Test whitespace-only query
+    with pytest.raises(ValidationError) as exc_info:
+        SearchItemsRequest(crate_name="tokio", query="   \t\n   ")
+    assert "Query cannot be empty after normalization" in str(exc_info.value)
+
+    # Test query too long
+    with pytest.raises(ValidationError) as exc_info:
+        SearchItemsRequest(crate_name="tokio", query="a" * 501)
+    assert "Query too long" in str(exc_info.value)
+    assert "501 characters" in str(exc_info.value)
+
+    # Test None query (should be caught by Pydantic as required field)
+    with pytest.raises(ValidationError) as exc_info:
+        SearchItemsRequest(crate_name="tokio", query=None)
+    # Pydantic will handle this as a missing required field
+
+
+def test_query_unicode_edge_cases():
+    """Test Unicode edge cases in query preprocessing."""
+    # Test various Unicode normalization forms
+    test_cases = [
+        ("Å", "Å"),  # Angstrom symbol normalizes to regular A with ring
+        ("½", "1⁄2"),  # Fraction normalization
+        ("①", "1"),  # Circled number
+        ("ℌ", "H"),  # Double-struck capital H
+        ("ℍ", "H"),  # Double-struck capital H (different codepoint)
+        ("㎡", "m2"),  # Square meter symbol
+        ("℡", "TEL"),  # Telephone sign
+    ]
+
+    for input_str, expected in test_cases:
+        req = SearchItemsRequest(crate_name="tokio", query=input_str)
+        assert req.query == expected
+
+    # Test that emoji are preserved (not normalized away)
+    req = SearchItemsRequest(crate_name="tokio", query="rust 🦀 async")
+    assert "🦀" in req.query
+    assert req.query == "rust 🦀 async"
+
+    # Test mixed scripts
+    req = SearchItemsRequest(crate_name="tokio", query="async 异步 非同期")
+    assert req.query == "async 异步 非同期"
+
+    # Test bidirectional text
+    req = SearchItemsRequest(crate_name="tokio", query="async مزامن غير")
+    assert "async" in req.query
+    assert "مزامن" in req.query
+
+
+def test_query_mcp_compatibility():
+    """Test query preprocessing with MCP client string inputs."""
+    # Test that string inputs work as expected
+    req = SearchItemsRequest.model_validate(
+        {"crate_name": "tokio", "query": "  async  runtime  "}
+    )
+    assert req.query == "async runtime"
+
+    # Test with various MCP-style inputs
+    req = SearchItemsRequest.model_validate(
+        {"crate_name": "tokio", "query": "tokio::spawn\n\n"}
+    )
+    assert req.query == "tokio::spawn"
+
+    # Test with special characters from MCP clients
+    req = SearchItemsRequest.model_validate(
+        {"crate_name": "serde", "query": "Deserialize<'de>"}
+    )
+    assert req.query == "Deserialize<'de>"
