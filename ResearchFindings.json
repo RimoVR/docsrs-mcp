@@ -64,7 +64,8 @@
                 "description": "Use Pydantic v2 field validators to handle string-to-numeric conversion",
                 "pattern": "@field_validator('numeric_field', mode='before') decorator with type conversion",
                 "timing": "Validators with mode='before' execute before Pydantic's built-in type validation",
-                "benefit": "Allows seamless conversion of MCP string parameters to expected Python types"
+                "benefit": "Allows seamless conversion of MCP string parameters to expected Python types",
+                "mcpCompatibility": "Field validators with mode='before' essential for MCP client compatibility due to inconsistent parameter serialization"
               }
             },
             "parameterValidation": {
@@ -169,12 +170,14 @@
           "Active maintenance and development",
           "Binary quantization support (32x memory reduction)",
           "Metadata filtering capabilities",
-          "SIMD acceleration for distance calculations"
+          "SIMD acceleration for distance calculations",
+          "WHERE clause support in MATCH queries for metadata filtering"
         ],
         "syntax": {
           "searchOperator": "MATCH (not vec_distance)",
           "knnConstraint": "Requires 'k = ?' parameter for KNN queries",
-          "example": "SELECT * FROM embeddings WHERE vec MATCH ? AND k = 10"
+          "example": "SELECT * FROM embeddings WHERE vec MATCH ? AND k = 10",
+          "metadataFiltering": "SELECT * FROM embeddings WHERE vec MATCH ? AND k = 10 AND metadata_column = 'value'"
         },
         "installation": "pip install sqlite-vec",
         "performance": {
@@ -324,6 +327,26 @@
               "library": "Built into sqlite-vec for performance",
               "benefit": "Hardware acceleration for vector operations",
               "platform": "Automatic detection and utilization of SIMD instructions"
+            },
+            "filterOptimization": {
+              "partialIndexes": {
+                "description": "SQLite partial indexes provide significant performance benefits for filtered queries",
+                "implementation": "CREATE INDEX idx_name ON table(column) WHERE condition",
+                "benefit": "Dramatically improves query performance when filters significantly reduce result set",
+                "useCase": "Optimal for queries that frequently filter on specific metadata values"
+              },
+              "progressiveFiltering": {
+                "strategy": "Apply metadata filters before vector search when filters reduce dataset significantly",
+                "threshold": "Use progressive filtering when filters reduce results to <10K items",
+                "benefit": "Reduces computational overhead by limiting vector similarity calculations",
+                "implementation": "Filter dataset first, then perform vector search on reduced set"
+              },
+              "filterSelectivityAnalysis": {
+                "purpose": "Analyze filter selectivity to determine optimal query strategy",
+                "overhead": "Analysis adds minimal overhead (typically <5ms)",
+                "decision": "Choose between full vector search vs progressive filtering based on selectivity",
+                "implementation": "COUNT queries to estimate result set size before applying expensive vector operations"
+              }
             }
           }
         }

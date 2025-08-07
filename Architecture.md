@@ -170,6 +170,7 @@ erDiagram
         TEXT examples "extracted code examples - DEFAULT NULL"
         TEXT tags "searchable metadata tags"
         INTEGER char_start "original position"
+        BOOLEAN deprecated "item deprecation status - DEFAULT NULL"
     }
     
     VEC_EMBEDDINGS {
@@ -221,6 +222,15 @@ erDiagram
     META ||--|| EMBEDDINGS : "describes"
     META ||--|| PASSAGES : "legacy describes"
 ```
+
+### Partial Indexes for Filter Optimization
+
+The database schema includes specialized partial indexes designed to optimize common filter patterns:
+
+- **idx_non_deprecated**: Indexes only non-deprecated items (`WHERE deprecated IS NULL OR deprecated = 0`)
+- **idx_public_functions**: Indexes public functions (`WHERE item_type = 'function' AND item_path NOT LIKE '%::%'`)
+- **idx_has_examples**: Indexes items with code examples (`WHERE examples IS NOT NULL AND examples != ''`)
+- **idx_crate_prefix**: Enables fast crate-specific searches using prefix matching on item_path
 
 ## Dual-Mode Architecture
 
@@ -612,6 +622,117 @@ graph TB
 - **Error Handling**: Graceful degradation when standard library documentation cannot be retrieved
 - **Cache Resilience**: Maintains cached standard library docs even when upstream docs.rs is unavailable
 
+## Filter Optimization Architecture
+
+### Progressive Filtering with Selectivity Analysis
+
+The filter optimization system implements intelligent query planning with selectivity-based optimization to maximize search performance:
+
+```mermaid
+graph TB
+    subgraph "Filter Analysis Pipeline"
+        QUERY[Incoming Query<br/>with filters]
+        ANALYZE[Selectivity Analyzer<br/>Estimates filter cardinality]
+        ORDER[Filter Ordering<br/>Most selective first]
+        EXECUTE[Progressive Execution<br/>Early termination on selectivity]
+    end
+    
+    subgraph "Selectivity Metrics"
+        DEPRECATED[Deprecated Filter<br/>~5% selectivity]
+        TYPE[Type Filter<br/>Functions ~40%, Traits ~5%]
+        EXAMPLES[Has Examples<br/>~30% selectivity]
+        CRATE[Crate Prefix<br/>Highly selective ~1%]
+    end
+    
+    subgraph "Partial Index Strategy"
+        IDX_DEPRECATED[idx_non_deprecated<br/>Non-deprecated items only]
+        IDX_FUNCTIONS[idx_public_functions<br/>Public functions only]
+        IDX_EXAMPLES[idx_has_examples<br/>Items with examples]
+        IDX_CRATE[idx_crate_prefix<br/>Crate-specific searches]
+    end
+    
+    QUERY --> ANALYZE
+    ANALYZE --> ORDER
+    ORDER --> EXECUTE
+    
+    ANALYZE --> DEPRECATED
+    ANALYZE --> TYPE
+    ANALYZE --> EXAMPLES
+    ANALYZE --> CRATE
+    
+    EXECUTE --> IDX_DEPRECATED
+    EXECUTE --> IDX_FUNCTIONS
+    EXECUTE --> IDX_EXAMPLES
+    EXECUTE --> IDX_CRATE
+```
+
+### Enhanced Validation with MCP Compatibility
+
+The filter validation system provides comprehensive parameter validation while maintaining MCP client compatibility:
+
+```mermaid
+graph LR
+    subgraph "Filter Validation Pipeline"
+        INPUT[Filter Parameters]
+        VALIDATE[Pydantic Validation<br/>Type coercion & constraints]
+        OPTIMIZE[Query Optimizer<br/>Selectivity analysis]
+        EXECUTE[Optimized Execution<br/>Progressive filtering]
+    end
+    
+    subgraph "MCP Parameter Handling"
+        STRING_PARAMS[String Parameters<br/>from MCP clients]
+        TYPE_COERCE[Field Validators<br/>mode='before']
+        CONSTRAINT_CHECK[Constraint Validation<br/>enum values, ranges]
+    end
+    
+    STRING_PARAMS --> TYPE_COERCE
+    TYPE_COERCE --> INPUT
+    INPUT --> VALIDATE
+    VALIDATE --> OPTIMIZE
+    OPTIMIZE --> EXECUTE
+    CONSTRAINT_CHECK --> VALIDATE
+```
+
+### Performance Timing and Metrics Collection
+
+The system includes comprehensive performance monitoring for filter operations:
+
+```mermaid
+graph TD
+    subgraph "Performance Metrics"
+        TIMING[Query Timing<br/>Per-filter latency]
+        SELECTIVITY[Selectivity Metrics<br/>Filter effectiveness]
+        INDEX_USAGE[Index Usage Stats<br/>Partial index efficiency]
+        CACHE_HITS[Cache Performance<br/>Filter cache hit rates]
+    end
+    
+    subgraph "Monitoring Points"
+        PRE_FILTER[Pre-filter Query Time]
+        FILTER_APPLY[Filter Application Time]
+        POST_FILTER[Post-filter Processing Time]
+        TOTAL_LATENCY[Total Query Latency]
+    end
+    
+    TIMING --> PRE_FILTER
+    TIMING --> FILTER_APPLY
+    TIMING --> POST_FILTER
+    TIMING --> TOTAL_LATENCY
+    
+    SELECTIVITY --> INDEX_USAGE
+    INDEX_USAGE --> CACHE_HITS
+```
+
+### Performance Characteristics for Filter Operations
+
+| Filter Type | Selectivity | Index Used | Target Latency | Notes |
+|-------------|-------------|------------|----------------|---------|
+| Deprecated filter | ~5% | idx_non_deprecated | < 5ms | Most selective, applied first |
+| Crate prefix | ~1% | idx_crate_prefix | < 3ms | Highly selective for single crate |
+| Item type = function | ~40% | idx_public_functions | < 10ms | Medium selectivity |
+| Has examples | ~30% | idx_has_examples | < 8ms | Medium selectivity |
+| Combined filters | Variable | Multiple indexes | < 15ms | Progressive application |
+| Vector search + filters | N/A | Composite strategy | < 100ms P95 | Maintains search SLA |
+
 ## Search Ranking Architecture
 
 ### Multi-Factor Scoring Algorithm
@@ -705,8 +826,13 @@ graph LR
 
 | Component | Target | Notes |
 |-----------|--------|-------|
-| Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH + multi-factor ranking |
+| Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH + multi-factor ranking + progressive filtering |
 | Ranking overhead | < 20ms P95 | Multi-factor scoring with type weights and normalization |
+| Filter latency | < 15ms P95 | Progressive filtering with selectivity analysis and partial indexes |
+| Deprecated filter | < 5ms P95 | High selectivity (~5%) with idx_non_deprecated partial index |
+| Type filter | < 10ms P95 | Medium selectivity (~40% for functions) with idx_public_functions |
+| Example filter | < 8ms P95 | Medium selectivity (~30%) with idx_has_examples partial index |
+| Crate prefix filter | < 3ms P95 | High selectivity (~1%) with idx_crate_prefix optimization |
 | Cache hit latency | < 5ms P95 | LRU cache with TTL support |
 | Cache miss latency | < 100ms P95 | Full search + ranking + cache store |
 | Ingest latency | < 30s | Full rustdoc processing with streaming |

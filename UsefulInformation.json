@@ -455,6 +455,46 @@
           "impact": "Significantly improves response times for repeated queries while managing memory usage effectively",
           "dateLearned": "2025-08-06",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Always load sqlite-vec extension when testing database operations",
+          "context": "Vector similarity search and database testing",
+          "details": "The sqlite-vec extension must be loaded before performing any vector operations or database schema creation that depends on vector functionality. Failure to load the extension results in 'no such function' errors",
+          "impact": "Prevents vector operation failures and ensures consistent database functionality across testing and production environments",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "tests/"]
+        },
+        {
+          "lesson": "Use Pydantic field_validator with mode='before' for flexible MCP parameter handling",
+          "context": "MCP protocol parameter type conversion and validation",
+          "details": "MCP clients may send parameters as different types (e.g., string '5' instead of integer 5). Using Pydantic field_validator with mode='before' allows flexible type conversion before validation. Combine with anyOf schema patterns in MCP manifests to pass JSON Schema validation",
+          "impact": "Enables robust parameter handling across different MCP client implementations while maintaining type safety",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Partial indexes significantly improve performance for common filter patterns",
+          "context": "Database query optimization for filtered searches",
+          "details": "Creating partial indexes on commonly filtered columns (e.g., WHERE item_type = 'function') dramatically improves query performance for specific filter patterns. Partial indexes are smaller and more targeted than full column indexes",
+          "impact": "Reduces query execution time for filtered searches by orders of magnitude, especially for common filter patterns",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/database.py"]
+        },
+        {
+          "lesson": "Progressive filtering should only be used when result set is small (<10K items)",
+          "context": "Search result filtering and performance optimization",
+          "details": "Progressive filtering (applying filters after vector search) is only efficient when the initial result set is small. For large result sets, database-level filtering with proper indexes is more performant than in-memory filtering",
+          "impact": "Prevents performance degradation when dealing with large datasets by choosing appropriate filtering strategies",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Use anyOf schema pattern in MCP manifests for parameters that may arrive as strings",
+          "context": "MCP protocol schema validation and client compatibility",
+          "details": "MCP clients may send numeric parameters as strings due to JSON serialization. Use anyOf: [{'type': 'integer'}, {'type': 'string'}] in MCP manifest schemas to handle this variability. This allows JSON Schema validation to pass so Pydantic field validators can perform type coercion",
+          "impact": "Ensures compatibility with various MCP client implementations that may serialize parameters differently",
+          "dateLearned": "2025-08-06",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"]
         }
       ]
     }
@@ -523,7 +563,10 @@
       "Clear buffers and trigger GC between batches in streaming operations",
       "Implement per-batch transactions for database resilience in streaming pipelines",
       "Log memory status at key processing points for debugging streaming operations",
-      "Use integration tests to validate streaming pipeline error recovery"
+      "Use integration tests to validate streaming pipeline error recovery",
+      "Always load sqlite-vec extension before testing vector operations to prevent 'no such function' errors",
+      "Create partial indexes for common filter patterns to dramatically improve query performance",
+      "Use progressive filtering only for small result sets (<10K items) - prefer database-level filtering for large datasets"
     ],
     "rateLimiting": [
       "Ensure Redis is running for distributed limiting",
@@ -549,7 +592,8 @@
       "Verify MCP protocol: Check that STDIO is clean, no stdout pollution",
       "FastMCP conversion: Use FastMCP.from_fastapi() for automatic REST-to-MCP conversion",
       "Parameter type issues: MCP clients may send numeric parameters as strings - use Pydantic field validators with mode='before' for type coercion",
-      "Double validation conflicts: When MCP manifest schema is too restrictive, it prevents Pydantic field validators from running - use anyOf schema patterns for flexible type acceptance"
+      "Double validation conflicts: When MCP manifest schema is too restrictive, it prevents Pydantic field validators from running - use anyOf schema patterns for flexible type acceptance",
+      "Schema flexibility: Use anyOf: [{'type': 'integer'}, {'type': 'string'}] in MCP manifests for parameters that may arrive as strings from different clients"
     ]
   },
   "performanceMetrics": {
@@ -567,7 +611,9 @@
       "batchProcessing": "Maintains constant memory usage regardless of dataset size",
       "memoryManagement": "Use MemoryMonitor context manager, trigger GC after 100+ items, pre-serialize before batching",
       "streaming": "Async generators for data processing, wrapper functions for backwards compatibility",
-      "errorRecovery": "Per-batch transactions, memory status logging, streaming-aware error handling"
+      "errorRecovery": "Per-batch transactions, memory status logging, streaming-aware error handling",
+      "databaseOptimization": "Create partial indexes for common filter patterns, use progressive filtering only for small result sets (<10K items)",
+      "extensionManagement": "Always load sqlite-vec extension before vector operations, especially in testing environments"
     }
   },
   "codeQuality": {

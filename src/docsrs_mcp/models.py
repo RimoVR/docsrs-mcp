@@ -8,7 +8,7 @@ strict validation with `extra="forbid"` to prevent injection attacks.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # MCP Manifest Models
@@ -181,11 +181,26 @@ class SearchItemsRequest(BaseModel):
             return v
         if isinstance(v, str):
             try:
-                return int(v)
+                value = int(v)
+                # Provide helpful guidance if value is out of bounds
+                if value < 1:
+                    raise ValueError(
+                        f"k parameter must be at least 1 (requested: {value}). "
+                        "Use k=1 for single result or increase for more results."
+                    )
+                if value > 20:
+                    raise ValueError(
+                        f"k parameter cannot exceed 20 (requested: {value}). "
+                        "Large result sets may impact performance. Consider using k=10 for comprehensive results."
+                    )
+                return value
             except ValueError as err:
-                raise ValueError(
-                    f"k parameter must be a valid integer, got '{v}'"
-                ) from err
+                if "invalid literal" in str(err):
+                    raise ValueError(
+                        f"k parameter must be a valid integer, got '{v}'. "
+                        "Examples: k=5 for top 5 results, k=10 for more comprehensive search."
+                    ) from err
+                raise
         return v
 
     @field_validator("item_type", mode="before")
@@ -199,8 +214,19 @@ class SearchItemsRequest(BaseModel):
         # Validate against allowed types
         allowed_types = {"function", "struct", "trait", "enum", "module"}
         if normalized not in allowed_types:
+            # Provide helpful suggestions for common mistakes
+            suggestions = []
+            if "func" in normalized or "fn" in normalized:
+                suggestions.append("Did you mean 'function'?")
+            elif "class" in normalized:
+                suggestions.append("Did you mean 'struct'?")
+            elif "interface" in normalized:
+                suggestions.append("Did you mean 'trait'?")
+
+            suggestion_text = f" {suggestions[0]}" if suggestions else ""
             raise ValueError(
-                f"item_type must be one of {allowed_types}, got '{normalized}'"
+                f"item_type must be one of {sorted(allowed_types)}, got '{normalized}'.{suggestion_text} "
+                f"Use 'function' for functions/methods, 'struct' for structs, 'trait' for traits."
             )
         return normalized
 
@@ -232,10 +258,54 @@ class SearchItemsRequest(BaseModel):
             return None
         normalized = str(v).lower()
         if normalized not in ["public", "private", "crate"]:
+            # Common visibility terms mapping
+            if normalized in ["pub", "exported"]:
+                suggestion = " Did you mean 'public'?"
+            elif normalized in ["priv", "internal"]:
+                suggestion = " Did you mean 'private'?"
+            elif normalized in ["pub(crate)", "crate-private"]:
+                suggestion = " Did you mean 'crate'?"
+            else:
+                suggestion = ""
+
             raise ValueError(
-                f"visibility must be one of ['public', 'private', 'crate'], got '{normalized}'"
+                f"visibility must be one of ['public', 'private', 'crate'], got '{normalized}'.{suggestion} "
+                f"Use 'public' for exported items, 'private' for module-private items, 'crate' for crate-visible items."
             )
         return normalized
+
+    @model_validator(mode="after")
+    def validate_filter_compatibility(self):
+        """Check for conflicting or incompatible filter combinations."""
+        # Warn if searching for private items in a different crate
+        if (
+            self.visibility == "private"
+            and self.crate_filter
+            and self.crate_filter != self.crate_name
+        ):
+            raise ValueError(
+                f"Cannot search for private items in crate '{self.crate_filter}' "
+                f"when searching within crate '{self.crate_name}'. "
+                "Private items are only visible within their own crate."
+            )
+
+        # Warn if min_doc_length is very high with has_examples=True
+        if self.has_examples and self.min_doc_length and self.min_doc_length > 5000:
+            raise ValueError(
+                f"min_doc_length={self.min_doc_length} is very high when combined with has_examples=True. "
+                "This may return no results. Consider using min_doc_length=1000 or lower for items with examples."
+            )
+
+        # Suggest optimization for common patterns
+        if (
+            self.deprecated is False
+            and self.visibility == "public"
+            and not self.item_type
+        ):
+            # This is fine, just a common pattern that benefits from our partial indexes
+            pass
+
+        return self
 
     model_config = ConfigDict(extra="forbid")
 

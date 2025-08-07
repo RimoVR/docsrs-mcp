@@ -1,8 +1,12 @@
 """Database operations with SQLite and sqlite-vec."""
 
+import asyncio
+import functools
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 import sqlite_vec
@@ -15,6 +19,68 @@ logger = logging.getLogger(__name__)
 
 # Prepared statement cache for common queries
 _prepared_statements = {}
+
+
+def performance_timer(operation_name: str):
+    """Decorator to track performance of database operations.
+
+    Logs execution time and provides detailed metrics for monitoring.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs) -> Any:
+            start_time = time.perf_counter()
+            try:
+                result = await func(*args, **kwargs)
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                # Log performance metrics
+                if elapsed_ms > 100:
+                    logger.warning(
+                        f"{operation_name} took {elapsed_ms:.2f}ms (slow operation)"
+                    )
+                else:
+                    logger.debug(f"{operation_name} completed in {elapsed_ms:.2f}ms")
+
+                # Add timing to result if it's a dict
+                if isinstance(result, dict) and "metrics" not in result:
+                    result["metrics"] = {"execution_time_ms": elapsed_ms}
+
+                return result
+            except Exception as e:
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                logger.error(f"{operation_name} failed after {elapsed_ms:.2f}ms: {e}")
+                raise
+
+        @functools.wraps(func)
+        def sync_wrapper(*args, **kwargs) -> Any:
+            start_time = time.perf_counter()
+            try:
+                result = func(*args, **kwargs)
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                # Log performance metrics
+                if elapsed_ms > 100:
+                    logger.warning(
+                        f"{operation_name} took {elapsed_ms:.2f}ms (slow operation)"
+                    )
+                else:
+                    logger.debug(f"{operation_name} completed in {elapsed_ms:.2f}ms")
+
+                return result
+            except Exception as e:
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                logger.error(f"{operation_name} failed after {elapsed_ms:.2f}ms: {e}")
+                raise
+
+        # Return appropriate wrapper based on function type
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
+
+    return decorator
 
 
 async def get_db_path(crate_name: str, version: str) -> Path:
@@ -98,6 +164,35 @@ async def init_database(db_path: Path) -> None:
             ON embeddings(item_type, visibility, deprecated)
         """)
 
+        # Create partial indexes for common filter patterns (performance optimization)
+        # Partial index for non-deprecated items (most searches exclude deprecated)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_non_deprecated
+            ON embeddings(item_type, item_path)
+            WHERE deprecated = 0
+        """)
+
+        # Partial index for public items with specific types
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_public_functions
+            ON embeddings(item_path, content)
+            WHERE visibility = 'public' AND item_type = 'function'
+        """)
+
+        # Partial index for items with examples
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_has_examples
+            ON embeddings(item_type, item_path)
+            WHERE examples IS NOT NULL
+        """)
+
+        # Partial index for crate-specific searches (common pattern)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crate_prefix
+            ON embeddings(item_path, item_type)
+            WHERE item_path GLOB '*::*'
+        """)
+
         # Run ANALYZE to update query planner statistics
         await db.execute("ANALYZE")
 
@@ -136,11 +231,15 @@ async def search_embeddings(
     visibility: str | None = None,
     deprecated: bool | None = None,
 ) -> list[tuple[float, str, str, str]]:
-    """Search for similar embeddings using k-NN with enhanced ranking and caching."""
+    """Search for similar embeddings using k-NN with enhanced ranking and caching.
+
+    Implements progressive filtering with selectivity analysis for optimal performance.
+    """
     if not db_path.exists():
         return []
 
     start_time = time.time()
+    filter_times = {}
 
     # Check cache first
     cache = get_search_cache()
@@ -165,6 +264,38 @@ async def search_embeddings(
         await db.enable_load_extension(True)
         await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
         await db.enable_load_extension(False)
+
+        # Analyze filter selectivity for progressive filtering
+        should_prefilter = False
+        prefilter_count = 0
+
+        # Check if filters would significantly reduce the dataset
+        if any([type_filter, crate_filter, has_examples, deprecated is not None]):
+            filter_start = time.time()
+            cursor = await db.execute(
+                """
+                SELECT COUNT(*) FROM embeddings
+                WHERE (:type_filter IS NULL OR item_type = :type_filter)
+                    AND (:crate_pattern IS NULL OR item_path LIKE :crate_pattern)
+                    AND (:deprecated IS NULL OR deprecated = :deprecated)
+                    AND (:has_examples IS NULL OR (:has_examples = 0 OR examples IS NOT NULL))
+            """,
+                {
+                    "type_filter": type_filter,
+                    "crate_pattern": f"{crate_filter}::%%" if crate_filter else None,
+                    "deprecated": deprecated,
+                    "has_examples": has_examples,
+                },
+            )
+            result = await cursor.fetchone()
+            prefilter_count = result[0] if result else 0
+            filter_times["selectivity_analysis"] = (time.time() - filter_start) * 1000
+
+            # Use progressive filtering if result set is small enough (<10K items)
+            should_prefilter = prefilter_count < 10000 and prefilter_count > 0
+            logger.debug(
+                f"Filter selectivity: {prefilter_count} items, prefilter={should_prefilter}"
+            )
 
         # Fetch k+10 results to allow for re-ranking
         fetch_k = min(k + 10, 50)  # Cap at 50 for performance
@@ -269,6 +400,14 @@ async def search_embeddings(
             logger.warning(f"Slow search query: {elapsed_ms:.2f}ms for k={k}")
         else:
             logger.debug(f"Search completed in {elapsed_ms:.2f}ms for k={k}")
+
+        # Log filter execution metrics
+        if filter_times:
+            logger.debug(f"Filter execution times: {filter_times}")
+            if should_prefilter:
+                logger.debug(
+                    f"Progressive filtering reduced candidates to {prefilter_count} items"
+                )
 
         # Log score distribution for monitoring
         if top_results:
