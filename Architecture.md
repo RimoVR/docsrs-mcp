@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a dual-mode architecture with a FastAPI web layer that can operate in either MCP mode (default) or REST mode. The MCP mode uses STDIO transport for AI clients, while REST mode requires an explicit flag. The system includes a comprehensive asynchronous ingestion pipeline with enhanced rustdoc JSON processing for complete documentation extraction, and a SQLite-based vector storage system with intelligent caching and example management.
+The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a dual-mode architecture with a FastAPI web layer that can operate in either MCP mode (default) or REST mode. The MCP mode uses STDIO transport for AI clients, while REST mode requires an explicit flag. The system includes a comprehensive asynchronous ingestion pipeline with enhanced rustdoc JSON processing for complete documentation extraction, a SQLite-based vector storage system with intelligent caching and example management, and a dedicated code example extraction and semantic search system.
 
 ## High-Level Architecture
 
@@ -54,9 +54,9 @@ graph TB
 graph LR
     subgraph "docsrs_mcp Package"
         subgraph "Web Layer"
-            APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata]
+            APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata<br/>search_examples endpoint]
             ROUTES[routes.py<br/>Enhanced MCP endpoints<br/>Comprehensive docstrings]
-            MODELS[models.py<br/>Enhanced Pydantic schemas<br/>Field validators<br/>MCP compatibility<br/>Auto-generated docs]
+            MODELS[models.py<br/>Enhanced Pydantic schemas<br/>Field validators<br/>MCP compatibility<br/>Auto-generated docs<br/>Code example data models]
             VALIDATION[validation.py<br/>Centralized validation utilities<br/>Precompiled regex patterns<br/>Type coercion functions]
             NAV[navigation.py<br/>Module tree operations<br/>Hierarchy traversal]
             MW[middleware.py<br/>Rate limiting]
@@ -68,7 +68,7 @@ graph LR
             DL[Compression Support<br/>zst, gzip, json]
             PARSE[ijson Parser<br/>Memory-efficient streaming<br/>Module hierarchy extraction]
             HIERARCHY[build_module_hierarchy()<br/>Parent-child relationships<br/>Depth calculation<br/>Item counting]
-            EXTRACT[Code Example Extractor<br/>Doc comment parsing]
+            EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]
             EMBED[FastEmbed<br/>Batch processing]
             LOCK[Per-crate Locks<br/>Prevent duplicates]
         end
@@ -316,6 +316,7 @@ graph TD
         SEARCH_DOC[search_documentation<br/>Vector similarity search with type filtering<br/>Input: query text, item_type filter<br/>Output: ranked documentation items]
         NAV_MOD[navigate_modules<br/>Module hierarchy navigation<br/>Input: crate, path<br/>Output: module tree structure]
         GET_EX[get_examples<br/>Code example retrieval<br/>Input: item_id or query<br/>Output: relevant code examples]
+        SEARCH_EX[search_examples<br/>Semantic code example search<br/>Input: query, language filter<br/>Output: scored code examples with deduplication]
         GET_SIG[get_item_signature<br/>Item signature retrieval<br/>Input: item_path<br/>Output: complete signature]
         INGEST_TOOL[ingest_crate<br/>Manual crate ingestion<br/>Input: crate name/version<br/>Output: ingestion status]
         GET_MOD_TREE[get_module_tree<br/>Module hierarchy navigation<br/>Input: crate, version, module_path<br/>Output: hierarchical tree structure]
@@ -330,6 +331,7 @@ graph TD
         REST_SEARCH_DOC[POST /search_documentation<br/>Enhanced search endpoint]
         REST_NAV[POST /navigate_modules<br/>Module navigation endpoint]
         REST_EXAMPLES[POST /get_examples<br/>Example retrieval endpoint]
+        REST_SEARCH_EX[POST /search_examples<br/>Code example search endpoint]
         REST_SIG[POST /get_item_signature<br/>Signature endpoint]
         REST_INGEST[POST /ingest<br/>FastAPI endpoint]
         REST_MOD_TREE[POST /get_module_tree<br/>Module tree endpoint]
@@ -345,6 +347,7 @@ graph TD
     SEARCH_DOC -->|converts| REST_SEARCH_DOC
     NAV_MOD -->|converts| REST_NAV
     GET_EX -->|converts| REST_EXAMPLES
+    SEARCH_EX -->|converts| REST_SEARCH_EX
     GET_SIG -->|converts| REST_SIG
     INGEST_TOOL -->|converts| REST_INGEST
     GET_MOD_TREE -->|converts| REST_MOD_TREE
@@ -907,10 +910,10 @@ The search ranking system implements a sophisticated multi-factor scoring algori
 ```mermaid
 graph TB
     subgraph "Scoring Components"
-        VECTOR[Vector Similarity<br/>70% weight<br/>BAAI/bge-small-en-v1.5]
+        VECTOR[Vector Similarity<br/>60% weight<br/>BAAI/bge-small-en-v1.5<br/>Reduced from 70% to 60%]
         TYPE[Type-Aware Boost<br/>15% weight<br/>Functions 1.2x, Traits 1.15x]
         QUALITY[Documentation Quality<br/>10% weight<br/>Length + examples heuristics]
-        EXAMPLES[Example Presence<br/>5% weight<br/>Code example availability]
+        EXAMPLES[Example Presence<br/>15% weight<br/>Code example availability<br/>Enhanced from 5% to 15%]
     end
     
     subgraph "Type Weights"
@@ -921,7 +924,7 @@ graph TB
     end
     
     subgraph "Score Processing"
-        COMBINE[Weighted Combination<br/>Score = (V×0.7) + (T×0.15) + (Q×0.1) + (E×0.05)]
+        COMBINE[Weighted Combination<br/>Score = (V×0.60) + (T×0.15) + (Q×0.10) + (E×0.15)]
         NORMALIZE[Score Normalization<br/>Min-Max to [0, 1] range]
         RANK[Final Ranking<br/>Sorted by normalized score]
     end
@@ -1035,6 +1038,9 @@ graph LR
 | Type filter | < 10ms P95 | Medium selectivity (~40% for functions) with idx_public_functions |
 | Example filter | < 8ms P95 | Medium selectivity (~30%) with idx_has_examples partial index |
 | Crate prefix filter | < 3ms P95 | High selectivity (~1%) with idx_crate_prefix optimization |
+| **Code example search** | **< 100ms P95** | **Vector search + language filtering + deduplication** |
+| **Language detection** | **< 2ms per block** | **Pygments lexer analysis with 30% confidence threshold** |
+| **Example extraction** | **< 10ms per doc** | **Enhanced JSON structure processing overhead** |
 | **Rate limiting overhead** | **< 1ms P95** | **In-memory counter check and update with slowapi** |
 | **Rate limit storage** | **O(active IPs)** | **In-memory storage, resets on restart** |
 | **Parameter validation** | **< 2ms P95** | **Centralized validation with precompiled regex patterns** |
@@ -1951,6 +1957,148 @@ graph TD
 - **Hierarchical Queries**: Self-joining PASSAGES table on parent_id for tree traversal
 - **Breadcrumb Generation**: Recursive parent lookup for complete navigation paths
 - **Module Content Listing**: Query children of a given module for content discovery
+
+## Code Example Extraction System
+
+The system includes a comprehensive code example extraction and indexing system that enables semantic search across code examples while maintaining backward compatibility.
+
+### Components Architecture
+
+```mermaid
+graph TB
+    subgraph "Code Example Processing Pipeline"
+        PYGMENTS[Pygments Language Detection<br/>30% confidence threshold<br/>Auto-detection fallback]
+        EXTRACT_FUNC[extract_code_examples()<br/>Enhanced JSON structure<br/>Backward compatible]
+        METADATA[Code Metadata<br/>language, confidence, detection_method]
+    end
+    
+    subgraph "Storage Integration"
+        JSON_FIELD[examples TEXT column<br/>JSON structure storage<br/>Maintains list format compatibility]
+        EXISTING_EMBED[Existing Embeddings<br/>Vector search infrastructure<br/>No schema changes required]
+    end
+    
+    subgraph "Search Infrastructure"
+        SEARCH_TOOL[search_examples MCP Tool<br/>POST /mcp/tools/search_examples<br/>Semantic search capability]
+        LANG_FILTER[Language Filtering<br/>rust, bash, toml, etc.<br/>Optional parameter]
+        DEDUP[Deduplication<br/>Code hash-based<br/>Prevents duplicate results]
+        SCORING[Scoring System<br/>1/(1+distance) formula<br/>Vector similarity ranking]
+    end
+    
+    PYGMENTS --> EXTRACT_FUNC
+    EXTRACT_FUNC --> METADATA
+    METADATA --> JSON_FIELD
+    JSON_FIELD --> EXISTING_EMBED
+    EXISTING_EMBED --> SEARCH_TOOL
+    SEARCH_TOOL --> LANG_FILTER
+    LANG_FILTER --> DEDUP
+    DEDUP --> SCORING
+```
+
+### Data Models
+
+**SearchExamplesRequest**
+- `query: str` - Search query for semantic matching
+- `language: Optional[str]` - Filter by programming language (rust, bash, toml, etc.)
+- `k: int = 5` - Number of results to return
+
+**CodeExample**
+- `code: str` - The code snippet content
+- `language: str` - Detected or specified language
+- `confidence: Optional[float]` - Language detection confidence score
+- `detection_method: str` - How language was determined (pygments, explicit, fallback)
+- `context: str` - Surrounding documentation context
+
+**SearchExamplesResponse**
+- `examples: List[CodeExample]` - List of matching code examples
+- `total_count: int` - Total examples found before limiting
+
+### Implementation Details
+
+#### Enhanced extract_code_examples Function (ingest.py:579)
+
+The function now returns structured JSON data while maintaining backward compatibility:
+
+```python
+# New JSON structure
+{
+    "code": "let x = 5;",
+    "language": "rust", 
+    "confidence": 0.85,
+    "detection_method": "pygments"
+}
+
+# Legacy list format still supported
+["let x = 5;", "cargo build"]
+```
+
+Key features:
+- **Pygments Integration**: Uses lexer analysis for accurate language detection
+- **Confidence Threshold**: 30% minimum confidence for auto-detection
+- **Fallback Strategy**: Uses context clues when pygments fails
+- **Multiple Language Support**: Handles rust, bash, toml, json, yaml, and more
+- **Backward Compatibility**: Maintains support for old list format
+
+#### search_examples MCP Tool (app.py:443)
+
+New endpoint providing semantic search capabilities:
+- **Vector Search Integration**: Uses existing embeddings infrastructure
+- **Language Filtering**: SQL-based filtering by detected language
+- **Deduplication**: Hash-based removal of identical code snippets
+- **Semantic Ranking**: Distance-based scoring with normalization
+- **Context Preservation**: Returns examples with surrounding documentation
+
+### Data Flow Integration
+
+```mermaid
+sequenceDiagram
+    participant Ingest as Ingestion Pipeline
+    participant Extract as extract_code_examples()
+    participant Pygments as Pygments Lexer
+    participant Storage as SQLite Database
+    participant Search as search_examples Tool
+    participant Client as MCP Client
+    
+    Ingest->>Extract: Process documentation text
+    Extract->>Pygments: Detect language for code blocks
+    Pygments-->>Extract: Language + confidence score
+    Extract->>Extract: Build JSON structure
+    Extract-->>Ingest: Enhanced code examples
+    Ingest->>Storage: Store JSON in examples column
+    
+    Client->>Search: POST /mcp/tools/search_examples
+    Search->>Storage: Vector similarity query
+    Storage->>Storage: Filter by language (if specified)
+    Storage->>Storage: Deduplicate by code hash
+    Storage-->>Search: Ranked code examples
+    Search-->>Client: SearchExamplesResponse
+```
+
+### Configuration Changes
+
+The ranking weights have been adjusted to better utilize code examples:
+
+- **RANKING_EXAMPLES_WEIGHT**: Increased from 0.05 to 0.15 (15% vs 5%)
+- **RANKING_VECTOR_WEIGHT**: Reduced from 0.70 to 0.60 (60% vs 70%)
+
+This change reflects the increased importance and utility of code examples in search relevance.
+
+### Backward Compatibility
+
+The implementation maintains full backward compatibility:
+- **Storage Format**: Old list format still supported and processed
+- **API Changes**: No breaking changes to existing endpoints
+- **Database Schema**: No changes to existing table structure
+- **Search Behavior**: Existing search functionality unaffected
+
+### Performance Characteristics
+
+| Operation | Target | Notes |
+|-----------|--------|-------|
+| Language detection | < 2ms per block | Pygments lexer analysis |
+| Example extraction | < 10ms per doc | Enhanced processing overhead |
+| Search query | < 100ms P95 | Vector search + filtering + deduplication |
+| Storage overhead | +15% | JSON structure vs list format |
+| Memory usage | Minimal | Uses existing embedding infrastructure |
 
 ## Enhanced Component Integration
 

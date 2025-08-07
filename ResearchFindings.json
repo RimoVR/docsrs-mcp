@@ -393,6 +393,93 @@
           ],
           "balancing": "Weighted combination allows tuning for specific use cases",
           "simplicity": "Keep scoring logic simple to maintain and debug"
+        },
+        "codeExampleExtraction": {
+          "overview": "Research findings on extracting and processing code examples from documentation",
+          "libraries": {
+            "pygments": {
+              "version": "2.19.2",
+              "description": "Python syntax highlighting and language detection library",
+              "features": [
+                "Automatic language detection with guess_lexer()",
+                "Supports 598+ programming languages",
+                "Confidence scoring for detection accuracy",
+                "Comprehensive lexer ecosystem"
+              ],
+              "implementation": {
+                "lazyImport": "Import pygments components inside functions to minimize startup overhead",
+                "confidenceThreshold": "Use 30% confidence threshold for reliable language detection",
+                "fallbackHandling": "Default to generic highlighting when confidence is below threshold"
+              }
+            }
+          },
+          "dataManagement": {
+            "storageFormat": {
+              "approach": "JSON storage in TEXT columns for structured example data",
+              "benefits": [
+                "Maintains backward compatibility with existing schemas",
+                "Enables rich metadata storage per example",
+                "Supports versioning and migration strategies"
+              ],
+              "migration": "Seamless transition from old list format to new JSON structure"
+            },
+            "backwardCompatibility": {
+              "strategy": "Support both old list format and new JSON format during migration",
+              "implementation": "Automatic conversion handles legacy data gracefully",
+              "benefit": "No breaking changes to existing data or applications"
+            }
+          },
+          "searchOptimization": {
+            "vectorSearch": {
+              "performance": "sqlite-vec provides sub-second response times for example searches",
+              "integration": "Vector embeddings enable semantic similarity matching for code examples",
+              "scalability": "Efficient handling of large code example datasets"
+            },
+            "deduplication": {
+              "method": "Hash-based deduplication prevents duplicate examples in search results",
+              "efficiency": "Simple implementation with high effectiveness",
+              "benefit": "Improved search result quality and reduced storage overhead"
+            }
+          },
+          "technicalImplementation": {
+            "embeddingStorage": {
+              "serialization": "Use sqlite_vec.serialize_float32() for proper vector storage",
+              "extension": "sqlite-vec extension must be loaded before using vec_distance_L2 function",
+              "optimization": "Pre-serialize embeddings for batch processing efficiency"
+            },
+            "errorHandling": {
+              "typingImports": "Ensure Optional import is included in typing imports",
+              "extensionLoading": "Load sqlite-vec extension before vector operations",
+              "dataFormat": "Handle legacy list format with automatic conversion to JSON"
+            }
+          },
+          "performanceCharacteristics": {
+            "searchLatency": "Sub-second response times for code example similarity searches",
+            "memoryEfficiency": "Efficient storage with JSON TEXT columns and vector embeddings",
+            "scalability": "Handles large collections of code examples with consistent performance"
+          },
+          "bestPractices": {
+            "languageDetection": [
+              "Use Pygments guess_lexer() with confidence scoring",
+              "Set 30% minimum confidence threshold for reliable detection",
+              "Implement fallback to generic highlighting for low-confidence cases"
+            ],
+            "dataStorage": [
+              "Use JSON format for structured example metadata",
+              "Maintain backward compatibility during schema evolution",
+              "Implement graceful handling of legacy data formats"
+            ],
+            "searchOptimization": [
+              "Leverage vector embeddings for semantic code similarity",
+              "Implement hash-based deduplication for result quality",
+              "Use sqlite-vec for efficient vector distance calculations"
+            ],
+            "implementationPatterns": [
+              "Import heavy libraries only when needed (lazy imports)",
+              "Pre-serialize vectors for batch processing efficiency",
+              "Handle multiple data format versions gracefully"
+            ]
+          }
         }
       }
     },
@@ -536,7 +623,42 @@
               "pattern": "r'```(?:rust)?\\s*\\n(.*?)```'",
               "purpose": "Extract Rust code examples from documentation strings",
               "effectiveness": "Proven effective for isolating code blocks from markdown documentation",
-              "implementation": "Use regex pattern to extract code examples for syntax highlighting and validation"
+              "implementation": "Use regex pattern to extract code examples for syntax highlighting and validation",
+              "libraryIntegration": {
+                "pygments": {
+                  "version": "2.19.2",
+                  "purpose": "Automatic language detection in code blocks",
+                  "method": "guess_lexer() function for automatic language identification",
+                  "capabilities": "Supports 598+ programming languages with confidence scoring",
+                  "confidenceThreshold": "30% minimum confidence for reliable detection"
+                },
+                "languageDetection": {
+                  "algorithm": "Pygments provides reliable language detection with confidence scoring",
+                  "threshold": "Use 30% confidence threshold for detection accuracy",
+                  "fallback": "Default to generic code highlighting when confidence is below threshold"
+                }
+              },
+              "dataStorage": {
+                "format": "JSON storage in TEXT columns for structured example data",
+                "compatibility": "Maintains backward compatibility with existing database schemas",
+                "migration": "Supports both old list format and new JSON format for smooth transitions"
+              },
+              "searchIntegration": {
+                "vectorSearch": "sqlite-vec efficiently handles example searches with sub-second response times",
+                "deduplication": "Simple hash-based deduplication prevents duplicate examples in search results",
+                "performance": "Vector distance calculations provide fast example similarity matching"
+              },
+              "implementationPatterns": {
+                "lazyImport": "Import pygments components only when needed to minimize startup overhead",
+                "backwardCompatibility": "Handle multiple format variations gracefully for migration support",
+                "vectorExtension": "Use sqlite-vec extension loading for vector distance calculations",
+                "embeddingSerialization": "Serialize embeddings with sqlite_vec.serialize_float32() for proper storage"
+              },
+              "knownIssues": {
+                "typingImports": "Missing Optional import fixed by adding to typing imports",
+                "extensionLoading": "sqlite-vec extension must be loaded before using vec_distance_L2 function",
+                "dataFormat": "Old data format (list of strings) handled with automatic conversion to new format"
+              }
             }
           },
           "databaseOptimizations": {
@@ -1576,7 +1698,16 @@
       "Implement generator patterns for 7x-25x memory efficiency gains over list-based processing",
       "Use two-pass parsing for rustdoc format (paths then index) to optimize memory usage",
       "Set memory thresholds at 80% (reduce batch) and 90% (minimum batch + GC) for adaptive processing",
-      "Implement progressive processing to enable handling 100MB+ rustdoc files with constant memory usage"
+      "Implement progressive processing to enable handling 100MB+ rustdoc files with constant memory usage",
+      "Use Pygments 2.19.2 for automatic language detection in code blocks with 30% confidence threshold",
+      "Implement lazy import of Pygments components to minimize startup overhead",
+      "Store code examples in JSON format within TEXT columns for structured metadata and backward compatibility",
+      "Support both legacy list format and new JSON format during migration for seamless transitions",
+      "Implement hash-based deduplication to prevent duplicate code examples in search results",
+      "Use sqlite-vec for sub-second response times in code example similarity searches",
+      "Pre-serialize vector embeddings with sqlite_vec.serialize_float32() for efficient storage",
+      "Load sqlite-vec extension before using vec_distance_L2 function for vector operations",
+      "Handle automatic conversion from legacy data formats to maintain compatibility during upgrades"
     ],
     "performance": [
       "Use semantic chunking with 50-200 tokens for optimal search granularity",
@@ -1648,7 +1779,14 @@
       "Leverage ijson with yajl2_c backend for 656x JSON parsing performance improvement",
       "Use aiosqlite for async SQLite operations during module hierarchy extraction and storage",
       "Apply zstandard library for efficient zstd decompression of docs.rs compressed JSON files",
-      "Implement batch insertions with transactions to improve database insertion performance for hierarchical data"
+      "Implement batch insertions with transactions to improve database insertion performance for hierarchical data",
+      "Use lazy imports for Pygments components to minimize application startup overhead",
+      "Set 30% confidence threshold for Pygments language detection to balance accuracy and performance",
+      "Implement hash-based deduplication for code examples to reduce storage overhead and improve result quality",
+      "Leverage sqlite-vec vector embeddings for sub-second code example similarity search performance",
+      "Pre-serialize vector embeddings to optimize batch processing and reduce per-operation overhead",
+      "Store code examples in JSON TEXT columns to enable efficient metadata queries and backward compatibility",
+      "Use automatic format conversion to handle legacy data without performance penalties during migration"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

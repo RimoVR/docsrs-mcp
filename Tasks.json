@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-07T16:00:00Z",
+    "lastUpdated": "2025-08-07T16:45:00Z",
     "priorities": ["high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked"]
   },
@@ -745,27 +745,67 @@
       },
       {
         "id": "examples-1",
-        "title": "Extract code examples",
+        "title": "Extract and index code examples",
         "description": "Parse examples from rustdoc to provide practical usage information alongside documentation",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": ["idx-1"],
         "relatedTasks": ["examples-2"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-07T16:45:00Z",
+          "implementation": "Enhanced code example extraction with language detection, JSON storage, and MCP search functionality",
+          "notes": "Successfully implemented enhanced extract_code_examples function with pygments language detection, updated storage format to JSON with structure [{'code': str, 'language': str, 'detected': bool}], added SearchExamplesRequest and SearchExamplesResponse models, implemented search_examples MCP tool endpoint at /mcp/tools/search_examples, added search_examples to MCP manifest, updated ranking weight for examples from 0.05 to 0.15 (reduced vector weight to 0.60), added comprehensive unit tests for enhanced extraction, and successfully tested search_examples functionality."
+        },
         "subtasks": [
           {
             "id": "examples-1.1",
             "title": "Parse rustdoc examples",
             "description": "Extract code examples from rustdoc documentation blocks",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "examples-1.2",
             "title": "Link examples to items",
             "description": "Associate extracted examples with their corresponding documentation items",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "examples-1.3",
+            "title": "Enhanced language detection",
+            "description": "Added pygments-based language detection for code examples",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "examples-1.4",
+            "title": "JSON storage format",
+            "description": "Updated storage to structured JSON format with code, language, and detection metadata",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "examples-1.5",
+            "title": "MCP search endpoint",
+            "description": "Implemented search_examples MCP tool endpoint for code example search",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "examples-1.6",
+            "title": "Ranking weight optimization",
+            "description": "Updated examples ranking weight from 0.05 to 0.15 for improved relevance",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "examples-1.7",
+            "title": "Comprehensive testing",
+            "description": "Added unit tests for enhanced extraction and search functionality",
+            "status": "completed",
+            "progress": 100
           }
         ]
       },
@@ -775,7 +815,7 @@
         "description": "Generate searchable vectors for examples to enable example-based search functionality",
         "status": "pending",
         "progress": 0,
-        "dependencies": [],
+        "dependencies": ["examples-1"],
         "relatedTasks": ["examples-1"],
         "roadblocks": [],
         "subtasks": [

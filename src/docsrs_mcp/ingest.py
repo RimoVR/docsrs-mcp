@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import aiohttp
 import aiosqlite
@@ -576,28 +576,74 @@ def resolve_parent_id(item: dict, paths: dict) -> str | None:
     return None
 
 
-def extract_code_examples(docstring: str) -> list[str]:
-    """Extract ```rust code blocks from documentation."""
+def extract_code_examples(docstring: str) -> Optional[str]:
+    """Extract code blocks from documentation with language detection.
+
+    Returns JSON string with structure:
+    [{"code": str, "language": str, "detected": bool}]
+    """
     if not docstring:
-        return []
+        return None
 
     try:
-        # Match ```rust blocks and also plain ``` blocks that are likely Rust
-        pattern = r"```(?:rust)?\s*\n(.*?)```"
-        examples = re.findall(pattern, docstring, re.DOTALL | re.MULTILINE)
+        import json
 
-        # Clean up examples
-        cleaned_examples = []
-        for example in examples:
-            # Remove leading/trailing whitespace but preserve internal formatting
-            cleaned_example = example.strip()
-            if cleaned_example:  # Only add non-empty examples
-                cleaned_examples.append(cleaned_example)
+        from pygments.lexers import guess_lexer
+        from pygments.util import ClassNotFound
 
-        return cleaned_examples
+        # Match code blocks with optional language tags
+        # Captures: 1) optional language tag, 2) code content
+        pattern = r"```(\w*)\s*\n(.*?)```"
+        matches = re.findall(pattern, docstring, re.DOTALL | re.MULTILINE)
+
+        if not matches:
+            return None
+
+        examples = []
+        for lang_tag, code in matches:
+            code = code.strip()
+            if not code:  # Skip empty examples
+                continue
+
+            # Determine language
+            detected = False
+            if lang_tag:
+                # Explicit language tag provided
+                language = lang_tag.lower()
+            else:
+                # Try to detect language using pygments
+                try:
+                    lexer = guess_lexer(code)
+                    # Use confidence threshold - pygments returns confidence score
+                    if hasattr(lexer, "analyse_text"):
+                        confidence = lexer.analyse_text(code)
+                        if confidence and confidence > 0.3:  # 30% confidence threshold
+                            language = (
+                                lexer.aliases[0]
+                                if lexer.aliases
+                                else lexer.name.lower()
+                            )
+                            detected = True
+                        else:
+                            language = "rust"  # Default for Rust crates
+                            detected = True
+                    else:
+                        language = (
+                            lexer.aliases[0] if lexer.aliases else lexer.name.lower()
+                        )
+                        detected = True
+                except (ClassNotFound, Exception):
+                    # Default to rust for Rust documentation
+                    language = "rust"
+                    detected = True
+
+            examples.append({"code": code, "language": language, "detected": detected})
+
+        return json.dumps(examples) if examples else None
+
     except Exception as e:
         logger.warning(f"Error extracting code examples: {e}")
-        return []
+        return None
 
 
 def extract_visibility(item: dict) -> str:

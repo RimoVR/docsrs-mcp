@@ -122,12 +122,17 @@ def test_extract_code_examples():
     ```
     """
 
-    examples = extract_code_examples(docs_with_rust)
+    examples_json = extract_code_examples(docs_with_rust)
+    assert examples_json is not None
+    examples = json.loads(examples_json)
     assert len(examples) == 2
-    assert "let x = 42;" in examples[0]
-    assert "fn main()" in examples[1]
+    assert "let x = 42;" in examples[0]["code"]
+    assert examples[0]["language"] == "rust"
+    assert examples[0]["detected"] is False  # Explicit rust tag
+    assert "fn main()" in examples[1]["code"]
+    assert examples[1]["language"] == "rust"
 
-    # Test with plain code blocks
+    # Test with plain code blocks (language detection)
     docs_with_plain = """
     ```
     use std::io;
@@ -135,17 +140,44 @@ def test_extract_code_examples():
     ```
     """
 
-    examples = extract_code_examples(docs_with_plain)
+    examples_json = extract_code_examples(docs_with_plain)
+    assert examples_json is not None
+    examples = json.loads(examples_json)
     assert len(examples) == 1
-    assert "use std::io;" in examples[0]
+    assert "use std::io;" in examples[0]["code"]
+    assert examples[0]["language"] == "rust"  # Should detect as Rust
+    assert examples[0]["detected"] is True  # Auto-detected
+
+    # Test with mixed language blocks
+    docs_with_mixed = """
+    ```bash
+    cargo build --release
+    ```
+    
+    ```toml
+    [dependencies]
+    serde = "1.0"
+    ```
+    """
+
+    examples_json = extract_code_examples(docs_with_mixed)
+    assert examples_json is not None
+    examples = json.loads(examples_json)
+    assert len(examples) == 2
+    assert examples[0]["language"] == "bash"
+    assert examples[0]["detected"] is False  # Explicit bash tag
+    assert "cargo build" in examples[0]["code"]
+    assert examples[1]["language"] == "toml"
+    assert examples[1]["detected"] is False  # Explicit toml tag
+    assert "serde" in examples[1]["code"]
 
     # Test with no code blocks
     docs_no_code = "This is just plain documentation."
-    assert extract_code_examples(docs_no_code) == []
+    assert extract_code_examples(docs_no_code) is None
 
     # Test with empty input
-    assert extract_code_examples("") == []
-    assert extract_code_examples(None) == []
+    assert extract_code_examples("") is None
+    assert extract_code_examples(None) is None
 
 
 def test_parse_rustdoc_items_with_metadata():

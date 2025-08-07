@@ -909,3 +909,80 @@ class ErrorResponse(BaseModel):
         return v
 
     model_config = ConfigDict(extra="forbid")
+
+
+class SearchExamplesRequest(BaseModel):
+    """Request model for searching code examples."""
+
+    crate_name: str = Field(
+        ...,
+        description="Name of the crate to search within",
+        examples=["tokio", "serde"],
+    )
+    query: str = Field(
+        ...,
+        description="Search query for finding relevant code examples",
+        examples=["async runtime", "deserialize JSON"],
+    )
+    version: str | None = Field(
+        None,
+        description="Specific version to search (default: latest)",
+        examples=["1.35.1", "latest"],
+    )
+    k: int = Field(default=5, ge=1, le=20, description="Number of examples to return")
+    language: str | None = Field(
+        None,
+        description="Filter examples by programming language",
+        examples=["rust", "bash", "toml"],
+    )
+
+    @field_validator("k", mode="before")
+    @classmethod
+    def coerce_k_to_int(cls, v):
+        """Convert string numbers to int for MCP client compatibility."""
+        if v is None:
+            return 5
+        if isinstance(v, str):
+            try:
+                value = int(v)
+                if value < 1:
+                    raise ValueError(f"k must be at least 1, got {value}")
+                if value > 20:
+                    raise ValueError(f"k cannot exceed 20, got {value}")
+                return value
+            except ValueError as err:
+                if "invalid literal" in str(err):
+                    raise ValueError(f"k must be a valid integer, got '{v}'") from err
+                raise
+        return v
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CodeExample(BaseModel):
+    """Individual code example with metadata."""
+
+    code: str = Field(..., description="The code example content")
+    language: str = Field(..., description="Programming language of the example")
+    detected: bool = Field(
+        ..., description="Whether language was auto-detected or explicitly specified"
+    )
+    item_path: str = Field(..., description="Path to the item containing this example")
+    context: str | None = Field(
+        None, description="Additional context about the example"
+    )
+    score: float | None = Field(None, description="Relevance score for search results")
+
+
+class SearchExamplesResponse(BaseModel):
+    """Response model for code example search."""
+
+    crate_name: str = Field(..., description="Name of the searched crate")
+    version: str = Field(..., description="Version of the crate")
+    query: str = Field(..., description="The search query used")
+    examples: list[CodeExample] = Field(
+        default_factory=list, description="List of matching code examples"
+    )
+    total_count: int = Field(..., description="Total number of examples found")
+
+    model_config = ConfigDict(extra="forbid")

@@ -149,6 +149,38 @@
           "prevention": "Understand rustdoc JSON path structure where item names are derived from path arrays",
           "dateEncountered": "2025-08-07",
           "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "NameError: name 'Optional' is not defined",
+          "context": "Code example extraction implementation missing Optional type import",
+          "solution": "Added Optional to typing imports: 'from typing import Any, Optional'",
+          "prevention": "Always import all required typing components when adding type hints",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "no such column: crate_version",
+          "context": "Database schema missing crate_version column during code example queries",
+          "solution": "Extract version from database filename pattern (e.g., '1.0.219.db' → '1.0.219')",
+          "prevention": "Extract crate version from database file path when schema doesn't include version column",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "no such function: vec_distance_L2",
+          "context": "sqlite-vec extension not loaded before vector similarity queries",
+          "solution": "Load extension before queries: await db.enable_load_extension(True); await db.execute(f'SELECT load_extension(\'{sqlite_vec.loadable_path()}\')'); await db.enable_load_extension(False)",
+          "prevention": "Always load sqlite-vec extension before performing any vector operations",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "'str' object has no attribute 'get'",
+          "context": "Backward compatibility issue with old list format vs new JSON format for code examples",
+          "solution": "Handle both old list format and new JSON format: if isinstance(examples_data, list) and all(isinstance(e, str) for e in examples_data): examples_data = [{'code': e, 'language': 'rust', 'detected': False} for e in examples_data]",
+          "prevention": "Always implement backward compatibility checks when changing data formats",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
         }
       ]
     },
@@ -669,6 +701,30 @@
           "relatedFiles": ["src/docsrs_mcp/models.py", "tests/test_app.py"]
         },
         {
+          "lesson": "Code example extraction performance optimization",
+          "context": "Implementation of search_examples functionality for retrieving code examples",
+          "details": "search_examples successfully returns results in ~200ms for warm queries. Language detection adds minimal overhead during ingestion. Deduplication by hash is efficient for preventing duplicates during batch processing",
+          "impact": "Enables fast code example retrieval with minimal performance impact from language detection and deduplication",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Backward compatibility patterns for data format changes",
+          "context": "Handling transition from old list-based code examples to new JSON object format",
+          "details": "When changing data formats, implement compatibility checks that detect old formats and convert them to new formats automatically. Example: detecting list of strings vs list of objects and converting appropriately with default values",
+          "impact": "Ensures seamless upgrades without breaking existing cached data or requiring manual migration",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Database schema extraction patterns from file paths",
+          "context": "Extracting metadata from database file structure when schema doesn't include all needed fields",
+          "details": "When database schema lacks certain fields (like crate_version), extract information from file structure patterns. Use db_path.parent.name for crate name and db_path.stem for version from cache/{crate}/{version}.db structure",
+          "impact": "Enables metadata extraction without requiring database schema changes or migrations",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
           "lesson": "Database path extraction pattern for module search",
           "context": "Converting database file paths to crate names for module pattern construction",
           "details": "Use db_path.parent.name to extract crate name from cache/{crate}/{version}.db structure. Module search patterns follow format: f'{crate_name}::{module_path}::%' for SQL LIKE queries",
@@ -793,6 +849,10 @@
       "Log memory status at key processing points for debugging streaming operations",
       "Use integration tests to validate streaming pipeline error recovery",
       "Always load sqlite-vec extension before testing vector operations to prevent 'no such function' errors",
+      "Handle both old list format and new JSON format for backward compatibility during data format changes",
+      "Extract crate version from database filename when schema doesn't include version column",
+      "Always import all required typing components (including Optional) when adding type hints",
+      "Load sqlite-vec extension with proper enable/disable pattern: enable_load_extension(True) -> load_extension() -> enable_load_extension(False)",
       "Create partial indexes for common filter patterns to dramatically improve query performance",
       "Use progressive filtering only for small result sets (<10K items) - prefer database-level filtering for large datasets",
       "Use version-specific docs.rs URLs (/crate/{name}/{version}/json) to avoid redirect overhead",
@@ -867,7 +927,8 @@
       "Always add new filter parameters to _make_key(), get(), and set() methods for cache consistency",
       "Maintain parameter ordering consistency across cache methods to ensure proper cache hits",
       "Test FastAPI validation errors by checking both 422 status code and response.json()['detail'] array",
-      "Use nohup with PID capture for background server testing: 'nohup uv run uvicorn docsrs_mcp.app:app > server.log 2>&1 & echo $!'" 
+      "Use nohup with PID capture for background server testing: 'nohup uv run uvicorn docsrs_mcp.app:app > server.log 2>&1 & echo $!'",
+      "Server testing: Always use nohup when starting servers in background, use kill PID to stop servers cleanly, check logs with tail -f for debugging"
     ]
   },
   "performanceMetrics": {
@@ -887,7 +948,8 @@
       "streaming": "Async generators for data processing, wrapper functions for backwards compatibility",
       "errorRecovery": "Per-batch transactions, memory status logging, streaming-aware error handling",
       "databaseOptimization": "Create partial indexes for common filter patterns, use progressive filtering only for small result sets (<10K items)",
-      "extensionManagement": "Always load sqlite-vec extension before vector operations, especially in testing environments"
+      "extensionManagement": "Always load sqlite-vec extension before vector operations, especially in testing environments",
+      "codeExampleExtraction": "Language detection adds minimal overhead (~200ms warm queries), deduplication by hash prevents duplicates efficiently, backward compatibility essential for format changes"
     }
   },
   "codeQuality": {

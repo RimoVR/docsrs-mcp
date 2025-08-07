@@ -12,6 +12,7 @@ from .database import search_embeddings
 from .ingest import get_embedding_model, ingest_crate
 from .middleware import limiter, rate_limit_handler
 from .models import (
+    CodeExample,
     CrateModule,
     GetCrateSummaryRequest,
     GetCrateSummaryResponse,
@@ -21,6 +22,8 @@ from .models import (
     MCPResource,
     MCPTool,
     ModuleTreeNode,
+    SearchExamplesRequest,
+    SearchExamplesResponse,
     SearchItemsRequest,
     SearchItemsResponse,
     SearchResult,
@@ -242,6 +245,37 @@ async def get_mcp_manifest(request: Request):
                 },
             ),
             MCPTool(
+                name="search_examples",
+                description="Search for code examples in a crate's documentation with language detection",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "crate_name": {
+                            "type": "string",
+                            "description": "Name of the crate to search within",
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query for finding relevant code examples",
+                        },
+                        "version": {
+                            "type": "string",
+                            "description": "Specific version (default: latest)",
+                        },
+                        "k": {
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
+                            "description": "Number of examples to return",
+                            "default": 5,
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Filter examples by programming language (e.g., 'rust', 'bash', 'toml')",
+                        },
+                    },
+                    "required": ["crate_name", "query"],
+                },
+            ),
+            MCPTool(
                 name="get_module_tree",
                 description="Get the module hierarchy tree for a Rust crate",
                 input_schema={
@@ -437,6 +471,144 @@ async def get_item_doc(request: Request, params: GetItemDocRequest):
 
     except Exception as e:
         logger.error(f"Error in get_item_doc: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post(
+    "/mcp/tools/search_examples",
+    response_model=SearchExamplesResponse,
+    tags=["tools"],
+    summary="Search Code Examples",
+    response_description="Code examples from documentation",
+    operation_id="searchExamples",
+)
+@limiter.limit("30/second")
+async def search_examples(request: Request, params: SearchExamplesRequest):
+    """
+    Search for code examples in a crate's documentation.
+
+    Searches through extracted code examples from documentation and returns
+    matching examples with language detection and metadata.
+
+    **Features**:
+    - Language detection for code blocks
+    - Filtering by programming language
+    - Semantic search across example content
+    """
+    try:
+        import json
+
+        # Ingest crate if not already done
+        db_path = await ingest_crate(params.crate_name, params.version)
+
+        # Generate embedding for query
+        model = get_embedding_model()
+        query_embedding = list(model.embed([params.query]))[0]
+
+        # Search for items with examples
+        async with aiosqlite.connect(db_path) as db:
+            # Load sqlite-vec extension
+            import sqlite_vec
+            await db.enable_load_extension(True)
+            await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
+            await db.enable_load_extension(False)
+            
+            # Get crate version info from the database path
+            # The version is embedded in the path like: cache/serde/1.0.219.db
+            version = "latest"
+            if db_path:
+                db_name = Path(db_path).stem  # Gets "1.0.219" from "1.0.219.db"
+                if db_name and db_name != "latest":
+                    version = db_name
+
+            # Search for items containing examples with semantic similarity
+            query_sql = """
+                SELECT 
+                    vec_distance_L2(embedding, ?) as distance,
+                    item_path,
+                    examples,
+                    content
+                FROM embeddings
+                WHERE examples IS NOT NULL
+                ORDER BY distance
+                LIMIT ?
+            """
+
+            cursor = await db.execute(
+                query_sql,
+                (bytes(sqlite_vec.serialize_float32(query_embedding)), params.k * 3),  # Get more results to filter
+            )
+
+            examples_list = []
+            seen_codes = set()  # For deduplication
+
+            async for row in cursor:
+                distance, item_path, examples_json, content = row
+
+                if not examples_json:
+                    continue
+
+                try:
+                    # Parse the JSON examples - handle both old list format and new dict format
+                    examples_data = json.loads(examples_json)
+                    
+                    # Handle old format (list of strings)
+                    if isinstance(examples_data, list) and all(isinstance(e, str) for e in examples_data):
+                        examples_data = [{"code": e, "language": "rust", "detected": False} for e in examples_data]
+
+                    for example in examples_data:
+                        # Handle both dict format and potential string format
+                        if isinstance(example, str):
+                            example = {"code": example, "language": "rust", "detected": False}
+                        
+                        # Filter by language if specified
+                        if (
+                            params.language
+                            and example.get("language") != params.language
+                        ):
+                            continue
+
+                        code = example.get("code", "")
+                        # Simple deduplication by code hash
+                        code_hash = hash(code)
+                        if code_hash in seen_codes:
+                            continue
+                        seen_codes.add(code_hash)
+
+                        # Calculate relevance score (inverse of distance)
+                        score = 1.0 / (1.0 + distance)
+
+                        examples_list.append(
+                            CodeExample(
+                                code=code,
+                                language=example.get("language", "rust"),
+                                detected=example.get("detected", False),
+                                item_path=item_path,
+                                context=content[:200] if content else None,
+                                score=score,
+                            )
+                        )
+
+                        if len(examples_list) >= params.k:
+                            break
+
+                    if len(examples_list) >= params.k:
+                        break
+
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse examples JSON for {item_path}")
+                    continue
+
+            return SearchExamplesResponse(
+                crate_name=params.crate_name,
+                version=version,
+                query=params.query,
+                examples=examples_list[: params.k],
+                total_count=len(examples_list),
+            )
+
+    except Exception as e:
+        logger.error(f"Error in search_examples: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
