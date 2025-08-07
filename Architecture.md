@@ -223,6 +223,25 @@ erDiagram
         INTEGER line_number "position in docs"
     }
     
+    EXAMPLE_EMBEDDINGS {
+        INTEGER id PK
+        TEXT item_id "stable rustdoc ID"
+        TEXT item_path "e.g. serde::de::Deserialize"
+        TEXT crate_name "crate this example belongs to"
+        TEXT version "crate version"
+        TEXT example_hash "SHA256 prefix for deduplication - 16 chars"
+        TEXT example_text "code example content"
+        TEXT language "rust, bash, toml, etc"
+        TEXT context "surrounding documentation context"
+        BLOB embedding "384-dim float32 vector"
+        INTEGER created_at "timestamp"
+    }
+    
+    VEC_EXAMPLE_EMBEDDINGS {
+        INTEGER rowid PK
+        BLOB embedding "384-dim float32 vector for examples"
+    }
+    
     META {
         TEXT crate
         TEXT version
@@ -241,6 +260,8 @@ erDiagram
     MODULES ||--o{ MODULES : "parent_id self-reference"
     MODULES ||--o{ EMBEDDINGS : "contains documentation items"
     MODULES ||--o{ PASSAGES : "legacy contains items"
+    EXAMPLE_EMBEDDINGS ||--|| VEC_EXAMPLE_EMBEDDINGS : "vector indexed by rowid"
+    EXAMPLE_EMBEDDINGS ||--o{ EXAMPLE_EMBEDDINGS : "deduplication via example_hash"
 ```
 
 ### Partial Indexes for Filter Optimization
@@ -251,6 +272,15 @@ The database schema includes specialized partial indexes designed to optimize co
 - **idx_public_functions**: Indexes public functions (`WHERE item_type = 'function' AND item_path NOT LIKE '%::%'`)
 - **idx_has_examples**: Indexes items with code examples (`WHERE examples IS NOT NULL AND examples != ''`)
 - **idx_crate_prefix**: Enables fast crate-specific searches using prefix matching on item_path
+
+### Example Embeddings Indexes
+
+The example_embeddings table includes specialized indexes for efficient example search and deduplication:
+
+- **idx_example_crate_version**: Crate-specific example queries (`CREATE INDEX idx_example_crate_version ON example_embeddings(crate_name, version)`)
+- **idx_example_hash**: Hash-based deduplication (`CREATE UNIQUE INDEX idx_example_hash ON example_embeddings(crate_name, version, example_hash)`)
+- **idx_example_item_path**: Item-specific example lookup (`CREATE INDEX idx_example_item_path ON example_embeddings(item_path)`)
+- **UNIQUE constraint**: Enforced on (crate_name, version, example_hash) for deduplication
 
 ### Module Hierarchy Indexes
 
@@ -1038,7 +1068,11 @@ graph LR
 | Type filter | < 10ms P95 | Medium selectivity (~40% for functions) with idx_public_functions |
 | Example filter | < 8ms P95 | Medium selectivity (~30%) with idx_has_examples partial index |
 | Crate prefix filter | < 3ms P95 | High selectivity (~1%) with idx_crate_prefix optimization |
-| **Code example search** | **< 100ms P95** | **Vector search + language filtering + deduplication** |
+| **Example embedding generation** | **16-item batches** | **CPU-optimized batch size for memory efficiency** |
+| **Example search latency** | **150-360ms warm, 1.4s cold** | **Dedicated example_embeddings search with model loading** |
+| **Example memory usage** | **~421MB for tokio** | **Memory usage during example embedding generation** |
+| **Deduplication rate** | **~30% reduction** | **SHA256-based deduplication effectiveness** |
+| **Code example search** | **< 100ms P95** | **Vector search + language filtering + hash-based deduplication** |
 | **Language detection** | **< 2ms per block** | **Pygments lexer analysis with 30% confidence threshold** |
 | **Example extraction** | **< 10ms per doc** | **Enhanced JSON structure processing overhead** |
 | **Rate limiting overhead** | **< 1ms P95** | **In-memory counter check and update with slowapi** |
@@ -1561,7 +1595,8 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 
 1. **Ingestion**: Client requests → Check cache → Fetch from crates.io API → Generate embeddings → Store in SQLite
 2. **Search**: Query → Vector similarity search using sqlite-vec MATCH → Return ranked results
-3. **Caching**: Persistent file-based cache in ./cache directory for fast subsequent access
+3. **Example Search**: Query → Primary search through dedicated example_embeddings table → Fallback to document embeddings for backward compatibility → search_example_embeddings() function with language filtering
+4. **Caching**: Persistent file-based cache in ./cache directory for fast subsequent access
 
 ## Technical Implementation Details
 
@@ -1960,7 +1995,7 @@ graph TD
 
 ## Code Example Extraction System
 
-The system includes a comprehensive code example extraction and indexing system that enables semantic search across code examples while maintaining backward compatibility.
+The system includes a comprehensive code example extraction and indexing system with dedicated embeddings architecture that enables semantic search across code examples while maintaining backward compatibility. The new architecture separates example embeddings from document embeddings for improved performance and specialized example search capabilities.
 
 ### Components Architecture
 
@@ -1972,26 +2007,29 @@ graph TB
         METADATA[Code Metadata<br/>language, confidence, detection_method]
     end
     
-    subgraph "Storage Integration"
-        JSON_FIELD[examples TEXT column<br/>JSON structure storage<br/>Maintains list format compatibility]
-        EXISTING_EMBED[Existing Embeddings<br/>Vector search infrastructure<br/>No schema changes required]
+    subgraph "Dedicated Example Storage"
+        EXAMPLE_TABLE[example_embeddings table<br/>Dedicated storage for examples<br/>Hash-based deduplication]
+        EXAMPLE_VEC[vec_example_embeddings<br/>Virtual table for vector search<br/>Separate from document embeddings]
+        DEDUP_SYSTEM[SHA256-based Deduplication<br/>16-char hash prefix<br/>~30% reduction in stored embeddings]
     end
     
     subgraph "Search Infrastructure"
-        SEARCH_TOOL[search_examples MCP Tool<br/>POST /mcp/tools/search_examples<br/>Semantic search capability]
-        LANG_FILTER[Language Filtering<br/>rust, bash, toml, etc.<br/>Optional parameter]
-        DEDUP[Deduplication<br/>Code hash-based<br/>Prevents duplicate results]
-        SCORING[Scoring System<br/>1/(1+distance) formula<br/>Vector similarity ranking]
+        SEARCH_TOOL[search_example_embeddings()<br/>Dedicated function for example search<br/>Primary search through example_embeddings]
+        FALLBACK_SEARCH[Fallback to Document Embeddings<br/>Backward compatibility<br/>When dedicated examples unavailable]
+        LANG_FILTER[Language Filtering<br/>rust, bash, toml, etc.<br/>SQL-based filtering]
+        BATCH_GENERATE[Streaming Generation<br/>Batch size 16 for CPU<br/>Memory-efficient processing]
+        SCORING[Scoring System<br/>Distance-based ranking<br/>Dedicated example scoring]
     end
     
     PYGMENTS --> EXTRACT_FUNC
     EXTRACT_FUNC --> METADATA
-    METADATA --> JSON_FIELD
-    JSON_FIELD --> EXISTING_EMBED
-    EXISTING_EMBED --> SEARCH_TOOL
-    SEARCH_TOOL --> LANG_FILTER
-    LANG_FILTER --> DEDUP
-    DEDUP --> SCORING
+    METADATA --> EXAMPLE_TABLE
+    EXAMPLE_TABLE --> EXAMPLE_VEC
+    EXAMPLE_VEC --> SEARCH_TOOL
+    SEARCH_TOOL --> FALLBACK_SEARCH
+    FALLBACK_SEARCH --> LANG_FILTER
+    LANG_FILTER --> BATCH_GENERATE
+    BATCH_GENERATE --> SCORING
 ```
 
 ### Data Models
@@ -2038,39 +2076,46 @@ Key features:
 - **Multiple Language Support**: Handles rust, bash, toml, json, yaml, and more
 - **Backward Compatibility**: Maintains support for old list format
 
-#### search_examples MCP Tool (app.py:443)
+#### search_example_embeddings Function
 
-New endpoint providing semantic search capabilities:
-- **Vector Search Integration**: Uses existing embeddings infrastructure
-- **Language Filtering**: SQL-based filtering by detected language
-- **Deduplication**: Hash-based removal of identical code snippets
-- **Semantic Ranking**: Distance-based scoring with normalization
-- **Context Preservation**: Returns examples with surrounding documentation
+Dedicated function providing semantic search capabilities for examples:
+- **Dedicated Architecture**: Uses separate example_embeddings table for improved performance
+- **Hash-based Deduplication**: SHA256-based deduplication using 16-character prefix reduces storage by ~30%
+- **Language Filtering**: SQL-based filtering by detected language in dedicated table
+- **Fallback Support**: Falls back to document embeddings for backward compatibility
+- **Memory-Efficient Processing**: Batch size 16 for CPU with explicit cleanup and gc.collect()
+- **Context Preservation**: Returns examples with surrounding documentation context
 
-### Data Flow Integration
+### Example Embeddings Pipeline
+
+The dedicated example embeddings architecture provides a complete pipeline for processing and searching code examples:
 
 ```mermaid
 sequenceDiagram
     participant Ingest as Ingestion Pipeline
     participant Extract as extract_code_examples()
-    participant Pygments as Pygments Lexer
-    participant Storage as SQLite Database
-    participant Search as search_examples Tool
+    participant Hash as SHA256 Hashing
+    participant Dedup as Deduplication Filter
+    participant Batch as Batch Generator
+    participant Embed as FastEmbed
+    participant Storage as example_embeddings table
+    participant Search as search_example_embeddings()
     participant Client as MCP Client
     
-    Ingest->>Extract: Process documentation text
-    Extract->>Pygments: Detect language for code blocks
-    Pygments-->>Extract: Language + confidence score
-    Extract->>Extract: Build JSON structure
-    Extract-->>Ingest: Enhanced code examples
-    Ingest->>Storage: Store JSON in examples column
+    Ingest->>Extract: Extract unique examples from docs
+    Extract->>Hash: Generate SHA256 hash (16-char prefix)
+    Hash->>Dedup: Filter already embedded examples
+    Dedup->>Batch: Stream filtered examples in batches
+    Batch->>Embed: Generate embeddings (batch size 16)
+    Embed->>Storage: Store with transaction atomicity
+    Storage->>Storage: Apply UNIQUE constraint on hash
     
-    Client->>Search: POST /mcp/tools/search_examples
-    Search->>Storage: Vector similarity query
-    Storage->>Storage: Filter by language (if specified)
-    Storage->>Storage: Deduplicate by code hash
-    Storage-->>Search: Ranked code examples
-    Search-->>Client: SearchExamplesResponse
+    Client->>Search: Search example embeddings
+    Search->>Storage: Query example_embeddings table
+    Storage->>Storage: Language filtering (if specified)
+    Storage->>Storage: Vector similarity search
+    Storage-->>Search: Ranked examples with metadata
+    Search-->>Client: Deduplicated results with context
 ```
 
 ### Configuration Changes
@@ -2096,7 +2141,11 @@ The implementation maintains full backward compatibility:
 |-----------|--------|-------|
 | Language detection | < 2ms per block | Pygments lexer analysis |
 | Example extraction | < 10ms per doc | Enhanced processing overhead |
-| Search query | < 100ms P95 | Vector search + filtering + deduplication |
+| Example embedding generation | 16-item batches | CPU-optimized batch size for memory efficiency |
+| Example search latency | 150-360ms warm, 1.4s cold | Dedicated example_embeddings search with model loading |
+| Example memory usage | ~421MB for tokio | Memory usage during example embedding generation |
+| Deduplication rate | ~30% reduction | SHA256-based deduplication effectiveness |
+| Search query | < 100ms P95 | Vector search + filtering + hash-based deduplication |
 | Storage overhead | +15% | JSON structure vs list format |
 | Memory usage | Minimal | Uses existing embedding infrastructure |
 

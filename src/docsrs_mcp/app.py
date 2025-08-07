@@ -498,6 +498,8 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
     try:
         import json
 
+        from .database import search_example_embeddings
+
         # Ingest crate if not already done
         db_path = await ingest_crate(params.crate_name, params.version)
 
@@ -505,21 +507,55 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
         model = get_embedding_model()
         query_embedding = list(model.embed([params.query]))[0]
 
-        # Search for items with examples
+        # Get crate version info from the database path
+        version = "latest"
+        if db_path:
+            db_name = Path(db_path).stem  # Gets "1.0.219" from "1.0.219.db"
+            if db_name and db_name != "latest":
+                version = db_name
+
+        # Try to use dedicated example embeddings first
+        try:
+            example_results = await search_example_embeddings(
+                db_path,
+                query_embedding,
+                k=params.k,
+                crate_filter=params.crate_name,
+                language_filter=params.language,
+            )
+
+            if example_results:
+                # Convert to response format
+                examples_list = [
+                    CodeExample(
+                        code=result["code"],
+                        language=result["language"],
+                        detected=False,  # We don't track this in new format
+                        item_path=result["item_path"],
+                        context=result["context"],
+                        score=result["score"],
+                    )
+                    for result in example_results
+                ]
+
+                return SearchExamplesResponse(
+                    crate_name=params.crate_name,
+                    version=version,
+                    query=params.query,
+                    examples=examples_list,
+                    total_count=len(examples_list),
+                )
+        except Exception as e:
+            logger.debug(f"Dedicated example search failed, falling back: {e}")
+
+        # Fallback to searching in the main embeddings table
         async with aiosqlite.connect(db_path) as db:
             # Load sqlite-vec extension
             import sqlite_vec
+
             await db.enable_load_extension(True)
             await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
             await db.enable_load_extension(False)
-            
-            # Get crate version info from the database path
-            # The version is embedded in the path like: cache/serde/1.0.219.db
-            version = "latest"
-            if db_path:
-                db_name = Path(db_path).stem  # Gets "1.0.219" from "1.0.219.db"
-                if db_name and db_name != "latest":
-                    version = db_name
 
             # Search for items containing examples with semantic similarity
             query_sql = """
@@ -536,7 +572,10 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
 
             cursor = await db.execute(
                 query_sql,
-                (bytes(sqlite_vec.serialize_float32(query_embedding)), params.k * 3),  # Get more results to filter
+                (
+                    bytes(sqlite_vec.serialize_float32(query_embedding)),
+                    params.k * 3,
+                ),  # Get more results to filter
             )
 
             examples_list = []
@@ -551,16 +590,25 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
                 try:
                     # Parse the JSON examples - handle both old list format and new dict format
                     examples_data = json.loads(examples_json)
-                    
+
                     # Handle old format (list of strings)
-                    if isinstance(examples_data, list) and all(isinstance(e, str) for e in examples_data):
-                        examples_data = [{"code": e, "language": "rust", "detected": False} for e in examples_data]
+                    if isinstance(examples_data, list) and all(
+                        isinstance(e, str) for e in examples_data
+                    ):
+                        examples_data = [
+                            {"code": e, "language": "rust", "detected": False}
+                            for e in examples_data
+                        ]
 
                     for example in examples_data:
                         # Handle both dict format and potential string format
                         if isinstance(example, str):
-                            example = {"code": example, "language": "rust", "detected": False}
-                        
+                            example = {
+                                "code": example,
+                                "language": "rust",
+                                "detected": False,
+                            }
+
                         # Filter by language if specified
                         if (
                             params.language

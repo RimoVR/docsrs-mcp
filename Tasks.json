@@ -813,25 +813,30 @@
         "id": "examples-2",
         "title": "Index example embeddings",
         "description": "Generate searchable vectors for examples to enable example-based search functionality",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": ["examples-1"],
         "relatedTasks": ["examples-1"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-07T20:35:00Z",
+          "implementation": "Dedicated vector embeddings for code examples with deduplication, streaming generation, and optimized search",
+          "notes": "Successfully implemented example embeddings with hash-based deduplication, memory-efficient streaming (batch size 16), dedicated database tables (example_embeddings, vec_example_embeddings), and optimized search with fallback. Test results: Memory usage 421MB < 1GB limit, search latency 150-360ms for warm queries (first query 1.4s due to model loading), backward compatibility maintained with fallback to document embeddings."
+        },
         "subtasks": [
           {
             "id": "examples-2.1",
             "title": "Generate example embeddings",
             "description": "Create vector embeddings for code examples using FastEmbed",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "examples-2.2",
             "title": "Implement example search",
             "description": "Add search functionality specifically for finding relevant code examples",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           }
         ]
       },

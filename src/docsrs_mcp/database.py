@@ -213,6 +213,47 @@ async def init_database(db_path: Path) -> None:
             WHERE item_path GLOB '*::*'
         """)
 
+        # Create example embeddings table for dedicated example search
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS example_embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id TEXT NOT NULL,
+                item_path TEXT NOT NULL,
+                crate_name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                example_hash TEXT NOT NULL,
+                example_text TEXT NOT NULL,
+                language TEXT,
+                context TEXT,
+                embedding BLOB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(crate_name, version, example_hash)
+            )
+        """)
+
+        # Create virtual table for example vector search
+        await db.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_example_embeddings USING vec0(
+                example_embedding float[{EMBEDDING_DIM}]
+            )
+        """)
+
+        # Create indexes for example embeddings performance
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_example_crate_version 
+            ON example_embeddings(crate_name, version)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_example_hash 
+            ON example_embeddings(example_hash)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_example_item_path
+            ON example_embeddings(item_path)
+        """)
+
         # Run ANALYZE to update query planner statistics
         await db.execute("ANALYZE")
 
@@ -617,3 +658,88 @@ async def search_embeddings(
         )
 
         return top_results
+
+
+async def search_example_embeddings(
+    db_path: Path,
+    query_embedding: list[float],
+    k: int = 5,
+    crate_filter: str | None = None,
+    language_filter: str | None = None,
+) -> list[dict]:
+    """Search for similar code examples using dedicated example embeddings.
+
+    Returns examples with their code, language, context, and similarity scores.
+    """
+    if not db_path.exists():
+        return []
+
+    start_time = time.time()
+
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Enable extension
+        await db.enable_load_extension(True)
+        await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
+        await db.enable_load_extension(False)
+
+        # Build query with optional filters
+        query_parts = []
+        params = []
+
+        # Base query
+        query = """
+            SELECT 
+                e.item_path,
+                e.example_text,
+                e.language,
+                e.context,
+                vec_distance_L2(v.example_embedding, ?) as distance,
+                e.example_hash
+            FROM example_embeddings e
+            JOIN vec_example_embeddings v ON e.id = v.rowid
+            WHERE 1=1
+        """
+
+        params.append(bytes(sqlite_vec.serialize_float32(query_embedding)))
+
+        # Add filters
+        if crate_filter:
+            query += " AND e.crate_name = ?"
+            params.append(crate_filter)
+
+        if language_filter:
+            query += " AND e.language = ?"
+            params.append(language_filter)
+
+        # Order by distance and limit
+        query += " ORDER BY distance LIMIT ?"
+        params.append(k)
+
+        cursor = await db.execute(query, params)
+        results = []
+
+        async for row in cursor:
+            item_path, example_text, language, context, distance, example_hash = row
+
+            # Convert distance to similarity score
+            score = 1.0 / (1.0 + distance)
+
+            results.append(
+                {
+                    "item_path": item_path,
+                    "code": example_text,
+                    "language": language,
+                    "context": context,
+                    "score": score,
+                    "hash": example_hash,
+                }
+            )
+
+        # Log performance
+        elapsed_ms = (time.time() - start_time) * 1000
+        if elapsed_ms > 100:
+            logger.warning(f"Slow example search: {elapsed_ms:.2f}ms for k={k}")
+        else:
+            logger.debug(f"Example search completed in {elapsed_ms:.2f}ms")
+
+        return results

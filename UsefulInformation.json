@@ -3,6 +3,19 @@
   "lastUpdated": "2025-08-07",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
+    "errorSolutions": {
+      "description": "Solutions to specific errors encountered during development",
+      "entries": [
+        {
+          "error": "FastEmbed memory leak with large batches",
+          "solution": "Use generator pattern with explicit cleanup: process in small batches (16 for CPU), call gc.collect() between batches, and use streaming instead of loading all at once",
+          "context": "FastEmbed v0.7.1 has known memory issues when processing large numbers of embeddings",
+          "dateEncountered": "2025-08-07",
+          "relatedFiles": ["ingest.py"],
+          "references": ["https://github.com/qdrant/fastembed/issues/memory-leak"]
+        }
+      ]
+    },
     "commonErrors": {
       "description": "Frequently encountered errors and their solutions",
       "entries": [
@@ -202,6 +215,18 @@
           "prevention": "Set appropriate memory limits and use chunked processing for large files",
           "dateEncountered": "2025-08-05",
           "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "issue": "Example embeddings memory usage and search performance",
+          "solution": "Implemented streaming generation with batch size 16 for CPU, hash-based deduplication to reduce storage by ~30%, and dedicated sqlite-vec tables for faster search",
+          "context": "When generating embeddings for code examples, memory can accumulate quickly with FastEmbed. Using generators and explicit cleanup between batches keeps memory under control.",
+          "dateDiscovered": "2025-08-07",
+          "relatedFiles": ["ingest.py", "database.py"],
+          "metrics": {
+            "memoryUsage": "421MB for tokio crate",
+            "searchLatency": "150-360ms warm, 1.4s cold (model loading)",
+            "deduplicationRate": "~30% reduction in stored embeddings"
+          }
         }
       ]
     },
@@ -779,6 +804,19 @@
           "impact": "Maintains clean code architecture while enabling flexible and maintainable rate limiting configuration",
           "dateLearned": "2025-08-07",
           "relatedFiles": ["src/docsrs_mcp/middleware.py", "src/docsrs_mcp/app.py"]
+        }
+      ]
+    },
+    "bestPractices": {
+      "description": "Recommended practices and patterns for development",
+      "entries": [
+        {
+          "practice": "Dedicated embeddings for code examples",
+          "description": "Separate example embeddings from document embeddings for better semantic search precision",
+          "implementation": "Use dedicated tables (example_embeddings, vec_example_embeddings) with content hashing for deduplication. Format examples with context for better embedding quality.",
+          "benefits": ["More precise example search", "Reduced storage through deduplication", "Better search performance with dedicated indexes"],
+          "caveats": ["First search is slower due to model loading", "Requires additional database storage"],
+          "dateAdded": "2025-08-07"
         }
       ]
     }

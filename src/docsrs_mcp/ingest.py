@@ -1,14 +1,17 @@
 """Ingestion pipeline for Rust crate documentation."""
 
 import asyncio
+import gc
 import gzip
+import hashlib
 import io
 import json
 import logging
 import os
 import re
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 import aiosqlite
@@ -576,7 +579,7 @@ def resolve_parent_id(item: dict, paths: dict) -> str | None:
     return None
 
 
-def extract_code_examples(docstring: str) -> Optional[str]:
+def extract_code_examples(docstring: str) -> str | None:
     """Extract code blocks from documentation with language detection.
 
     Returns JSON string with structure:
@@ -644,6 +647,254 @@ def extract_code_examples(docstring: str) -> Optional[str]:
     except Exception as e:
         logger.warning(f"Error extracting code examples: {e}")
         return None
+
+
+def normalize_code(code: str) -> str:
+    """Normalize code for consistent hashing and deduplication.
+
+    Removes comments and normalizes whitespace to detect duplicate examples.
+    """
+    lines = code.strip().split("\n")
+    normalized_lines = []
+
+    for line in lines:
+        # Skip comments and empty lines for hashing
+        stripped = line.strip()
+        # Skip various comment types
+        if stripped and not any(
+            [
+                stripped.startswith("#"),  # Python comments
+                stripped.startswith("//"),  # Rust/C++ comments
+                stripped.startswith("/*"),  # Block comments
+                stripped.startswith("*"),  # Continuation of block comments
+                stripped.startswith("--"),  # SQL/Lua comments
+            ]
+        ):
+            # Normalize whitespace but preserve structure
+            normalized_lines.append(" ".join(stripped.split()))
+
+    return "\n".join(normalized_lines)
+
+
+def calculate_example_hash(example_text: str, language: str) -> str:
+    """Generate hash for deduplication of code examples.
+
+    Includes language in hash to avoid cross-language collisions.
+    """
+    # Normalize the code
+    normalized = normalize_code(example_text)
+    # Include language in hash to avoid cross-language collisions
+    content = f"{language}:{normalized}"
+    # Return first 16 chars of SHA256 hash for reasonable uniqueness
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+async def batch_examples(
+    examples: list[dict], batch_size: int
+) -> AsyncGenerator[list[dict], None]:
+    """Yield batches of examples for processing.
+
+    Memory-efficient batching for embedding generation.
+    """
+    for i in range(0, len(examples), batch_size):
+        batch = examples[i : i + batch_size]
+        yield batch
+        # Allow other async operations between batches
+        await asyncio.sleep(0)
+
+
+def format_example_for_embedding(example: dict) -> str:
+    """Format a code example for embedding generation.
+
+    Combines code with context for better semantic search.
+    """
+    # Include language as context
+    language = example.get("language", "unknown")
+    code = example.get("example_text", example.get("code", ""))
+    context = example.get("context", "")
+
+    # Combine elements for embedding
+    parts = []
+    if language and language != "unknown":
+        parts.append(f"Language: {language}")
+    if context:
+        parts.append(f"Context: {context[:200]}")  # Limit context length
+    parts.append(code)
+
+    return "\n\n".join(parts)
+
+
+async def generate_example_embeddings(
+    db_path: Path, crate_name: str, version: str
+) -> None:
+    """Generate embeddings for code examples with deduplication.
+
+    Extracts examples from existing embeddings table and generates
+    dedicated embeddings for semantic search.
+    """
+    logger.info(f"Generating example embeddings for {crate_name}@{version}")
+
+    async with aiosqlite.connect(db_path) as db:
+        # Enable sqlite-vec extension
+        await db.enable_load_extension(True)
+        await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
+        await db.enable_load_extension(False)
+
+        # Extract examples from embeddings table
+        cursor = await db.execute("""
+            SELECT item_id, item_path, examples, content
+            FROM embeddings
+            WHERE examples IS NOT NULL AND examples != ''
+        """)
+
+        all_examples = []
+        async for row in cursor:
+            item_id, item_path, examples_json, content = row
+
+            try:
+                examples_data = json.loads(examples_json)
+
+                # Handle both old list format and new dict format
+                if isinstance(examples_data, list) and all(
+                    isinstance(e, str) for e in examples_data
+                ):
+                    examples_data = [
+                        {"code": e, "language": "rust", "detected": False}
+                        for e in examples_data
+                    ]
+
+                for example in examples_data:
+                    if isinstance(example, str):
+                        example = {
+                            "code": example,
+                            "language": "rust",
+                            "detected": False,
+                        }
+
+                    code = example.get("code", "")
+                    if not code:
+                        continue
+
+                    # Calculate hash for deduplication
+                    language = example.get("language", "rust")
+                    example_hash = calculate_example_hash(code, language)
+
+                    all_examples.append(
+                        {
+                            "item_id": item_id,
+                            "item_path": item_path,
+                            "crate_name": crate_name,
+                            "version": version,
+                            "example_hash": example_hash,
+                            "example_text": code,
+                            "language": language,
+                            "context": content[:500]
+                            if content
+                            else None,  # Store context
+                        }
+                    )
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse examples for {item_path}")
+                continue
+
+        if not all_examples:
+            logger.info(f"No examples found for {crate_name}@{version}")
+            return
+
+        logger.info(f"Found {len(all_examples)} total examples")
+
+        # Check for existing examples to avoid duplicates
+        placeholders = ",".join(["?"] * len(all_examples))
+        hashes = [ex["example_hash"] for ex in all_examples]
+
+        cursor = await db.execute(
+            f"""
+            SELECT example_hash 
+            FROM example_embeddings 
+            WHERE crate_name = ? AND version = ? AND example_hash IN ({placeholders})
+        """,
+            [crate_name, version] + hashes,
+        )
+
+        existing_hashes = {row[0] for row in await cursor.fetchall()}
+
+        # Filter out already processed examples
+        new_examples = [
+            ex for ex in all_examples if ex["example_hash"] not in existing_hashes
+        ]
+
+        if not new_examples:
+            logger.info(f"All examples already embedded for {crate_name}@{version}")
+            return
+
+        logger.info(
+            f"Processing {len(new_examples)} new examples (skipped {len(all_examples) - len(new_examples)} duplicates)"
+        )
+
+        # Process in batches
+        embedding_model = get_embedding_model()
+        batch_size = 16  # Conservative for CPU
+
+        processed = 0
+        async for batch in batch_examples(new_examples, batch_size):
+            # Prepare texts for embedding
+            texts = [format_example_for_embedding(ex) for ex in batch]
+
+            # Generate embeddings using generator pattern
+            embeddings = list(embedding_model.embed(texts))
+
+            # Begin transaction for this batch
+            await db.execute("BEGIN TRANSACTION")
+
+            try:
+                # Insert into example_embeddings table
+                for example, embedding in zip(batch, embeddings, strict=False):
+                    # Insert into main table
+                    cursor = await db.execute(
+                        """
+                        INSERT INTO example_embeddings (
+                            item_id, item_path, crate_name, version,
+                            example_hash, example_text, language, context, embedding
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                        (
+                            example["item_id"],
+                            example["item_path"],
+                            example["crate_name"],
+                            example["version"],
+                            example["example_hash"],
+                            example["example_text"],
+                            example["language"],
+                            example["context"],
+                            bytes(sqlite_vec.serialize_float32(embedding)),
+                        ),
+                    )
+
+                    rowid = cursor.lastrowid
+
+                    # Insert into vector table
+                    await db.execute(
+                        """
+                        INSERT INTO vec_example_embeddings(rowid, example_embedding)
+                        VALUES (?, ?)
+                    """,
+                        (rowid, bytes(sqlite_vec.serialize_float32(embedding))),
+                    )
+
+                await db.commit()
+                processed += len(batch)
+                logger.debug(f"Processed {processed}/{len(new_examples)} examples")
+
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"Error processing batch: {e}")
+                raise
+
+            # Explicit memory cleanup between batches
+            del embeddings
+            gc.collect()
+
+        logger.info(f"Successfully generated embeddings for {processed} examples")
 
 
 def extract_visibility(item: dict) -> str:
@@ -1311,6 +1562,13 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 await store_embeddings_streaming(db_path, chunk_embedding_pairs)
 
                 logger.info("Successfully completed streaming ingestion")
+
+                # Generate example embeddings for dedicated search
+                try:
+                    await generate_example_embeddings(db_path, crate_name, version)
+                except Exception as ex_err:
+                    logger.warning(f"Failed to generate example embeddings: {ex_err}")
+                    # Continue - main embeddings are already stored
 
             except Exception as e:
                 if is_stdlib_crate(crate_name):
