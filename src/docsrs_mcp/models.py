@@ -867,9 +867,10 @@ class ErrorResponse(BaseModel):
     Example:
         ```json
         {
-            "error": "RateLimitExceeded",
-            "detail": "Rate limit exceeded. Please retry after 1 second.",
-            "status_code": 429
+            "error": "item_not_found",
+            "detail": "No documentation found for 'tokio::spwan'",
+            "status_code": 404,
+            "suggestions": ["tokio::spawn", "tokio::spawn_blocking"]
         }
         ```
     """
@@ -877,6 +878,9 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error type/category")
     detail: str | None = Field(None, description="Detailed error message for debugging")
     status_code: int = Field(500, description="HTTP status code", ge=400, le=599)
+    suggestions: list[str] | None = Field(
+        None, description="Suggested alternative paths for fuzzy matching"
+    )
 
     @field_validator("status_code", mode="before")
     @classmethod

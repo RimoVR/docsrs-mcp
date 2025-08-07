@@ -55,7 +55,7 @@ graph LR
     subgraph "docsrs_mcp Package"
         subgraph "Web Layer"
             APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata<br/>search_examples endpoint]
-            ROUTES[routes.py<br/>Enhanced MCP endpoints<br/>Comprehensive docstrings]
+            ROUTES[routes.py<br/>Enhanced MCP endpoints<br/>Comprehensive docstrings<br/>Fuzzy path resolution]
             MODELS[models.py<br/>Enhanced Pydantic schemas<br/>Field validators<br/>MCP compatibility<br/>Auto-generated docs<br/>Code example data models]
             VALIDATION[validation.py<br/>Centralized validation utilities<br/>Precompiled regex patterns<br/>Type coercion functions]
             NAV[navigation.py<br/>Module tree operations<br/>Hierarchy traversal]
@@ -612,6 +612,7 @@ mindmap
       FastEmbed
       ONNX Runtime
       BAAI/bge-small-en-v1.5
+      RapidFuzz (fuzzy string matching)
       
     HTTP Client
       aiohttp 3.9.5 (pinned for memory leak fix)
@@ -1506,30 +1507,69 @@ graph LR
     CS --> MM
 ```
 
-### Fuzzy Path Resolution (Future Enhancement)
+### Fuzzy Path Resolution
 
-This enhancement would integrate RapidFuzz for intelligent path suggestions when exact path matches fail:
+The system implements intelligent path suggestions using RapidFuzz library when exact path matches fail in the `get_item_doc` endpoint:
 
 ```mermaid
-graph LR
-    subgraph "Fuzzy Path Resolution Pipeline"
-        USER_REQ[User Request<br/>crate/module path]
-        EXACT_MATCH[Exact Match Check<br/>validation.py]
-        FUZZY_MATCHER[RapidFuzz Matcher<br/>Path similarity scoring]
-        SUGGESTIONS[Path Suggestions<br/>Ranked by similarity]
+graph TD
+    subgraph "Fuzzy Path Resolution Flow"
+        REQ[get_item_doc Request<br/>item_path parameter]
+        EXACT[Exact Path Match<br/>SQLite query]
+        CACHE_CHECK[Path Cache Check<br/>5-minute TTL]
+        CACHE_BUILD[Build Path Cache<br/>Query all item paths]
+        FUZZY[RapidFuzz Processing<br/>0.6 similarity threshold]
+        SUGGESTIONS[Top 3 Suggestions<br/>Ranked by similarity]
+        ERROR[ItemNotFoundError<br/>with suggestions]
     end
     
-    USER_REQ --> EXACT_MATCH
-    EXACT_MATCH -->|Match Found| SUGGESTIONS
-    EXACT_MATCH -->|Match Failed| FUZZY_MATCHER
-    FUZZY_MATCHER --> SUGGESTIONS
+    REQ --> EXACT
+    EXACT -->|Found| SUCCESS[Return Documentation]
+    EXACT -->|Not Found| CACHE_CHECK
+    CACHE_CHECK -->|Cache Hit| FUZZY
+    CACHE_CHECK -->|Cache Miss| CACHE_BUILD
+    CACHE_BUILD --> FUZZY
+    FUZZY --> SUGGESTIONS
+    SUGGESTIONS --> ERROR
 ```
 
-**Integration Points:**
-- **validation.py**: Add fuzzy path validation fallback for failed exact matches
-- **database.py**: Query existing paths for fuzzy matching candidates
-- **Error Responses**: Include suggested corrections in validation error messages
-- **Performance**: Cache common path patterns and suggestions
+**Architecture Components:**
+
+**1. Integration Point**
+- **Location**: `routes.py` in `get_item_doc` endpoint
+- **Trigger**: When exact SQLite path lookup fails
+- **Fallback**: Automatic fuzzy matching with user-friendly error messages
+
+**2. Path Caching System**
+- **Implementation**: Simple in-memory dictionary cache
+- **TTL**: 5-minute expiration for cache freshness
+- **Population**: Lazy loading - cache built on first fuzzy match attempt
+- **Memory Footprint**: <3MB for typical crate collections
+- **Thread Safety**: Single-threaded FastAPI context (no locking required)
+
+**3. RapidFuzz Configuration**
+- **Library**: RapidFuzz library for high-performance string matching
+- **Similarity Threshold**: 0.6 (60% similarity required for meaningful suggestions)
+- **Result Limit**: Maximum 3 suggestions returned to users
+- **Scoring Method**: Default fuzzy matching algorithm optimized for path-like strings
+
+**4. Performance Characteristics**
+- **Cold Start**: Initial cache population during first fuzzy match
+- **Warm Performance**: Sub-5ms fuzzy matching after cache warmup  
+- **Memory Usage**: Minimal overhead with efficient string comparison
+- **Scalability**: Linear performance with crate collection size
+
+**5. Error Response Enhancement**
+- **Error Type**: `ItemNotFoundError` with enhanced context
+- **User Experience**: Clear error message with "Did you mean?" suggestions
+- **Suggestion Format**: Top 3 ranked alternatives presented as list
+- **Fallback**: Graceful degradation if fuzzy matching fails
+
+**Integration Benefits:**
+- **No Database Changes**: Pure application-layer enhancement
+- **Backward Compatible**: Existing exact match behavior preserved
+- **User-Friendly**: Helpful suggestions reduce friction from typos
+- **Performance Optimized**: Fast response times with intelligent caching
 
 ## Dual-Mode Server Implementation
 

@@ -1644,43 +1644,93 @@
     "fuzzy_path_resolution": {
       "rapidfuzz": {
         "overview": "High-performance fuzzy string matching library for Python",
+        "version": {
+          "recommended": "3.5.2 to <3.9.0",
+          "avoid": "v3.9.6 due to multiprocessing bug",
+          "rationale": "v3.5.2+ provides optimal performance while avoiding known issues in later versions"
+        },
         "performanceAdvantages": {
           "comparison": "RapidFuzz vs FuzzyWuzzy performance comparison",
           "rapidfuzzPerformance": "20ms for 1M elements",
           "fuzzywuzzyPerformance": "7s for 1M elements",
-          "speedup": "350x performance improvement over FuzzyWuzzy",
-          "implementation": "Written in C++ with Python bindings for optimal performance"
+          "speedup": "16X to 350X faster than FuzzyWuzzy depending on dataset size",
+          "implementation": "C++ implementation with SIMD optimizations for maximum performance"
         },
         "features": [
           "Levenshtein distance calculation",
           "Fuzzy string matching algorithms",
           "Unicode-aware string comparison",
           "Multiple similarity metrics (ratio, partial_ratio, token_sort_ratio)",
-          "C++ backend for maximum performance"
+          "C++ backend with SIMD optimizations",
+          "Thread-safe implementation"
         ],
+        "breakingChanges": {
+          "v3x": {
+            "change": "No automatic string preprocessing by default",
+            "impact": "Strings are not automatically normalized unless explicit processor is specified",
+            "solution": "Use explicit processor=default_process for consistent preprocessing behavior"
+          }
+        },
         "fuzzyMatchingThresholds": {
+          "recommended": "0.6 (60%) similarity threshold",
           "optimalRange": "60-80% similarity threshold for fuzzy path matching",
           "conservative": "80% threshold for high precision, lower recall",
           "balanced": "70% threshold for balanced precision and recall",
           "liberal": "60% threshold for high recall, lower precision",
-          "rationale": "Balances false positives vs missed matches in documentation path resolution"
+          "rationale": "0.6 threshold balances false positives vs missed matches in documentation path resolution"
         },
         "bestPractices": {
           "thresholdSelection": {
             "documentation": "Use 70-80% threshold for documentation path matching",
             "reason": "Documentation paths have consistent structure, higher thresholds work well",
-            "userInput": "Use 60-70% threshold for user-provided path queries to handle typos"
+            "userInput": "Use 60-70% threshold for user-provided path queries to handle typos",
+            "general": "Use 0.6 (60%) as recommended baseline threshold"
+          },
+          "suggestionCount": {
+            "optimal": "3-5 maximum suggestions",
+            "rationale": "More than 5 suggestions overwhelm users, fewer than 3 may miss valid alternatives"
+          },
+          "editDistance": {
+            "default": "2 character operations",
+            "definition": "Maximum number of insertions, deletions, or substitutions allowed"
+          },
+          "scoring": {
+            "preferredScorer": "fuzz.ratio for path similarity",
+            "normalization": "Convert 0-100 score range to 0-1 range for consistency",
+            "formula": "normalized_score = score / 100.0"
           },
           "preprocessing": [
+            "Use explicit processor=default_process for consistent string preprocessing",
             "Normalize paths to consistent format before matching",
             "Handle case sensitivity appropriately for target system",
             "Remove or normalize path separators for consistent comparison"
           ],
           "performanceOptimization": [
-            "Use RapidFuzz process.extractOne() for single best match",
-            "Leverage process.extract() with limit parameter for multiple candidates",
+            "Use process.extract() for multiple suggestions with limit=5",
+            "Use process.extractOne() for single best match only when needed",
+            "Set workers=1 to avoid multiprocessing issues",
             "Consider caching results for frequently queried paths"
-          ]
+          ],
+          "cachingStrategy": {
+            "approach": "Cache paths per crate with TTL",
+            "benefit": "Reduces repeated expensive fuzzy matching operations",
+            "implementation": "Per-crate path caches with time-based expiration"
+          }
+        },
+        "implementationInsights": {
+          "multiprocessingAvoidance": {
+            "setting": "workers=1",
+            "reason": "Avoids multiprocessing issues and bugs in certain versions"
+          },
+          "explicitProcessing": {
+            "requirement": "Use processor=default_process for consistent behavior",
+            "impact": "Ensures string preprocessing occurs as expected in v3.x+"
+          },
+          "scoreNormalization": {
+            "input": "0-100 range from RapidFuzz",
+            "output": "0-1 range for API consistency",
+            "method": "Divide by 100.0"
+          }
         }
       },
       "mcpManifestParameterHandling": {

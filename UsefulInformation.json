@@ -815,6 +815,38 @@
           "relatedFiles": ["src/docsrs_mcp/app.py"]
         },
         {
+          "lesson": "SearchCache incompatibility with simple string caching needs",
+          "context": "Implementing fuzzy path resolution with caching for performance",
+          "details": "SearchCache is designed for embedding-based searches with complex cache key structures, not simple string-based path caching. For simple path caching needs, implement a basic dictionary cache with TTL instead of trying to adapt SearchCache to different use cases",
+          "impact": "Prevents over-engineering caching solutions and ensures appropriate tool selection for specific caching requirements",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "FastAPI HTTPException detail format requirements",
+          "context": "Returning structured error responses with suggestions in FastAPI",
+          "details": "HTTPException with dictionary detail causes 500 error instead of proper status code handling. FastAPI expects string detail for proper error response processing. Include error suggestions directly in the error message text rather than as separate detail fields",
+          "impact": "Ensures proper HTTP status code handling and prevents unexpected 500 errors when returning structured error information",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "TestClient async fixture compatibility patterns",
+          "context": "Testing async endpoints with FastAPI TestClient and pytest fixtures",
+          "details": "TestClient operates synchronously while async fixtures can cause compatibility issues. Mock at the appropriate abstraction level and use synchronous test functions with TestClient rather than trying to mix async fixtures with sync test clients",
+          "impact": "Prevents test fixture compatibility issues and ensures reliable test execution patterns",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["tests/test_app.py"]
+        },
+        {
+          "lesson": "RapidFuzz integration best practices for fallback search",
+          "context": "Implementing fuzzy string matching as fallback for exact path lookups",
+          "details": "RapidFuzz integrates cleanly with minimal code changes when used as fallback-only approach. This preserves exact match performance while adding fuzzy matching capability. Cache paths per crate to avoid repeated database queries and improve fuzzy search performance",
+          "impact": "Enables fuzzy search capabilities without impacting exact match performance, providing better user experience for path resolution",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
           "lesson": "SlowAPI rate limiting implementation gotchas",
           "context": "Implementing rate limiting with SlowAPI middleware in FastAPI applications",
           "details": "SlowAPI requires: 1) Request parameter MUST be included in endpoint function signatures or rate limiting won't work, 2) Middleware order matters - last added is outermost, 3) Memory backend doesn't share state between workers, use Redis for production, 4) Use limiter.limit() decorator on each endpoint that needs rate limiting, 5) Set app.state.limiter after app initialization for proper integration",
@@ -1001,6 +1033,15 @@
       "Test FastAPI validation errors by checking both 422 status code and response.json()['detail'] array",
       "Use nohup with PID capture for background server testing: 'nohup uv run uvicorn docsrs_mcp.app:app > server.log 2>&1 & echo $!'",
       "Server testing: Always use nohup when starting servers in background, use kill PID to stop servers cleanly, check logs with tail -f for debugging"
+    ],
+    "fuzzyPathResolution": [
+      "SearchCache is designed for embedding-based searches, not simple string caching - use basic dictionary cache with TTL for simple path caching needs",
+      "FastAPI HTTPException requires string detail, not dictionary - include suggestions in error message text to avoid 500 errors",
+      "TestClient works synchronously - avoid mixing async fixtures, mock at appropriate level and use sync test functions",
+      "RapidFuzz works best as fallback-only approach to preserve exact match performance while adding fuzzy capabilities",
+      "Cache paths per crate to avoid repeated database queries during fuzzy search operations",
+      "Use fallback pattern: attempt exact match first, then fuzzy search if no results found",
+      "Implement simple TTL caching with dictionary for path lookups rather than complex caching frameworks"
     ]
   },
   "performanceMetrics": {
@@ -1021,7 +1062,8 @@
       "errorRecovery": "Per-batch transactions, memory status logging, streaming-aware error handling",
       "databaseOptimization": "Create partial indexes for common filter patterns, use progressive filtering only for small result sets (<10K items)",
       "extensionManagement": "Always load sqlite-vec extension before vector operations, especially in testing environments",
-      "codeExampleExtraction": "Language detection adds minimal overhead (~200ms warm queries), deduplication by hash prevents duplicates efficiently, backward compatibility essential for format changes"
+      "codeExampleExtraction": "Language detection adds minimal overhead (~200ms warm queries), deduplication by hash prevents duplicates efficiently, backward compatibility essential for format changes",
+      "fuzzyPathResolution": "Use fallback-only approach with RapidFuzz for minimal performance impact, cache paths per crate, implement simple TTL dictionary cache instead of complex caching frameworks"
     }
   },
   "codeQuality": {

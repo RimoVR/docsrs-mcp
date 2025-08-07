@@ -743,3 +743,25 @@ async def search_example_embeddings(
             logger.debug(f"Example search completed in {elapsed_ms:.2f}ms")
 
         return results
+
+
+async def get_all_item_paths(db_path: Path) -> list[str]:
+    """Get all item paths from the database for fuzzy matching.
+
+    Args:
+        db_path: Path to the database file
+
+    Returns:
+        List of all unique item paths in the database
+    """
+    if not db_path.exists():
+        return []
+
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        cursor = await db.execute(
+            "SELECT DISTINCT item_path FROM embeddings WHERE item_path IS NOT NULL"
+        )
+        paths = [row[0] for row in await cursor.fetchall()]
+
+        logger.debug(f"Retrieved {len(paths)} unique item paths from database")
+        return paths

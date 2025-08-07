@@ -9,6 +9,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .database import get_module_tree as get_module_tree_from_db
 from .database import search_embeddings
+from .fuzzy_resolver import get_fuzzy_suggestions_with_fallback
 from .ingest import get_embedding_model, ingest_crate
 from .middleware import limiter, rate_limit_handler
 from .models import (
@@ -463,12 +464,30 @@ async def get_item_doc(request: Request, params: GetItemDocRequest):
             if row:
                 return {"content": row[0], "format": "markdown"}
             else:
-                # If not found in embeddings, return a helpful message
-                return {
-                    "content": f"Documentation for `{params.item_path}` not found in the current index. Try searching for it using the search_items tool.",
-                    "format": "markdown",
-                }
+                # Try fuzzy matching for suggestions
+                suggestions = await get_fuzzy_suggestions_with_fallback(
+                    query=params.item_path,
+                    db_path=str(db_path),
+                    crate_name=params.crate_name,
+                    version=params.version or "latest",
+                )
 
+                # Return error with suggestions
+                error_detail = f"No documentation found for '{params.item_path}'"
+                if suggestions:
+                    error_detail += (
+                        f". Did you mean one of these? {', '.join(suggestions[:3])}"
+                    )
+
+                # FastAPI's HTTPException expects string detail, so just raise with string
+                raise HTTPException(
+                    status_code=404,
+                    detail=error_detail,
+                )
+
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is (e.g., 404 with fuzzy suggestions)
+        raise
     except Exception as e:
         logger.error(f"Error in get_item_doc: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
