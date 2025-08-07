@@ -29,6 +29,7 @@ class SearchCache:
         k: int,
         type_filter: str | None = None,
         crate_filter: str | None = None,
+        module_path: str | None = None,
         has_examples: bool | None = None,
         min_doc_length: int | None = None,
         visibility: str | None = None,
@@ -42,6 +43,7 @@ class SearchCache:
             str(k),
             str(type_filter) if type_filter else "none",
             str(crate_filter) if crate_filter else "none",
+            str(module_path) if module_path else "none",
             str(has_examples) if has_examples is not None else "none",
             str(min_doc_length) if min_doc_length else "none",
             str(visibility) if visibility else "none",
@@ -56,6 +58,7 @@ class SearchCache:
         k: int,
         type_filter: str | None = None,
         crate_filter: str | None = None,
+        module_path: str | None = None,
         has_examples: bool | None = None,
         min_doc_length: int | None = None,
         visibility: str | None = None,
@@ -72,6 +75,7 @@ class SearchCache:
             k,
             type_filter,
             crate_filter,
+            module_path,
             has_examples,
             min_doc_length,
             visibility,
@@ -105,6 +109,7 @@ class SearchCache:
         results: list[tuple[float, str, str, str]],
         type_filter: str | None = None,
         crate_filter: str | None = None,
+        module_path: str | None = None,
         has_examples: bool | None = None,
         min_doc_length: int | None = None,
         visibility: str | None = None,
@@ -119,6 +124,7 @@ class SearchCache:
             results: Search results to cache
             type_filter: Optional type filter
             crate_filter: Optional crate filter
+            module_path: Optional module path filter
             has_examples: Optional examples filter
             min_doc_length: Optional minimum doc length filter
             visibility: Optional visibility filter
@@ -129,6 +135,7 @@ class SearchCache:
             k,
             type_filter,
             crate_filter,
+            module_path,
             has_examples,
             min_doc_length,
             visibility,

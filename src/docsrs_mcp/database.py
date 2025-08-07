@@ -381,6 +381,7 @@ async def search_embeddings(
     k: int = 5,
     type_filter: str | None = None,
     crate_filter: str | None = None,
+    module_path: str | None = None,
     has_examples: bool | None = None,
     min_doc_length: int | None = None,
     visibility: str | None = None,
@@ -403,6 +404,7 @@ async def search_embeddings(
         k,
         type_filter,
         crate_filter,
+        module_path,
         has_examples,
         min_doc_length,
         visibility,
@@ -425,19 +427,41 @@ async def search_embeddings(
         prefilter_count = 0
 
         # Check if filters would significantly reduce the dataset
-        if any([type_filter, crate_filter, has_examples, deprecated is not None]):
+        if any(
+            [
+                type_filter,
+                crate_filter,
+                module_path,
+                has_examples,
+                deprecated is not None,
+            ]
+        ):
             filter_start = time.time()
+
+            # Prepare patterns for filtering
+            crate_pattern = f"{crate_filter}::%%" if crate_filter else None
+            # Module pattern needs to account for crate name prefix
+            # Get crate name from the db path (format: cache/{crate}/{version}.db)
+            crate_name = db_path.parent.name if db_path.parent.name != "cache" else None
+            module_pattern = (
+                f"{crate_name}::{module_path}::%%"
+                if module_path and crate_name
+                else None
+            )
+
             cursor = await db.execute(
                 """
                 SELECT COUNT(*) FROM embeddings
                 WHERE (:type_filter IS NULL OR item_type = :type_filter)
                     AND (:crate_pattern IS NULL OR item_path LIKE :crate_pattern)
+                    AND (:module_pattern IS NULL OR item_path LIKE :module_pattern)
                     AND (:deprecated IS NULL OR deprecated = :deprecated)
                     AND (:has_examples IS NULL OR (:has_examples = 0 OR examples IS NOT NULL))
             """,
                 {
                     "type_filter": type_filter,
-                    "crate_pattern": f"{crate_filter}::%%" if crate_filter else None,
+                    "crate_pattern": crate_pattern,
+                    "module_pattern": module_pattern,
                     "deprecated": deprecated,
                     "has_examples": has_examples,
                 },
@@ -455,8 +479,13 @@ async def search_embeddings(
         # Fetch k+10 results to allow for re-ranking
         fetch_k = min(k + 10, 50)  # Cap at 50 for performance
 
-        # Prepare crate pattern for LIKE query
+        # Prepare patterns for LIKE queries
         crate_pattern = f"{crate_filter}::%%" if crate_filter else None
+        # Module pattern needs to account for crate name prefix
+        crate_name = db_path.parent.name if db_path.parent.name != "cache" else None
+        module_pattern = (
+            f"{crate_name}::{module_path}::%%" if module_path and crate_name else None
+        )
 
         # Perform vector search with additional metadata for ranking and filtering
         cursor = await db.execute(
@@ -476,6 +505,7 @@ async def search_embeddings(
             WHERE v.embedding MATCH :embedding AND k = :k
                 AND (:type_filter IS NULL OR e.item_type = :type_filter)
                 AND (:crate_pattern IS NULL OR e.item_path LIKE :crate_pattern)
+                AND (:module_pattern IS NULL OR e.item_path LIKE :module_pattern)
                 AND (:visibility IS NULL OR e.visibility = :visibility)
                 AND (:deprecated IS NULL OR e.deprecated = :deprecated)
                 AND (:has_examples IS NULL OR (:has_examples = 0 OR e.examples IS NOT NULL))
@@ -487,6 +517,7 @@ async def search_embeddings(
                 "k": fetch_k,
                 "type_filter": type_filter,
                 "crate_pattern": crate_pattern,
+                "module_pattern": module_pattern,
                 "visibility": visibility,
                 "deprecated": deprecated,
                 "has_examples": has_examples,
@@ -578,6 +609,7 @@ async def search_embeddings(
             top_results,
             type_filter,
             crate_filter,
+            module_path,
             has_examples,
             min_doc_length,
             visibility,

@@ -567,6 +567,46 @@
           "impact": "Reduces user confusion and support requests by providing clear guidance on correct input format",
           "dateLearned": "2025-08-07",
           "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Module path validation edge cases require careful pattern checking",
+          "context": "User input validation for module path patterns in search functionality",
+          "details": "Simple strip() validation can make invalid patterns like 'runtime::' appear valid. Check for trailing/leading '::' before stripping whitespace to catch malformed module paths. Invalid patterns should fail validation with clear error messages",
+          "impact": "Prevents invalid module path queries from reaching the database and provides clear feedback to users about correct module path syntax",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "tests/test_app.py"]
+        },
+        {
+          "lesson": "Database path extraction pattern for module search",
+          "context": "Converting database file paths to crate names for module pattern construction",
+          "details": "Use db_path.parent.name to extract crate name from cache/{crate}/{version}.db structure. Module search patterns follow format: f'{crate_name}::{module_path}::%' for SQL LIKE queries",
+          "impact": "Enables efficient module-scoped search by properly constructing database queries with correct crate and module path patterns",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Cache key generation must include all filter parameters",
+          "context": "Maintaining cache consistency when adding new search parameters",
+          "details": "When adding new filter parameters to search functions, always update _make_key(), get(), and set() methods to include the new parameters. Maintain consistent parameter ordering across all methods to ensure cache hits work correctly",
+          "impact": "Prevents cache misses and incorrect result caching when new search parameters are added, ensuring search results remain accurate and performant",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "FastAPI validation error testing patterns",
+          "context": "Testing Pydantic validation errors in FastAPI applications",
+          "details": "FastAPI returns HTTP 422 status for Pydantic validation errors. Error details are available in response.json()['detail'] as an array of error objects. Test both the status code and specific error message content",
+          "impact": "Enables comprehensive testing of input validation by properly checking both HTTP status and detailed error information",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["tests/test_app.py"]
+        },
+        {
+          "lesson": "Background server testing with clean process management",
+          "context": "Testing server applications without blocking terminal sessions",
+          "details": "Use nohup with output redirection and PID capture for clean server testing: 'nohup uv run uvicorn docsrs_mcp.app:app > server.log 2>&1 & echo $!'. Capture the PID for clean shutdown with kill command",
+          "impact": "Prevents terminal hanging during server testing and enables clean process cleanup, improving development workflow",
+          "dateLearned": "2025-08-07",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
         }
       ]
     }
@@ -681,6 +721,15 @@
       "Include specific examples in Pydantic validator error messages for better user experience",
       "Test normalization with various Unicode inputs including mathematical symbols and ligatures",
       "Verify that programming syntax elements remain intact after normalization"
+    ],
+    "moduleMetadataSearch": [
+      "Check for trailing/leading '::' in module paths before stripping whitespace to catch malformed patterns",
+      "Use db_path.parent.name to extract crate name from cache/{crate}/{version}.db file structure",
+      "Construct module search patterns as: f'{crate_name}::{module_path}::%' for SQL LIKE queries",
+      "Always add new filter parameters to _make_key(), get(), and set() methods for cache consistency",
+      "Maintain parameter ordering consistency across cache methods to ensure proper cache hits",
+      "Test FastAPI validation errors by checking both 422 status code and response.json()['detail'] array",
+      "Use nohup with PID capture for background server testing: 'nohup uv run uvicorn docsrs_mcp.app:app > server.log 2>&1 & echo $!'" 
     ]
   },
   "performanceMetrics": {

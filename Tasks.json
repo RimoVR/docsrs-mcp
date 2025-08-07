@@ -638,25 +638,30 @@
         "id": "mod-2",
         "title": "Add module metadata search",
         "description": "Enable searching by module path to help users find items within specific modules",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": [],
         "relatedTasks": ["mod-1"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-07T15:30:00Z",
+          "implementation": "Module path search functionality with SQL LIKE pattern matching and comprehensive MCP integration",
+          "notes": "Added module_path parameter to SearchItemsRequest model with full validation, extended search_embeddings function to filter by module path using SQL LIKE patterns, updated cache key generation to include module_path parameter, added MCP tool schema support for module_path, implemented comprehensive integration tests, all tests passing with code formatted and linted"
+        },
         "subtasks": [
           {
             "id": "mod-2.1",
             "title": "Implement module path search",
             "description": "Allow searching items by their module path",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "mod-2.2",
             "title": "Add module-scoped search",
             "description": "Enable searching within specific module scopes",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           }
         ]
       }

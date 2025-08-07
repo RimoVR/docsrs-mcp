@@ -184,6 +184,10 @@ async def get_mcp_manifest():
                             "type": "string",
                             "description": "Filter results to specific crate",
                         },
+                        "module_path": {
+                            "type": "string",
+                            "description": "Filter results to specific module path within the crate",
+                        },
                         "has_examples": {
                             "type": "boolean",
                             "description": "Filter to only items with code examples",
@@ -357,6 +361,7 @@ async def search_items(request: SearchItemsRequest):
             k=request.k or 5,
             type_filter=request.item_type,
             crate_filter=request.crate_filter,
+            module_path=request.module_path,
             has_examples=request.has_examples,
             min_doc_length=request.min_doc_length,
             visibility=request.visibility,

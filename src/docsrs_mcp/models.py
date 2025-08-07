@@ -155,6 +155,11 @@ class SearchItemsRequest(BaseModel):
         description="Filter results to specific crate",
         examples=["tokio", "serde"],
     )
+    module_path: str | None = Field(
+        None,
+        description="Filter results to specific module path within the crate",
+        examples=["runtime", "net::tcp", "sync::mpsc"],
+    )
     has_examples: bool | None = Field(
         None,
         description="Filter to only items with code examples",
@@ -297,6 +302,67 @@ class SearchItemsRequest(BaseModel):
             return None
         return str(v)
 
+    @field_validator("module_path", mode="before")
+    @classmethod
+    def validate_module_path(cls, v):
+        """Validate and normalize module path for filtering."""
+        if v is None or v == "":
+            return None
+
+        # Convert to string and strip whitespace
+        module_path = str(v).strip()
+        
+        # Store original for error messages
+        original_path = module_path
+
+        # Check for trailing :: which is invalid 
+        if module_path.endswith("::") and module_path != "::":
+            raise ValueError(
+                f"Invalid module path '{original_path}': trailing '::' is not allowed. "
+                "Module paths should be like 'runtime' or 'sync::mpsc'."
+            )
+        
+        # Check for leading :: which is invalid
+        if module_path.startswith("::") and module_path != "::":
+            raise ValueError(
+                f"Invalid module path '{original_path}': leading '::' is not allowed. "
+                "Module paths should be like 'runtime' or 'sync::mpsc'."
+            )
+        
+        # Check for empty segments in the middle
+        if ":::" in module_path:
+            raise ValueError(
+                f"Invalid module path '{original_path}': contains empty segments. "
+                "Module paths should be like 'runtime' or 'sync::mpsc'."
+            )
+
+        # Remove leading/trailing :: if present
+        module_path = module_path.strip(":")
+
+        # Validate format: should not be empty after stripping
+        if not module_path:
+            raise ValueError(
+                f"Invalid module path '{original_path}': cannot be empty. "
+                "Examples: 'runtime', 'sync::mpsc', 'net::tcp'."
+            )
+
+        # Validate format: should not have empty segments
+        segments = module_path.split("::")
+        for segment in segments:
+            if not segment:
+                raise ValueError(
+                    f"Invalid module path '{original_path}': contains empty segments. "
+                    "Module paths should be like 'runtime' or 'sync::mpsc'."
+                )
+            # Basic validation: segment should be valid Rust identifier
+            if not segment.replace("_", "").isalnum():
+                raise ValueError(
+                    f"Invalid module path '{original_path}': segment '{segment}' contains invalid characters. "
+                    "Module names should only contain alphanumeric characters and underscores."
+                )
+
+        return module_path
+
     @field_validator("deprecated", "has_examples", mode="before")
     @classmethod
     def validate_boolean_filters(cls, v):
@@ -336,6 +402,15 @@ class SearchItemsRequest(BaseModel):
     @model_validator(mode="after")
     def validate_filter_compatibility(self):
         """Check for conflicting or incompatible filter combinations."""
+        # Validate module_path is only used with matching crate context
+        if self.module_path:
+            if self.crate_filter and self.crate_filter != self.crate_name:
+                raise ValueError(
+                    f"Module path '{self.module_path}' can only be used when searching "
+                    f"within the same crate. Cannot use module_path with crate_filter='{self.crate_filter}' "
+                    f"when searching in crate '{self.crate_name}'."
+                )
+
         # Warn if searching for private items in a different crate
         if (
             self.visibility == "private"

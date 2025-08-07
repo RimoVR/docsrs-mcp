@@ -149,7 +149,7 @@ async def resolve_version(
     if version == "latest":
         # For latest, use the direct JSON endpoint
         rustdoc_url = f"https://docs.rs/crate/{crate_name}/latest/json"
-        
+
         # Make a HEAD request to get the actual version from redirect
         timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
         async with session.head(
@@ -159,19 +159,19 @@ async def resolve_version(
                 raise Exception(
                     f"Failed to resolve version for {crate_name}: HTTP {response.status}"
                 )
-            
+
             # Extract version from redirected URL
             # Format: https://static.docs.rs/{crate_name}/{version}/json
             final_url = str(response.url)
             parts = final_url.strip("/").split("/")
-            
+
             # Try to extract version from the URL
             if "static.docs.rs" in final_url and len(parts) >= 5:
                 resolved_version = parts[4]
             else:
                 # Fallback: use "latest" if we can't parse
                 resolved_version = "latest"
-                
+
             return resolved_version, rustdoc_url
     else:
         # For specific versions, use the direct pattern
@@ -238,22 +238,21 @@ async def download_rustdoc(
     # If URL already has a compressed extension, use it as-is
     if rustdoc_url.endswith((".json.zst", ".json.gz", ".gz")):
         urls_to_try.append(rustdoc_url)
+    # For the new JSON API pattern (/crate/{name}/{version}/json)
+    # We can append .gz for gzip compression
+    elif rustdoc_url.endswith("/json"):
+        # Try zstd (default), then gzip
+        urls_to_try.extend([rustdoc_url, f"{rustdoc_url}.gz"])
     else:
-        # For the new JSON API pattern (/crate/{name}/{version}/json)
-        # We can append .gz for gzip compression
-        if rustdoc_url.endswith("/json"):
-            # Try zstd (default), then gzip
-            urls_to_try.extend([rustdoc_url, f"{rustdoc_url}.gz"])
-        else:
-            # Fallback for old-style URLs
-            base_url = (
-                rustdoc_url.rstrip(".json")
-                if rustdoc_url.endswith(".json")
-                else rustdoc_url
-            )
-            urls_to_try.extend(
-                [f"{base_url}.json.zst", f"{base_url}.json.gz", f"{base_url}.json"]
-            )
+        # Fallback for old-style URLs
+        base_url = (
+            rustdoc_url.rstrip(".json")
+            if rustdoc_url.endswith(".json")
+            else rustdoc_url
+        )
+        urls_to_try.extend(
+            [f"{base_url}.json.zst", f"{base_url}.json.gz", f"{base_url}.json"]
+        )
 
     last_error = None
     for url in urls_to_try:
@@ -328,8 +327,8 @@ async def decompress_content(content: bytes, url: str) -> str:
     """
     # Check if content is zstd compressed (default for /json endpoint)
     # zstd magic bytes: 0x28, 0xb5, 0x2f, 0xfd
-    is_zstd = content[:4] == b'\x28\xb5\x2f\xfd' if len(content) >= 4 else False
-    
+    is_zstd = content[:4] == b"\x28\xb5\x2f\xfd" if len(content) >= 4 else False
+
     if url.endswith(".json.zst") or (url.endswith("/json") and is_zstd):
         # Zstandard decompression
         dctx = zstandard.ZstdDecompressor(max_window_size=2**31)
@@ -499,7 +498,7 @@ def build_module_hierarchy(paths: dict) -> dict:
             if isinstance(kind, str) and kind.lower() in ["module", "mod"]:
                 module_count += 1
                 path_parts = path_info.get("path", [])
-                
+
                 # Module name is the last part of the path
                 name = path_parts[-1] if path_parts else ""
 
@@ -546,7 +545,9 @@ def build_module_hierarchy(paths: dict) -> dict:
     except Exception as e:
         logger.warning(f"Error building module hierarchy: {e}")
 
-    logger.info(f"Processed {total_entries} path entries, found {module_count} modules, built {len(modules)} module records")
+    logger.info(
+        f"Processed {total_entries} path entries, found {module_count} modules, built {len(modules)} module records"
+    )
     return modules
 
 

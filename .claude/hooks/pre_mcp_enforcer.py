@@ -210,8 +210,9 @@ def main():
 
         # Output decision
         if result.get("decision") == "block":
-            print(json.dumps(result))
-            return 1
+            # Exit code 2 blocks the tool, message goes to stderr
+            print(result.get("message", "Improper MCP usage pattern"), file=sys.stderr)
+            return 2  # Block the tool call
 
     except Exception as e:
         # Log error but don't block

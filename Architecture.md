@@ -761,6 +761,7 @@ graph TD
 |-------------|-------------|------------|----------------|---------|
 | Deprecated filter | ~5% | idx_non_deprecated | < 5ms | Most selective, applied first |
 | Crate prefix | ~1% | idx_crate_prefix | < 3ms | Highly selective for single crate |
+| Module path LIKE | Variable | item_path index | < 50ms | Selective for module patterns (e.g., "tokio::runtime::%") |
 | Item type = function | ~40% | idx_public_functions | < 10ms | Medium selectivity |
 | Has examples | ~30% | idx_has_examples | < 8ms | Medium selectivity |
 | Combined filters | Variable | Multiple indexes | < 15ms | Progressive application |
@@ -810,23 +811,25 @@ graph TB
 
 ### Query Preprocessing Pipeline
 
-The query preprocessing system ensures consistent search results through Unicode normalization:
+The query preprocessing system ensures consistent search results through Unicode normalization and supports module path filtering:
 
 ```mermaid
 graph LR
     subgraph "Query Preprocessing"
         RAW_QUERY[Raw Query Text<br/>from client request]
         UNICODE_NORM[Unicode Normalization<br/>NFKC form application]
+        MODULE_PARAM[Module Path Parameter<br/>SQL LIKE pattern filtering]
         NORMALIZED[Normalized Query<br/>consistent character forms]
     end
     
     subgraph "Cache Integration"
-        CACHE_KEY[Cache Key Generation<br/>using normalized query]
+        CACHE_KEY[Cache Key Generation<br/>query + module_path parameters]
         CACHE_LOOKUP[Cache Lookup<br/>improved hit rates]
-        SEARCH_EXECUTION[Vector Search<br/>with normalized text]
+        SEARCH_EXECUTION[Vector Search<br/>with module path filtering]
     end
     
     RAW_QUERY --> UNICODE_NORM
+    MODULE_PARAM --> NORMALIZED
     UNICODE_NORM --> NORMALIZED
     NORMALIZED --> CACHE_KEY
     CACHE_KEY --> CACHE_LOOKUP
@@ -835,21 +838,22 @@ graph LR
 
 **Key Benefits:**
 - **Search Consistency**: NFKC normalization handles character variants (e.g., combining diacritics, fullwidth characters)
-- **Cache Efficiency**: Normalized queries improve cache hit rates by eliminating character encoding variations
+- **Module Path Filtering**: SQL LIKE patterns enable precise module-scoped searches (e.g., "tokio::runtime::%")
+- **Cache Efficiency**: Normalized queries + module path parameters improve cache hit rates by eliminating variations
 - **Cross-Platform Compatibility**: Consistent results across different operating systems and input methods
-- **Transparent Processing**: Normalization happens at validation layer with no API changes
-- **Performance Impact**: Minimal overhead (~1ms) for typical query lengths
+- **Transparent Processing**: Normalization and filtering happen at validation layer with no API changes
+- **Performance Impact**: Minimal overhead (~1ms) for query normalization, <50ms for module filtering using existing indexes
 
 ### Caching Layer with TTL Support
 
-The enhanced caching system provides intelligent result caching with time-to-live (TTL) support and benefits from query preprocessing:
+The enhanced caching system provides intelligent result caching with time-to-live (TTL) support and benefits from query preprocessing with module path awareness:
 
 ```mermaid
 graph LR
     subgraph "Cache Architecture"
         LRU[LRU Cache<br/>1000 entry capacity]
         TTL[TTL Support<br/>15-minute default]
-        KEY_GEN[Cache Key Generation<br/>Query embedding + parameters]
+        KEY_GEN[Cache Key Generation<br/>Query + module_path + parameters]
     end
     
     subgraph "Cache Operations"
@@ -895,6 +899,7 @@ graph LR
 | Query preprocessing | < 1ms | Unicode NFKC normalization for search consistency |
 | Ranking overhead | < 20ms P95 | Multi-factor scoring with type weights and normalization |
 | Filter latency | < 15ms P95 | Progressive filtering with selectivity analysis and partial indexes |
+| Module path filter | < 50ms P95 | SQL LIKE pattern matching leveraging existing item_path indexes |
 | Deprecated filter | < 5ms P95 | High selectivity (~5%) with idx_non_deprecated partial index |
 | Type filter | < 10ms P95 | Medium selectivity (~40% for functions) with idx_public_functions |
 | Example filter | < 8ms P95 | Medium selectivity (~30%) with idx_has_examples partial index |
@@ -956,6 +961,7 @@ graph TD
 - MCP clients may serialize all parameters as strings due to JSON-RPC transport limitations
 - Field validators with `mode='before'` handle type coercion before constraint validation
 - Critical for integer parameters like `k` (result count) that have numeric constraints
+- Module path parameters use SQL LIKE pattern validation for filtering capabilities
 
 **MCP Manifest Schema Pattern**
 - MCP tool manifests require `anyOf` schema pattern for parameters that may arrive as different types
@@ -993,6 +999,16 @@ def normalize_query(cls, v):
         import unicodedata
         return unicodedata.normalize('NFKC', v)
     return v
+
+@model_validator(mode="after")
+def validate_module_path_context(self):
+    """Cross-field validation: module_path requires matching crate context."""
+    if self.module_path is not None:
+        if self.crate is None:
+            raise ValueError(
+                "module_path parameter requires crate to be specified"
+            )
+    return self
 ```
 
 **Key Design Principles**
@@ -1008,8 +1024,9 @@ def normalize_query(cls, v):
 2. **Query Normalization**: Unicode NFKC normalization applied to search queries for consistency
 3. **Type Checking**: Pydantic validates coerced values against expected types
 4. **Constraint Validation**: Field constraints (ge, le, etc.) applied to typed values
-5. **Model Validation**: `extra='forbid'` prevents injection of unknown parameters
-6. **Error Standardization**: All validation errors converted to consistent ErrorResponse format
+5. **Cross-field Validation**: Model validators ensure parameter consistency (e.g., module_path requires crate)
+6. **Model Validation**: `extra='forbid'` prevents injection of unknown parameters
+7. **Error Standardization**: All validation errors converted to consistent ErrorResponse format
 
 ## Security Model
 
@@ -1473,7 +1490,7 @@ sequenceDiagram
 ```mermaid
 graph TD
     subgraph "Enhanced Search Tools"
-        SEARCH_DOC[search_documentation<br/>• Vector similarity search<br/>• Item type filtering (struct, function, trait, etc)<br/>• Signature matching<br/>• Tag-based filtering]
+        SEARCH_DOC[search_documentation<br/>• Vector similarity search<br/>• Item type filtering (struct, function, trait, etc)<br/>• Module path filtering with SQL LIKE patterns<br/>• Signature matching<br/>• Tag-based filtering]
         
         NAV_TREE[navigate_modules<br/>• Hierarchical module browsing<br/>• Parent-child relationships<br/>• Module content listing<br/>• Path-based navigation]
         
@@ -1577,7 +1594,7 @@ classDiagram
 - **Over-fetching Optimization**: K+10 strategy ensures sufficient candidates for re-ranking without constraining initial retrieval
 - **Type-filtered Search**: Filter results by item type (functions only, traits only, etc.)
 - **Signature-based Matching**: Search by function signatures, trait bounds, or type parameters
-- **Module-scoped Search**: Limit search results to specific modules or crates
+- **Module-scoped Search**: Limit search results to specific modules or crates using SQL LIKE patterns
 - **Example-integrated Results**: Include relevant code examples with search results
 - **Tag-based Discovery**: Use metadata tags for enhanced result categorization
 

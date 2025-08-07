@@ -305,3 +305,174 @@ async def test_search_with_no_filters():
                     assert call_args.kwargs.get("min_doc_length") is None
                     assert call_args.kwargs.get("visibility") is None
                     assert call_args.kwargs.get("deprecated") is None
+                    assert call_args.kwargs.get("module_path") is None
+
+
+@pytest.mark.asyncio
+async def test_search_with_module_path_filter():
+    """Test search with module_path filter."""
+    transport = ASGITransport(app=app)
+
+    with patch("docsrs_mcp.app.ingest_crate") as mock_ingest:
+        with patch("docsrs_mcp.app.get_embedding_model") as mock_model:
+            with patch("docsrs_mcp.app.search_embeddings") as mock_search:
+                mock_ingest.return_value = "/path/to/db"
+                mock_model.return_value.embed.return_value = [[0.1] * 768]
+                mock_search.return_value = [
+                    (
+                        0.95,
+                        "tokio::runtime::spawn",
+                        "spawn",
+                        "Spawn a future onto the runtime",
+                    ),
+                    (0.90, "tokio::runtime::Builder", "Builder", "Runtime builder"),
+                ]
+
+                async with AsyncClient(
+                    transport=transport, base_url="http://test"
+                ) as client:
+                    # Test single-level module path
+                    response = await client.post(
+                        "/mcp/tools/search_items",
+                        json={
+                            "crate_name": "tokio",
+                            "query": "runtime",
+                            "module_path": "runtime",
+                        },
+                    )
+
+                    assert response.status_code == 200
+                    data = response.json()
+                    assert "results" in data
+                    mock_search.assert_called_once()
+                    assert mock_search.call_args.kwargs["module_path"] == "runtime"
+
+                    # Test multi-level module path
+                    mock_search.reset_mock()
+                    response = await client.post(
+                        "/mcp/tools/search_items",
+                        json={
+                            "crate_name": "tokio",
+                            "query": "tcp",
+                            "module_path": "net::tcp",
+                        },
+                    )
+
+                    assert response.status_code == 200
+                    mock_search.assert_called_once()
+                    assert mock_search.call_args.kwargs["module_path"] == "net::tcp"
+
+
+@pytest.mark.asyncio
+async def test_module_path_with_other_filters():
+    """Test module_path filter combined with other filters."""
+    transport = ASGITransport(app=app)
+
+    with patch("docsrs_mcp.app.ingest_crate") as mock_ingest:
+        with patch("docsrs_mcp.app.get_embedding_model") as mock_model:
+            with patch("docsrs_mcp.app.search_embeddings") as mock_search:
+                mock_ingest.return_value = "/path/to/db"
+                mock_model.return_value.embed.return_value = [[0.1] * 768]
+                mock_search.return_value = [
+                    (0.92, "tokio::sync::mpsc::channel", "channel", "Create a channel")
+                ]
+
+                async with AsyncClient(
+                    transport=transport, base_url="http://test"
+                ) as client:
+                    # Test module_path + type filter
+                    response = await client.post(
+                        "/mcp/tools/search_items",
+                        json={
+                            "crate_name": "tokio",
+                            "query": "channel",
+                            "module_path": "sync::mpsc",
+                            "item_type": "function",
+                        },
+                    )
+
+                    assert response.status_code == 200
+                    mock_search.assert_called_once()
+                    assert mock_search.call_args.kwargs["module_path"] == "sync::mpsc"
+                    assert mock_search.call_args.kwargs["type_filter"] == "function"
+
+                    # Test module_path + visibility + deprecated
+                    mock_search.reset_mock()
+                    response = await client.post(
+                        "/mcp/tools/search_items",
+                        json={
+                            "crate_name": "tokio",
+                            "query": "mutex",
+                            "module_path": "sync",
+                            "visibility": "public",
+                            "deprecated": False,
+                        },
+                    )
+
+                    assert response.status_code == 200
+                    mock_search.assert_called_once()
+                    assert mock_search.call_args.kwargs["module_path"] == "sync"
+                    assert mock_search.call_args.kwargs["visibility"] == "public"
+                    assert mock_search.call_args.kwargs["deprecated"] is False
+
+
+@pytest.mark.asyncio
+async def test_module_path_validation_errors():
+    """Test module_path validation errors."""
+    transport = ASGITransport(app=app)
+
+    with patch("docsrs_mcp.app.ingest_crate") as mock_ingest:
+        with patch("docsrs_mcp.app.get_embedding_model") as mock_model:
+            with patch("docsrs_mcp.app.search_embeddings") as mock_search:
+                mock_ingest.return_value = "/path/to/db"
+                mock_model.return_value.embed.return_value = [[0.1] * 768]
+                mock_search.return_value = []
+
+                async with AsyncClient(
+                    transport=transport, base_url="http://test"
+                ) as client:
+                    # Test invalid module path with trailing ::
+                    response = await client.post(
+                        "/mcp/tools/search_items",
+                        json={
+                            "crate_name": "tokio",
+                            "query": "test",
+                            "module_path": "runtime::",
+                        },
+                    )
+
+                    assert response.status_code == 422
+                    data = response.json()
+                    assert "detail" in data
+                    assert "trailing" in str(data["detail"]).lower() or "not allowed" in str(data["detail"]).lower()
+
+                    # Test module_path with crate_filter mismatch
+                    response = await client.post(
+                        "/mcp/tools/search_items",
+                        json={
+                            "crate_name": "tokio",
+                            "query": "test",
+                            "module_path": "runtime",
+                            "crate_filter": "serde",
+                        },
+                    )
+
+                    assert response.status_code == 422
+                    data = response.json()
+                    assert "detail" in data
+                    assert "module path" in str(data["detail"]).lower()
+
+                    # Test invalid characters in module path
+                    response = await client.post(
+                        "/mcp/tools/search_items",
+                        json={
+                            "crate_name": "tokio",
+                            "query": "test",
+                            "module_path": "runtime/invalid",
+                        },
+                    )
+
+                    assert response.status_code == 422
+                    data = response.json()
+                    assert "detail" in data
+                    assert "invalid characters" in str(data["detail"]).lower()

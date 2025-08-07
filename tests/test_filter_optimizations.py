@@ -162,7 +162,7 @@ class TestFilterPerformanceOptimizations:
             await db.enable_load_extension(True)
             await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
             await db.enable_load_extension(False)
-            
+
             # Insert test embeddings
             test_data = [
                 ("function1", "fn test", "Test function", "function", "public", 0),
