@@ -2,14 +2,15 @@
 
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import aiosqlite
 import pytest
 
+import docsrs_mcp.fuzzy_resolver
 from docsrs_mcp.fuzzy_resolver import (
     get_fuzzy_suggestions,
     get_fuzzy_suggestions_with_fallback,
+    resolve_path_alias,
 )
 
 
@@ -33,13 +34,13 @@ async def temp_db():
 
             # Insert test data with Rust-like paths
             test_paths = [
-                "tokio::spawn",
+                "tokio::task::spawn",
                 "tokio::spawn_blocking",
                 "tokio::spawn_local",
-                "tokio::task::spawn",
                 "tokio::runtime::Runtime",
-                "serde::Serialize",
-                "serde::Deserialize",
+                "tokio::task::JoinHandle",
+                "serde::ser::Serialize",
+                "serde::de::Deserialize",
                 "std::vec::Vec",
                 "std::collections::HashMap",
             ]
@@ -78,8 +79,8 @@ class TestFuzzyResolver:
             threshold=0.6,
         )
 
-        # Exact match should be the first suggestion
-        assert "tokio::spawn" in suggestions
+        # Should find tokio::task::spawn as a suggestion
+        assert "tokio::task::spawn" in suggestions
 
     @pytest.mark.asyncio
     async def test_typo_correction(self, temp_db):
@@ -95,13 +96,13 @@ class TestFuzzyResolver:
         )
 
         # Should suggest the correct spelling
-        assert "tokio::spawn" in suggestions
+        assert "tokio::task::spawn" in suggestions
 
     @pytest.mark.asyncio
     async def test_partial_path_matching(self, temp_db):
         """Test fuzzy matching with partial paths."""
         suggestions = await get_fuzzy_suggestions(
-            query="spawn",  # Partial path
+            query="task::spawn",  # More specific partial path
             db_path=str(temp_db),
             crate_name="tokio",
             version="1.0.0",
@@ -197,9 +198,9 @@ class TestFuzzyResolver:
         """Test that paths are cached after first retrieval."""
         # Clear the cache before test
         import docsrs_mcp.fuzzy_resolver
-        
+
         docsrs_mcp.fuzzy_resolver._path_cache.clear()
-        
+
         # First call should fetch from database
         await get_fuzzy_suggestions(
             query="tokio::spawn",
@@ -207,11 +208,11 @@ class TestFuzzyResolver:
             crate_name="tokio",
             version="1.0.0",
         )
-        
+
         # Verify cache was populated
         cache_key = "tokio_1.0.0_paths"
         assert cache_key in docsrs_mcp.fuzzy_resolver._path_cache
-        
+
         # Second call should use cache (we can't directly test this but cache should exist)
         await get_fuzzy_suggestions(
             query="tokio::spawn_blocking",
@@ -269,3 +270,81 @@ class TestFuzzyResolver:
 
             # Should not crash and should return some results
             assert isinstance(suggestions, list)
+
+    def test_resolve_path_alias_serde(self):
+        """Test alias resolution for serde paths."""
+        # Test serde aliases
+        assert (
+            resolve_path_alias("serde", "serde::Deserialize")
+            == "serde::de::Deserialize"
+        )
+        assert (
+            resolve_path_alias("serde", "serde::Serialize") == "serde::ser::Serialize"
+        )
+        assert (
+            resolve_path_alias("serde", "serde::Serializer") == "serde::ser::Serializer"
+        )
+        assert (
+            resolve_path_alias("serde", "serde::Deserializer")
+            == "serde::de::Deserializer"
+        )
+
+    def test_resolve_path_alias_tokio(self):
+        """Test alias resolution for tokio paths."""
+        # Test tokio aliases
+        assert resolve_path_alias("tokio", "tokio::spawn") == "tokio::task::spawn"
+        assert (
+            resolve_path_alias("tokio", "tokio::JoinHandle")
+            == "tokio::task::JoinHandle"
+        )
+        assert resolve_path_alias("tokio", "tokio::select") == "tokio::macros::select"
+
+    def test_resolve_path_alias_std(self):
+        """Test alias resolution for std paths."""
+        # Test std aliases
+        assert resolve_path_alias("std", "std::HashMap") == "std::collections::HashMap"
+        assert resolve_path_alias("std", "std::HashSet") == "std::collections::HashSet"
+        assert (
+            resolve_path_alias("std", "std::BTreeMap") == "std::collections::BTreeMap"
+        )
+        assert (
+            resolve_path_alias("std", "std::BTreeSet") == "std::collections::BTreeSet"
+        )
+        assert (
+            resolve_path_alias("std", "std::VecDeque") == "std::collections::VecDeque"
+        )
+        assert resolve_path_alias("std", "std::Vec") == "std::vec::Vec"
+        assert resolve_path_alias("std", "std::Result") == "std::result::Result"
+        assert resolve_path_alias("std", "std::Option") == "std::option::Option"
+
+    def test_resolve_path_alias_no_alias(self):
+        """Test that non-aliased paths return unchanged."""
+        # Non-existent alias should return original
+        assert resolve_path_alias("unknown", "foo::bar") == "foo::bar"
+        assert resolve_path_alias("serde", "serde::json::Value") == "serde::json::Value"
+        assert (
+            resolve_path_alias("tokio", "tokio::net::TcpListener")
+            == "tokio::net::TcpListener"
+        )
+
+    def test_resolve_path_alias_crate_level(self):
+        """Test that crate-level paths are not altered."""
+        # Crate-level path should remain unchanged
+        assert resolve_path_alias("serde", "crate") == "crate"
+        assert resolve_path_alias("tokio", "crate") == "crate"
+        assert resolve_path_alias("std", "crate") == "crate"
+
+    def test_resolve_path_alias_edge_cases(self):
+        """Test edge cases for alias resolution."""
+        # Empty strings
+        assert resolve_path_alias("", "") == ""
+        assert resolve_path_alias("serde", "") == ""
+        assert resolve_path_alias("", "serde::Deserialize") == "serde::de::Deserialize"
+
+        # Whitespace (should not be aliased)
+        assert (
+            resolve_path_alias("serde", " serde::Deserialize") == " serde::Deserialize"
+        )
+        assert (
+            resolve_path_alias("serde", "serde::Deserialize ") == "serde::Deserialize "
+        )

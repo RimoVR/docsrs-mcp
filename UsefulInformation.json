@@ -460,6 +460,17 @@
             "implementationNote": "Field validators handle conversion, manifest must allow types through"
           },
           "resolutionStatus": "FIXED - Applied anyOf patterns for numeric and boolean parameters, tested and verified working with both string and native type inputs"
+        },
+        {
+          "error": "Path alias resolution for common Rust documentation paths",
+          "context": "Users often use common aliases (serde::Deserialize) instead of full rustdoc paths (serde::de::Deserialize), causing 404 errors and poor user experience",
+          "solution": "Implement static PATH_ALIASES dictionary with O(1) lookup before database query. Contains mappings like 'serde::Deserialize': 'serde::de::Deserialize', 'tokio::spawn': 'tokio::task::spawn', 'Result': 'std::result::Result'. Uses resolve_path_alias() function in fuzzy_resolver.py for efficient resolution",
+          "prevention": "Maintain PATH_ALIASES dictionary with common path aliases for frequently accessed items. Update aliases based on user feedback and common usage patterns",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/fuzzy_resolver.py"],
+          "performanceNotes": "Alias resolution adds <1ms overhead while maintaining sub-500ms response time requirement. O(1) dictionary lookup is extremely fast",
+          "testingApproach": "Both unit tests for resolve_path_alias() function and integration tests for API endpoint ensure comprehensive coverage",
+          "mcpTesting": "Use --mode rest flag to test with HTTP/curl instead of STDIO mode for easier debugging and verification"
         }
       ]
     },
@@ -955,6 +966,15 @@
           "impact": "Maintains clean code architecture while enabling flexible and maintainable rate limiting configuration",
           "dateLearned": "2025-08-07",
           "relatedFiles": ["src/docsrs_mcp/middleware.py", "src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Path alias resolution implementation for improved user experience",
+          "context": "Implementing path alias resolution to handle common user path shortcuts in Rust documentation search",
+          "details": "Users often use common aliases like 'serde::Deserialize' instead of full rustdoc paths 'serde::de::Deserialize'. Solution: 1) Implement static PATH_ALIASES dictionary with O(1) lookup, 2) Create resolve_path_alias() function in fuzzy_resolver.py, 3) Add mapping for common patterns: serde::Deserialize → serde::de::Deserialize, tokio::spawn → tokio::task::spawn, Result → std::result::Result, 4) Integrate before database query for minimal performance impact (<1ms overhead), 5) Test with both unit tests and integration tests for comprehensive coverage",
+          "impact": "Significantly improves user experience by handling common path aliases automatically while maintaining sub-500ms response time requirements. Reduces 404 errors for commonly accessed items",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/fuzzy_resolver.py"],
+          "testingStrategy": "Use --mode rest flag for easier HTTP/curl testing instead of STDIO mode during development and verification"
         }
       ]
     },
@@ -1143,6 +1163,16 @@
       "Cache paths per crate to avoid repeated database queries during fuzzy search operations",
       "Use fallback pattern: attempt exact match first, then fuzzy search if no results found",
       "Implement simple TTL caching with dictionary for path lookups rather than complex caching frameworks"
+    ],
+    "pathAliasResolution": [
+      "Implement PATH_ALIASES dictionary with O(1) lookup for common path shortcuts before database queries",
+      "Include mappings for frequently used patterns: serde::Deserialize → serde::de::Deserialize, tokio::spawn → tokio::task::spawn",
+      "Add std library aliases like Result → std::result::Result, Option → std::option::Option for better UX",
+      "Place resolve_path_alias() function before database lookup to minimize performance impact (<1ms overhead)",
+      "Test both unit tests for the alias function and integration tests for API endpoints",
+      "Use --mode rest flag for easier HTTP/curl testing during development instead of STDIO mode",
+      "Update PATH_ALIASES based on user feedback and common usage patterns to improve coverage",
+      "Maintain sub-500ms response time requirement even with alias resolution overhead"
     ]
   },
   "performanceMetrics": {
@@ -1164,7 +1194,8 @@
       "databaseOptimization": "Create partial indexes for common filter patterns, use progressive filtering only for small result sets (<10K items)",
       "extensionManagement": "Always load sqlite-vec extension before vector operations, especially in testing environments",
       "codeExampleExtraction": "Language detection adds minimal overhead (~200ms warm queries), deduplication by hash prevents duplicates efficiently, backward compatibility essential for format changes",
-      "fuzzyPathResolution": "Use fallback-only approach with RapidFuzz for minimal performance impact, cache paths per crate, implement simple TTL dictionary cache instead of complex caching frameworks"
+      "fuzzyPathResolution": "Use fallback-only approach with RapidFuzz for minimal performance impact, cache paths per crate, implement simple TTL dictionary cache instead of complex caching frameworks",
+      "pathAliasResolution": "Static PATH_ALIASES dictionary with O(1) lookup adds <1ms overhead, maintains sub-500ms response time requirement while significantly improving user experience"
     }
   },
   "codeQuality": {

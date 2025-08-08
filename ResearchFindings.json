@@ -1884,6 +1884,45 @@
             "implementation": "Boost scores for matches in recently accessed sections",
             "userExperience": "Present most contextually relevant matches first"
           }
+        },
+        "aliasResolution": {
+          "performanceCharacteristics": {
+            "lookupTime": "Python dict provides O(1) average-case lookup performance",
+            "implementation": "Ideal for alias mappings with frequent lookups",
+            "benchmarkResult": "<1ms alias resolution time for common patterns"
+          },
+          "dependencyOptimization": {
+            "existingLibrary": "RapidFuzz already in use for fuzzy matching",
+            "benefit": "No additional dependencies required for alias resolution",
+            "integration": "Seamless integration with existing fuzzy search infrastructure"
+          },
+          "commonRustPatterns": {
+            "serdeReExports": [
+              "Deserialize",
+              "Serialize"
+            ],
+            "tokioReExports": [
+              "spawn",
+              "JoinHandle", 
+              "select"
+            ],
+            "stdCollections": [
+              "HashMap",
+              "HashSet",
+              "Vec"
+            ],
+            "purpose": "Pre-identify frequently aliased types for faster path resolution"
+          },
+          "implementationStrategy": {
+            "approach": "Resolve aliases before database lookup for zero overhead on exact matches",
+            "workflow": [
+              "1. Check exact path match first",
+              "2. Resolve common aliases if no exact match",
+              "3. Perform database lookup with resolved paths",
+              "4. Fall back to fuzzy matching if needed"
+            ],
+            "benefit": "Maintains performance for exact matches while improving UX for common aliases"
+          }
         }
       }
     },

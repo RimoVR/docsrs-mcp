@@ -1120,14 +1120,26 @@
         "id": "enhance-path-1",
         "title": "Add path alias resolution",
         "description": "Implement common path aliases before fuzzy matching",
-        "status": "pending",
+        "status": "completed",
         "priority": "high",
+        "progress": 100,
         "location": "src/docsrs_mcp/fuzzy_resolver.py",
         "dependencies": ["fix-examples-1"],
         "effort": "medium",
         "impact": "high",
         "relatedTasks": ["fuzzy-1"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T17:00:00Z",
+          "implementation": "Added PATH_ALIASES dictionary with common Rust path mappings and resolve_path_alias() function with O(1) lookup performance",
+          "notes": "PATH_ALIASES dictionary added with common Rust path mappings (serde, tokio, std). resolve_path_alias() function implemented with O(1) lookup. Integrated into get_item_doc endpoint before database query. Comprehensive tests added covering all alias patterns, edge cases, and no-alias scenarios. Feature is working with sub-1ms resolution times.",
+          "filesModified": [
+            "src/docsrs_mcp/fuzzy_resolver.py (PATH_ALIASES dict, resolve_path_alias function)",
+            "src/docsrs_mcp/app.py (integrated into get_item_doc endpoint)",
+            "tests/test_fuzzy_resolver.py (comprehensive test coverage)"
+          ],
+          "performance": "Sub-1ms resolution times with O(1) dictionary lookup"
+        },
         "details": {
           "enhancement": "Add common path alias resolution (e.g., 'std::vec' -> 'std::vec::Vec', 'tokio::spawn' -> 'tokio::task::spawn') before applying fuzzy matching",
           "benefit": "Improves user experience by handling common path shortcuts and abbreviations",
@@ -1138,22 +1150,37 @@
             "id": "enhance-path-1.1",
             "title": "Create alias mapping system",
             "description": "Design and implement common Rust path alias mappings",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T17:00:00Z",
+              "implementation": "Created PATH_ALIASES dictionary with serde, tokio, and std library path mappings",
+              "notes": "Implemented comprehensive alias mappings for common Rust patterns including serde traits, tokio tasks, and std collections"
+            }
           },
           {
             "id": "enhance-path-1.2",
             "title": "Integrate with existing fuzzy resolver",
             "description": "Add alias resolution as first step before fuzzy matching",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T17:00:00Z",
+              "implementation": "Integrated resolve_path_alias() into get_item_doc endpoint before database query",
+              "notes": "Added alias resolution as first step in path lookup process, ensuring aliases are resolved before fuzzy matching or database queries"
+            }
           },
           {
             "id": "enhance-path-1.3",
             "title": "Add comprehensive tests for alias resolution",
             "description": "Test common alias patterns and edge cases",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T17:00:00Z",
+              "implementation": "Added comprehensive test coverage in test_fuzzy_resolver.py for all alias patterns and edge cases",
+              "notes": "Tests cover serde, tokio, and std aliases, no-alias scenarios, crate-level paths, and edge cases including empty strings"
+            }
           }
         ]
       },

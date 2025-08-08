@@ -25,7 +25,7 @@ async def mock_ingest():
         async with aiosqlite.connect(db_path) as db:
             # Insert test items
             test_items = [
-                ("tokio::spawn", "fn spawn", "Spawns a new asynchronous task"),
+                ("tokio::task::spawn", "fn spawn", "Spawns a new asynchronous task"),
                 ("tokio::spawn_blocking", "fn spawn_blocking", "Runs blocking code"),
                 ("tokio::spawn_local", "fn spawn_local", "Spawns a local task"),
                 ("tokio::runtime::Runtime", "struct Runtime", "The Tokio runtime"),
@@ -38,7 +38,7 @@ async def mock_ingest():
 
                 await db.execute(
                     """
-                    INSERT INTO embeddings 
+                    INSERT INTO embeddings
                     (item_path, header, content, embedding, item_type)
                     VALUES (?, ?, ?, ?, ?)
                     """,
@@ -48,7 +48,7 @@ async def mock_ingest():
             # Add crate metadata
             await db.execute(
                 """
-                INSERT INTO crate_metadata 
+                INSERT INTO crate_metadata
                 (name, version, description)
                 VALUES (?, ?, ?)
                 """,
@@ -104,7 +104,7 @@ def test_get_item_doc_fuzzy_match_typo(mock_ingest):
         detail = data["detail"]
 
         # Check that suggestions are in the error message
-        assert "tokio::spawn" in detail
+        assert "tokio::task::spawn" in detail
         assert "Did you mean" in detail
 
 
@@ -170,7 +170,7 @@ def test_fuzzy_suggestions_limit(mock_ingest):
             "/mcp/tools/get_item_doc",
             json={
                 "crate_name": "tokio",
-                "item_path": "spawn",  # Should match multiple items
+                "item_path": "spaw",  # Partial match, not an alias
             },
         )
 
@@ -219,7 +219,203 @@ def test_error_response_format(mock_ingest):
         # FastAPI wraps HTTPException detail in a standard error format
         assert "detail" in data
         detail = data["detail"]
-        
+
         # Should be a string with our error message
         assert isinstance(detail, str)
+        assert "No documentation found" in detail
+
+
+@pytest.fixture
+async def mock_ingest_with_aliases():
+    """Mock the ingest_crate function with test data for alias resolution."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = Path(tmp.name)
+
+        # Initialize database
+        await init_database(db_path)
+
+        # Add test data with ACTUAL paths (not aliases)
+        async with aiosqlite.connect(db_path) as db:
+            # Insert items with their real rustdoc paths
+            test_items = [
+                # serde items - real paths
+                (
+                    "serde::de::Deserialize",
+                    "trait Deserialize",
+                    "A data structure that can be deserialized",
+                ),
+                (
+                    "serde::ser::Serialize",
+                    "trait Serialize",
+                    "A data structure that can be serialized",
+                ),
+                # tokio items - real paths
+                ("tokio::task::spawn", "fn spawn", "Spawns a new asynchronous task"),
+                (
+                    "tokio::task::JoinHandle",
+                    "struct JoinHandle",
+                    "Handle to a spawned task",
+                ),
+                # std items - real paths
+                (
+                    "std::collections::HashMap",
+                    "struct HashMap",
+                    "A hash map implementation",
+                ),
+                ("std::vec::Vec", "struct Vec", "A contiguous growable array"),
+            ]
+
+            for item_path, header, content in test_items:
+                # Create dummy embedding
+                dummy_embedding = b"\x00" * (384 * 4)  # 384 float32 values
+
+                await db.execute(
+                    """
+                    INSERT INTO embeddings
+                    (item_path, header, content, embedding, item_type)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (item_path, header, content, dummy_embedding, "trait"),
+                )
+
+            # Add crate metadata
+            for crate_name in ["serde", "tokio", "std"]:
+                await db.execute(
+                    """
+                    INSERT INTO crate_metadata 
+                    (name, version, description)
+                    VALUES (?, ?, ?)
+                    """,
+                    (crate_name, "latest", f"The {crate_name} crate"),
+                )
+
+            await db.commit()
+
+        # Mock ingest_crate to return our test database
+        with patch("docsrs_mcp.app.ingest_crate") as mock:
+            mock.return_value = db_path
+            yield mock
+
+        # Cleanup
+        db_path.unlink(missing_ok=True)
+
+
+def test_alias_resolution_serde_deserialize(mock_ingest_with_aliases):
+    """Test that serde::Deserialize alias resolves to serde::de::Deserialize."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/tools/get_item_doc",
+            json={
+                "crate_name": "serde",
+                "item_path": "serde::Deserialize",  # Using alias
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "content" in data
+        assert "deserialized" in data["content"].lower()
+
+
+def test_alias_resolution_serde_serialize(mock_ingest_with_aliases):
+    """Test that serde::Serialize alias resolves to serde::ser::Serialize."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/tools/get_item_doc",
+            json={
+                "crate_name": "serde",
+                "item_path": "serde::Serialize",  # Using alias
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "content" in data
+        assert "serialized" in data["content"].lower()
+
+
+def test_alias_resolution_tokio_spawn(mock_ingest_with_aliases):
+    """Test that tokio::spawn alias resolves to tokio::task::spawn."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/tools/get_item_doc",
+            json={
+                "crate_name": "tokio",
+                "item_path": "tokio::spawn",  # Using alias
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "content" in data
+        assert "asynchronous task" in data["content"]
+
+
+def test_alias_resolution_std_hashmap(mock_ingest_with_aliases):
+    """Test that std::HashMap alias resolves to std::collections::HashMap."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/tools/get_item_doc",
+            json={
+                "crate_name": "std",
+                "item_path": "std::HashMap",  # Using alias
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "content" in data
+        assert "hash map" in data["content"].lower()
+
+
+def test_alias_resolution_std_vec(mock_ingest_with_aliases):
+    """Test that std::Vec alias resolves to std::vec::Vec."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/tools/get_item_doc",
+            json={
+                "crate_name": "std",
+                "item_path": "std::Vec",  # Using alias
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "content" in data
+        assert "array" in data["content"].lower() or "vec" in data["content"].lower()
+
+
+def test_alias_resolution_with_exact_path(mock_ingest_with_aliases):
+    """Test that exact paths still work when aliases are enabled."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/tools/get_item_doc",
+            json={
+                "crate_name": "serde",
+                "item_path": "serde::de::Deserialize",  # Using exact path
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "content" in data
+        assert "deserialized" in data["content"].lower()
+
+
+def test_alias_resolution_non_existent_alias(mock_ingest_with_aliases):
+    """Test that non-existent paths still trigger fuzzy matching."""
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/tools/get_item_doc",
+            json={
+                "crate_name": "serde",
+                "item_path": "serde::NotAnAlias",  # Not an alias
+            },
+        )
+
+        # Should return 404 with fuzzy suggestions
+        assert response.status_code == 404
+        data = response.json()
+        assert "detail" in data
+        detail = data["detail"]
         assert "No documentation found" in detail

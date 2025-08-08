@@ -9,9 +9,66 @@ from rapidfuzz.utils import default_process
 
 logger = logging.getLogger(__name__)
 
+# Path aliases for common Rust documentation patterns
+PATH_ALIASES = {
+    # serde aliases
+    "serde::Serialize": "serde::ser::Serialize",
+    "serde::Deserialize": "serde::de::Deserialize",
+    "serde::Serializer": "serde::ser::Serializer",
+    "serde::Deserializer": "serde::de::Deserializer",
+    # tokio aliases
+    "tokio::spawn": "tokio::task::spawn",
+    "tokio::JoinHandle": "tokio::task::JoinHandle",
+    "tokio::select": "tokio::macros::select",
+    # std aliases
+    "std::HashMap": "std::collections::HashMap",
+    "std::HashSet": "std::collections::HashSet",
+    "std::BTreeMap": "std::collections::BTreeMap",
+    "std::BTreeSet": "std::collections::BTreeSet",
+    "std::VecDeque": "std::collections::VecDeque",
+    "std::Vec": "std::vec::Vec",
+    "std::Result": "std::result::Result",
+    "std::Option": "std::option::Option",
+}
+
 # Simple path cache with TTL
 _path_cache: dict[str, tuple[float, list[str]]] = {}
 PATH_CACHE_TTL = 300  # 5 minutes
+
+
+def resolve_path_alias(crate_name: str, item_path: str) -> str:
+    """
+    Resolve common path aliases to their actual rustdoc paths.
+
+    Returns the resolved path or original if no alias exists.
+    O(1) operation with no exceptions.
+
+    Args:
+        crate_name: Name of the crate being searched
+        item_path: The path to resolve
+
+    Returns:
+        The resolved path or original if no alias found
+    """
+    # Handle crate-level paths
+    if item_path == "crate":
+        return item_path
+
+    # Check for direct alias with crate prefix
+    crate_qualified = f"{crate_name}::{item_path}"
+    if crate_qualified in PATH_ALIASES:
+        resolved = PATH_ALIASES[crate_qualified]
+        logger.debug(f"Resolved crate-specific alias {item_path} -> {resolved}")
+        return resolved
+
+    # Try without crate prefix for common patterns
+    if item_path in PATH_ALIASES:
+        resolved = PATH_ALIASES[item_path]
+        logger.debug(f"Resolved alias {item_path} -> {resolved}")
+        return resolved
+
+    # No alias found, return original
+    return item_path
 
 
 async def get_fuzzy_suggestions(

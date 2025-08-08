@@ -9,7 +9,7 @@ from slowapi.errors import RateLimitExceeded
 
 from .database import get_module_tree as get_module_tree_from_db
 from .database import search_embeddings
-from .fuzzy_resolver import get_fuzzy_suggestions_with_fallback
+from .fuzzy_resolver import get_fuzzy_suggestions_with_fallback, resolve_path_alias
 from .ingest import get_embedding_model, ingest_crate
 from .middleware import limiter, rate_limit_handler
 from .models import (
@@ -453,11 +453,14 @@ async def get_item_doc(request: Request, params: GetItemDocRequest):
         # Ingest crate if not already done
         db_path = await ingest_crate(params.crate_name, params.version)
 
+        # Resolve any path aliases first
+        resolved_path = resolve_path_alias(params.crate_name, params.item_path)
+
         # Search for the specific item
         async with aiosqlite.connect(db_path) as db:
             cursor = await db.execute(
                 "SELECT content FROM embeddings WHERE item_path = ? LIMIT 1",
-                (params.item_path,),
+                (resolved_path,),
             )
             row = await cursor.fetchone()
 

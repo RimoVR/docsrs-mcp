@@ -42,6 +42,88 @@ Ranking weights can be customized via environment variables:
 - `DOCSRS_CACHE_SIZE`: Max cache entries (default: 1000)
 - `DOCSRS_CACHE_TTL`: Cache TTL in seconds (default: 900)
 
+## Path Alias Resolution
+
+The docsrs-mcp server includes intelligent path alias resolution to improve user experience when querying common Rust documentation paths. This feature automatically resolves commonly used but incorrect paths to their actual rustdoc locations.
+
+### Features
+
+- **O(1) Performance**: Path resolution is a constant-time dictionary lookup operation
+- **Zero Exceptions**: The resolver gracefully handles all inputs without throwing exceptions
+- **Transparent Integration**: Automatically applied in the `get_item_doc` endpoint before path lookup
+- **Comprehensive Coverage**: Supports aliases for popular crates including `serde`, `tokio`, and `std`
+
+### Supported Path Aliases
+
+The `PATH_ALIASES` dictionary includes mappings for commonly misremembered paths:
+
+#### Serde Aliases
+- `serde::Serialize` → `serde::ser::Serialize`
+- `serde::Deserialize` → `serde::de::Deserialize`
+- `serde::Serializer` → `serde::ser::Serializer`
+- `serde::Deserializer` → `serde::de::Deserializer`
+
+#### Tokio Aliases
+- `tokio::spawn` → `tokio::task::spawn`
+- `tokio::JoinHandle` → `tokio::task::JoinHandle`
+- `tokio::select` → `tokio::macros::select`
+
+#### Standard Library Aliases
+- `std::HashMap` → `std::collections::HashMap`
+- `std::HashSet` → `std::collections::HashSet`
+- `std::BTreeMap` → `std::collections::BTreeMap`
+- `std::BTreeSet` → `std::collections::BTreeSet`
+- `std::VecDeque` → `std::collections::VecDeque`
+- `std::Vec` → `std::vec::Vec`
+- `std::Result` → `std::result::Result`
+- `std::Option` → `std::option::Option`
+
+### API Integration
+
+The `resolve_path_alias()` function is automatically called by the `get_item_doc` endpoint:
+
+```python
+# Resolve any path aliases first
+resolved_path = resolve_path_alias(params.crate_name, params.item_path)
+
+# Search for the specific item using resolved path
+cursor = await db.execute(
+    "SELECT content FROM embeddings WHERE item_path = ? LIMIT 1",
+    (resolved_path,),
+)
+```
+
+### Function Reference
+
+#### `resolve_path_alias(crate_name: str, item_path: str) -> str`
+
+Resolves common path aliases to their actual rustdoc paths.
+
+**Parameters:**
+- `crate_name`: Name of the crate being searched
+- `item_path`: The path to resolve (e.g., "serde::Serialize")
+
+**Returns:**
+- The resolved path if an alias exists, otherwise the original path
+
+**Performance:**
+- O(1) dictionary lookup operation
+- No exceptions thrown under any input conditions
+- Handles crate-specific and global path patterns
+
+**Example Usage:**
+```python
+from docsrs_mcp.fuzzy_resolver import resolve_path_alias
+
+# Resolves to actual rustdoc path
+resolved = resolve_path_alias("serde", "serde::Serialize")
+# Returns: "serde::ser::Serialize"
+
+# Returns original if no alias found
+original = resolve_path_alias("tokio", "tokio::net::TcpListener")
+# Returns: "tokio::net::TcpListener"
+```
+
 ## Streaming Architecture
 
 ### Memory-Efficient Processing Pipeline
