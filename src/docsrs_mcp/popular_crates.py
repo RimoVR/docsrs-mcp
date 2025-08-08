@@ -6,6 +6,7 @@ in the background to eliminate cold-start latency for commonly queried Rust crat
 
 import asyncio
 import logging
+import random
 import tempfile
 import time
 from datetime import datetime, timedelta
@@ -705,16 +706,221 @@ class PreIngestionWorker:
             )
 
 
+class IngestionScheduler:
+    """Background scheduler for periodic crate ingestion."""
+
+    def __init__(self, manager: PopularCratesManager, worker: PreIngestionWorker):
+        self.manager = manager
+        self.worker = worker
+        self.enabled = config.SCHEDULER_ENABLED
+        self.interval_hours = config.SCHEDULER_INTERVAL_HOURS
+        self.jitter_percent = config.SCHEDULER_JITTER_PERCENT
+        self.background_tasks: set[asyncio.Task] = (
+            set()
+        )  # Strong references to prevent GC
+        self._scheduler_task: asyncio.Task | None = None
+        self._last_run: datetime | None = None
+        self._next_run: datetime | None = None
+        self._runs_completed = 0
+        self._is_running = False
+        self._start_time: datetime | None = None
+
+    async def start(self):
+        """Non-blocking scheduler startup."""
+        if not self.enabled:
+            logger.debug("Scheduler is disabled")
+            return
+
+        self._start_time = datetime.now()
+        task = asyncio.create_task(self._run())
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+        self._scheduler_task = task
+        logger.info(f"Background scheduler started (interval: {self.interval_hours}h)")
+
+    async def _run(self):
+        """Main scheduler loop with interval-based execution."""
+        while True:
+            try:
+                self._next_run = datetime.now() + timedelta(hours=self.interval_hours)
+                await self._schedule_ingestion()
+
+                # Calculate next run time with jitter
+                interval_seconds = await self._calculate_next_interval()
+                await asyncio.sleep(interval_seconds)
+
+            except asyncio.CancelledError:
+                logger.info("Scheduler cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Scheduler error: {e}")
+                # Backoff on error
+                await asyncio.sleep(300)  # 5 min backoff
+
+    async def _calculate_next_interval(self) -> float:
+        """Calculate next run interval with jitter to prevent thundering herd."""
+        base_interval = self.interval_hours * 3600
+
+        # Add jitter (±jitter_percent%)
+        jitter_range = base_interval * (self.jitter_percent / 100.0)
+        jitter = random.uniform(-jitter_range, jitter_range)
+
+        return base_interval + jitter
+
+    async def _schedule_ingestion(self):
+        """Schedule a batch of popular crates for ingestion."""
+        self._is_running = True
+        self._last_run = datetime.now()
+
+        try:
+            # Check memory before scheduling
+            if not await self._should_schedule():
+                logger.warning(
+                    "Skipping scheduled ingestion due to resource constraints"
+                )
+                return
+
+            logger.info(f"Starting scheduled ingestion run #{self._runs_completed + 1}")
+
+            # Get fresh list of popular crates
+            crates = await self.manager.get_popular_crates_with_metadata()
+
+            # Reset worker stats for this run
+            self.worker.stats = {
+                "success": 0,
+                "failed": 0,
+                "skipped": 0,
+                "total": len(crates),
+            }
+            self.worker._processed_crates.clear()
+
+            # Add crates to worker's priority queue
+            for crate in crates:
+                if crate.name not in self.worker._processed_crates:
+                    priority = -crate.downloads if crate.downloads > 0 else 0
+                    await self.worker.queue.put((priority, crate.name))
+
+            # Process the queue (reuse existing worker logic)
+            await self.worker.queue.join()
+
+            self._runs_completed += 1
+            logger.info(
+                f"Scheduled ingestion run #{self._runs_completed} completed. "
+                f"Success: {self.worker.stats['success']}, "
+                f"Failed: {self.worker.stats['failed']}, "
+                f"Skipped: {self.worker.stats['skipped']}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error in scheduled ingestion: {e}")
+        finally:
+            self._is_running = False
+
+    async def _should_schedule(self) -> bool:
+        """Check if scheduling should proceed based on system resources."""
+        try:
+            import psutil
+
+            memory = psutil.virtual_memory()
+
+            if memory.percent > 80:
+                logger.warning(
+                    f"High memory usage ({memory.percent}%), delaying schedule"
+                )
+                return False
+
+        except ImportError:
+            # psutil not available, proceed anyway
+            pass
+
+        return True
+
+    async def _monitor_schedule(self):
+        """Monitor and log scheduler activity periodically."""
+        while True:
+            try:
+                await asyncio.sleep(300)  # Log every 5 minutes
+
+                if self._scheduler_task and not self._scheduler_task.done():
+                    status = self.get_scheduler_status()
+                    logger.info(
+                        f"Scheduler status: Runs={status['runs_completed']}, "
+                        f"Next run in {status['next_run_minutes']:.1f} minutes"
+                    )
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in scheduler monitor: {e}")
+
+    def get_scheduler_status(self) -> dict[str, Any]:
+        """Get scheduler status for health endpoint."""
+        status = {
+            "enabled": self.enabled,
+            "is_running": self._is_running,
+            "runs_completed": self._runs_completed,
+            "interval_hours": self.interval_hours,
+            "jitter_percent": self.jitter_percent,
+        }
+
+        if self._start_time:
+            status["uptime_seconds"] = (
+                datetime.now() - self._start_time
+            ).total_seconds()
+
+        if self._last_run:
+            status["last_run"] = self._last_run.isoformat()
+            status["last_run_minutes_ago"] = (
+                datetime.now() - self._last_run
+            ).total_seconds() / 60
+
+        if self._next_run:
+            status["next_run"] = self._next_run.isoformat()
+            status["next_run_minutes"] = max(
+                0, (self._next_run - datetime.now()).total_seconds() / 60
+            )
+
+        # Include worker stats if available
+        if self.worker:
+            status["last_run_stats"] = {
+                "success": self.worker.stats.get("success", 0),
+                "failed": self.worker.stats.get("failed", 0),
+                "skipped": self.worker.stats.get("skipped", 0),
+            }
+
+        return status
+
+    async def stop(self):
+        """Stop the scheduler gracefully."""
+        if self._scheduler_task:
+            self._scheduler_task.cancel()
+            try:
+                await self._scheduler_task
+            except asyncio.CancelledError:
+                pass
+
+        # Cancel all background tasks
+        for task in self.background_tasks:
+            task.cancel()
+
+        # Wait for all tasks to complete
+        await asyncio.gather(*self.background_tasks, return_exceptions=True)
+        self.background_tasks.clear()
+
+        logger.info("Scheduler stopped")
+
+
 # Global references for monitoring
 _popular_crates_manager: PopularCratesManager | None = None
 _pre_ingestion_worker: PreIngestionWorker | None = None
+_ingestion_scheduler: IngestionScheduler | None = None
 
 
 async def start_pre_ingestion() -> tuple[
     PopularCratesManager | None, PreIngestionWorker | None
 ]:
-    """Start pre-ingestion and return manager and worker for monitoring."""
-    global _popular_crates_manager, _pre_ingestion_worker
+    """Start pre-ingestion and scheduler, return manager and worker for monitoring."""
+    global _popular_crates_manager, _pre_ingestion_worker, _ingestion_scheduler
 
     if not config.PRE_INGEST_ENABLED:
         logger.debug("Pre-ingestion is disabled")
@@ -723,7 +929,24 @@ async def start_pre_ingestion() -> tuple[
     try:
         _popular_crates_manager = PopularCratesManager()
         _pre_ingestion_worker = PreIngestionWorker(_popular_crates_manager)
+
+        # Start the worker
         await _pre_ingestion_worker.start()
+
+        # Create and start the scheduler if enabled
+        if config.SCHEDULER_ENABLED:
+            _ingestion_scheduler = IngestionScheduler(
+                _popular_crates_manager, _pre_ingestion_worker
+            )
+            await _ingestion_scheduler.start()
+
+            # Also start the monitor task
+            monitor_task = asyncio.create_task(_ingestion_scheduler._monitor_schedule())
+            _ingestion_scheduler.background_tasks.add(monitor_task)
+            monitor_task.add_done_callback(
+                _ingestion_scheduler.background_tasks.discard
+            )
+
         return _popular_crates_manager, _pre_ingestion_worker
     except Exception as e:
         # Don't let pre-ingestion errors prevent server startup
@@ -736,6 +959,7 @@ def get_popular_crates_status() -> dict[str, Any]:
     status = {
         "cache_stats": {},
         "ingestion_stats": {},
+        "scheduler_stats": {},
     }
 
     if _popular_crates_manager:
@@ -743,5 +967,8 @@ def get_popular_crates_status() -> dict[str, Any]:
 
     if _pre_ingestion_worker:
         status["ingestion_stats"] = _pre_ingestion_worker.get_ingestion_stats()
+
+    if _ingestion_scheduler:
+        status["scheduler_stats"] = _ingestion_scheduler.get_scheduler_status()
 
     return status

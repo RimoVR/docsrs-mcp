@@ -2992,6 +2992,37 @@ The popular crate pre-ingestion system proactively processes high-traffic crates
 
 **Memory Monitoring**: Continuously monitors memory usage and reduces concurrency when approaching 1GB limit to prevent OOM conditions.
 
+### Background Ingestion Scheduler Architecture
+
+The IngestionScheduler provides periodic re-ingestion of popular crates to keep the cache fresh, implementing a robust background processing system with intelligent resource management.
+
+**Non-blocking Startup Pattern**: Uses `asyncio.create_task()` pattern for background execution, ensuring the scheduler starts without blocking server initialization.
+
+**Jitter Implementation**: Applies random variance (±10% by default) to scheduled intervals, preventing thundering herd problems when multiple instances coordinate.
+
+**Memory-Aware Scheduling**: Monitors system memory usage before scheduling ingestion tasks, enforcing an 80% memory threshold to maintain system stability.
+
+**Strong Task References**: Maintains explicit references to background tasks, preventing garbage collection and ensuring reliable long-running operations.
+
+**Configuration-Driven Behavior**: Supports runtime configuration through environment variables:
+- `SCHEDULER_ENABLED`: Enable/disable scheduler (default: true)
+- `SCHEDULER_INTERVAL_HOURS`: Hours between ingestion cycles (default: 6)  
+- `SCHEDULER_JITTER_PERCENT`: Jitter percentage for interval variance (default: 10)
+
+**Integration Points**:
+- **PopularCratesManager Integration**: Leverages existing popular crates discovery for scheduling targets
+- **PreIngestionWorker Reuse**: Delegates actual ingestion work to established worker infrastructure
+- **Health Endpoint Exposure**: Provides scheduler status and statistics via `/health` endpoint
+- **Startup Integration**: Automatically initialized during app startup when enabled
+
+**Data Flow Process**:
+1. **Scheduler Wake**: Activates at configured interval with applied jitter
+2. **Memory Check**: Verifies system memory usage below 80% threshold  
+3. **Crate Discovery**: Fetches fresh popular crates list from PopularCratesManager
+4. **Priority Queuing**: Schedules crates in priority order based on download counts
+5. **Asynchronous Processing**: Workers process ingestion queue concurrently
+6. **Status Reporting**: Exposes operational metrics through health endpoint
+
 ### Enhanced Data Flow Architecture
 **Complete Data Flow Process**:
 1. **PopularCratesManager** fetches from crates.io API with comprehensive metadata
@@ -3002,6 +3033,7 @@ The popular crate pre-ingestion system proactively processes high-traffic crates
 ```mermaid
 sequenceDiagram
     participant Startup as Server Startup (app.py/mcp_server.py)
+    participant Scheduler as IngestionScheduler
     participant Manager as PopularCratesManager
     participant DiskCache as Msgpack Disk Cache
     participant Worker as PreIngestionWorker
@@ -3011,6 +3043,7 @@ sequenceDiagram
     participant Health as Health Endpoint
     
     Startup->>Manager: asyncio.create_task(start_background_tasks())
+    Startup->>Scheduler: asyncio.create_task(start()) [if enabled]
     
     alt Cache Valid (< 75% TTL)
         Manager->>DiskCache: Load msgpack cache
@@ -3043,10 +3076,25 @@ sequenceDiagram
     Manager->>Health: Expose cache statistics
     Manager->>Health: Expose ingestion metrics
     
+    loop Periodic Scheduler (every 6h ± jitter)
+        Scheduler->>Monitor: Check system memory usage
+        alt Memory < 80% threshold
+            Scheduler->>Manager: get_popular_crates()
+            Manager-->>Scheduler: Return fresh crate list
+            Scheduler->>Worker: schedule_popular_crates()
+            Worker->>Queue: Enqueue crates by priority
+        else Memory >= 80% threshold
+            Scheduler->>Scheduler: Skip cycle - memory pressure
+        end
+    end
+    
+    Scheduler->>Health: Expose scheduler status
+    
     Note over Manager: Smart refresh at 75% TTL
     Note over DiskCache: msgpack + file locking
     Note over Worker: Adaptive concurrency control
     Note over Monitor: 1GB memory threshold
+    Note over Scheduler: Jitter prevents thundering herd
 ```
 
 ### Enhanced Module Architecture (popular_crates.py)
@@ -3131,12 +3179,34 @@ classDiagram
         +should_reduce_concurrency() -> bool
     }
     
+    class IngestionScheduler {
+        +enabled: bool
+        +interval_hours: int (default=6)
+        +jitter_percent: int (default=10)
+        +memory_threshold: float (default=0.8)
+        +scheduler_task: asyncio.Task
+        +popular_manager: PopularCratesManager
+        +worker: PreIngestionWorker
+        +last_run: datetime
+        +next_run: datetime
+        +start() -> None
+        +stop() -> None
+        +get_status() -> Dict
+        +calculate_next_run() -> datetime
+        +check_memory_usage() -> bool
+        -_scheduler_loop() -> None
+        -_apply_jitter(interval: int) -> int
+        -_schedule_popular_crates() -> None
+    }
+    
     PopularCratesManager --> PreIngestionWorker
     PopularCratesManager --> CacheStatistics
     PopularCratesManager --> CircuitBreakerState
     PreIngestionWorker --> PriorityQueue
     PreIngestionWorker --> MemoryMonitor
     PriorityQueue --> PreIngestionItem
+    IngestionScheduler --> PopularCratesManager
+    IngestionScheduler --> PreIngestionWorker
 ```
 
 ### Integration Points
@@ -3144,7 +3214,16 @@ classDiagram
 #### Startup Integration
 - **app.py**: `asyncio.create_task(popular_manager.start_background_tasks())` during FastAPI startup
 - **mcp_server.py**: `PreIngestionWorker` initialization in MCP server startup sequence
+- **Scheduler**: `asyncio.create_task(scheduler.start())` when `SCHEDULER_ENABLED=true`
 - **Non-blocking**: Background tasks don't delay server startup
+
+#### Scheduler Integration
+- **Configuration-Driven**: Environment variables control scheduler behavior and intervals
+- **Memory-Aware**: Monitors system memory before triggering ingestion cycles
+- **Jitter Implementation**: Random variance prevents coordinated load spikes across instances
+- **Health Monitoring**: Scheduler status exposed via `/health` endpoint with next run time
+- **Graceful Shutdown**: Scheduler tasks cleanly terminate during application shutdown
+- **Task References**: Strong references prevent garbage collection of long-running scheduler tasks
 
 #### Concurrency Control
 - **asyncio.Semaphore(3)**: Limits concurrent pre-ingestion workers to 3 maximum

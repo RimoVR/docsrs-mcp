@@ -2382,6 +2382,117 @@
         "Memory management optimization studies for bulk data processing"
       ]
     },
+    "asyncioTaskManagement": {
+      "overview": "Research findings on asyncio task management, scheduling patterns, and background task best practices",
+      "taskReferences": {
+        "weakReferences": {
+          "issue": "Tasks created with asyncio.create_task() only maintain weak references",
+          "problem": "Tasks can be garbage collected if not properly referenced, causing silent failures",
+          "solution": "Must keep strong references in a set to prevent garbage collection",
+          "pattern": "background_tasks.add(task); task.add_done_callback(background_tasks.discard)",
+          "rationale": "Ensures tasks complete even if the creating scope is garbage collected",
+          "implementation": "Use a module-level or application-level set to track background tasks"
+        }
+      },
+      "python311Improvements": {
+        "taskGroup": {
+          "feature": "TaskGroup provides structured concurrency with automatic cancellation",
+          "benefit": "Simplified error handling and resource cleanup for related tasks",
+          "version": "Available in Python 3.11+",
+          "useCase": "Managing multiple related async operations with coordinated lifecycle"
+        },
+        "eagerTasks": {
+          "feature": "Python 3.12 eager tasks improve performance 2-5x for synchronous coroutines",
+          "benefit": "Significant performance improvement for I/O bound operations",
+          "recommendation": "Consider upgrading for production deployments to leverage performance gains",
+          "compatibility": "Backward compatible with existing asyncio code"
+        }
+      },
+      "memoryManagement": {
+        "monitoring": {
+          "library": "psutil.virtual_memory()",
+          "capability": "Provides cross-platform memory monitoring",
+          "integration": "Use for real-time memory usage tracking in schedulers",
+          "reliability": "Works consistently across Linux, macOS, and Windows platforms"
+        },
+        "thresholds": {
+          "recommended": "80% memory threshold recommended for scheduler decisions",
+          "rationale": "Provides buffer for memory spikes while maintaining system responsiveness",
+          "implementation": "Use for adaptive concurrency and batch size decisions",
+          "benefit": "Adaptive concurrency based on memory pressure improves stability"
+        }
+      },
+      "schedulingPatterns": {
+        "intervalScheduling": {
+          "jitter": {
+            "technique": "Add jitter (±10%) to prevent thundering herd effect",
+            "implementation": "Apply random offset to scheduled intervals",
+            "benefit": "Distributes load and prevents synchronized resource contention",
+            "formula": "base_interval ± (base_interval * 0.1 * random())"
+          },
+          "simpleScheduling": {
+            "method": "Use asyncio.sleep() for simple interval-based scheduling",
+            "suitability": "Sufficient for basic periodic tasks without complex timing requirements",
+            "limitation": "Not suitable for cron-like scheduling patterns"
+          }
+        },
+        "complexScheduling": {
+          "requirement": "Complex cron-like scheduling would require APScheduler library",
+          "rationale": "Built-in asyncio doesn't provide advanced scheduling features",
+          "recommendation": "Use APScheduler for production systems requiring complex scheduling logic"
+        }
+      },
+      "fastAPIIntegration": {
+        "backgroundTasks": {
+          "resourceSeparation": {
+            "principle": "Create separate resources in background tasks rather than reusing",
+            "rationale": "Prevents resource conflicts and ensures proper isolation",
+            "implementation": "Instantiate new database connections, HTTP clients in background tasks",
+            "benefit": "Avoids concurrency issues with shared resources"
+          },
+          "nonBlockingStartup": {
+            "requirement": "Non-blocking startup critical for server responsiveness",
+            "implementation": "Use asyncio.create_task() to start background tasks without awaiting",
+            "benefit": "Server remains responsive during background task initialization",
+            "pattern": "Start background tasks in startup event handler without blocking"
+          },
+          "errorIsolation": {
+            "principle": "Background task errors shouldn't prevent server startup",
+            "implementation": "Use try-catch blocks and proper error logging in background tasks",
+            "benefit": "Server remains available even if background processes fail",
+            "monitoring": "Log background task errors for operational visibility"
+          }
+        }
+      },
+      "bestPractices": {
+        "taskManagement": [
+          "Always maintain strong references to asyncio tasks to prevent garbage collection",
+          "Use task.add_done_callback() to automatically clean up task references",
+          "Implement proper error handling in background tasks to prevent silent failures",
+          "Use asyncio.create_task() for fire-and-forget background operations"
+        ],
+        "scheduling": [
+          "Add random jitter to periodic tasks to prevent thundering herd effects",
+          "Use memory monitoring to implement adaptive scheduling policies",
+          "Prefer simple asyncio.sleep() for basic interval scheduling",
+          "Consider APScheduler for complex cron-like scheduling requirements"
+        ],
+        "fastAPISpecific": [
+          "Create separate resource instances for background tasks",
+          "Start background tasks in startup event handlers without blocking",
+          "Implement proper error isolation between background tasks and main server",
+          "Use FastAPI's dependency injection for background task resource management"
+        ]
+      },
+      "sources": [
+        "Python asyncio documentation - Task management patterns",
+        "Python 3.11+ TaskGroup implementation analysis",
+        "Python 3.12 eager tasks performance benchmarks",
+        "FastAPI background tasks best practices documentation",
+        "Production asyncio scheduler implementations",
+        "Memory management patterns in long-running async applications"
+      ]
+    },
     "mcpToolDescriptionOptimization": {
       "overview": "Research findings on optimizing MCP tool descriptions for token efficiency and clarity",
       "tokenEfficientPatterns": {
@@ -2594,7 +2705,18 @@
       "Use sqlite-vec for sub-second response times in code example similarity searches",
       "Pre-serialize vector embeddings with sqlite_vec.serialize_float32() for efficient storage",
       "Load sqlite-vec extension before using vec_distance_L2 function for vector operations",
-      "Handle automatic conversion from legacy data formats to maintain compatibility during upgrades"
+      "Handle automatic conversion from legacy data formats to maintain compatibility during upgrades",
+      "CRITICAL: Maintain strong references to asyncio tasks using background_tasks.add(task) pattern",
+      "Use task.add_done_callback(background_tasks.discard) for automatic task cleanup",
+      "Add jitter (±10%) to scheduled intervals to prevent thundering herd effects",
+      "Use psutil.virtual_memory() with 80% threshold for adaptive scheduler decisions",
+      "Create separate resource instances in background tasks to avoid concurrency conflicts",
+      "Start background tasks non-blocking in FastAPI startup handlers for server responsiveness",
+      "Implement error isolation in background tasks to prevent server startup failures",
+      "Consider Python 3.11+ TaskGroup for structured concurrency with automatic cancellation",
+      "Upgrade to Python 3.12 for 2-5x performance improvement in eager task execution",
+      "Use asyncio.sleep() for simple interval-based scheduling rather than complex libraries",
+      "Use APScheduler only when complex cron-like scheduling patterns are required"
     ],
     "performance": [
       "Use semantic chunking with 50-200 tokens for optimal search granularity",
@@ -2709,7 +2831,13 @@
       "Use filelock library for concurrent access control during cache updates",
       "Monitor memory usage with psutil and implement adaptive concurrency at 900MB threshold",
       "Process popular crates in priority queue order (by download count) for maximum cache efficiency",
-      "Use msgpack 1.0.8+ for Python 3.12 compatibility in binary serialization"
+      "Use msgpack 1.0.8+ for Python 3.12 compatibility in binary serialization",
+      "Use background_tasks set for strong task references to prevent asyncio task garbage collection",
+      "Apply ±10% jitter to scheduled intervals for distributed load and thundering herd prevention",
+      "Monitor memory usage with psutil at 80% threshold for adaptive scheduler performance decisions",
+      "Use Python 3.12 eager tasks for 2-5x performance improvement in synchronous coroutines",
+      "Implement non-blocking background task startup to maintain FastAPI server responsiveness",
+      "Create separate resource instances for background tasks to avoid resource contention performance impacts"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

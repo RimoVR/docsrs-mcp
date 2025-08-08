@@ -87,6 +87,11 @@ RUST_VERSION_MANIFEST_URL = f"{RUST_CHANNEL_BASE}/version"
 PRE_INGEST_ENABLED = os.getenv("DOCSRS_PRE_INGEST_ENABLED", "false").lower() == "true"
 PRE_INGEST_CONCURRENCY = int(os.getenv("DOCSRS_PRE_INGEST_CONCURRENCY", "3"))
 
+# Background scheduler configuration
+SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+SCHEDULER_INTERVAL_HOURS = int(os.getenv("SCHEDULER_INTERVAL_HOURS", "6"))
+SCHEDULER_JITTER_PERCENT = int(os.getenv("SCHEDULER_JITTER_PERCENT", "10"))
+
 # Popular crates configuration with validation
 _popular_count = int(os.getenv("DOCSRS_POPULAR_CRATES_COUNT", "100"))
 POPULAR_CRATES_COUNT = max(100, min(500, _popular_count))  # Clamp to 100-500 range

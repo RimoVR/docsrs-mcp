@@ -1509,32 +1509,37 @@
         "id": "pre-ingest-1.2",
         "title": "Implement background ingestion scheduler",
         "description": "Create background task scheduler for pre-ingesting popular crates",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": ["pre-ingest-1.1"],
         "relatedTasks": ["pre-ingest-1.3", "pre-ingest-1.4"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T18:00:00Z",
+          "implementation": "Added IngestionScheduler class that periodically re-ingests popular crates",
+          "notes": "Added scheduler configuration variables (SCHEDULER_ENABLED, SCHEDULER_INTERVAL_HOURS, SCHEDULER_JITTER_PERCENT). Implemented IngestionScheduler class with non-blocking startup. Includes jitter to prevent thundering herd. Memory-aware scheduling with psutil monitoring. Health endpoint integration for monitoring. Backward compatible - can be disabled via environment variable. No roadblocks encountered. Implementation complete and tested."
+        },
         "subtasks": [
           {
             "id": "pre-ingest-1.2.1",
             "title": "Design scheduler architecture",
             "description": "Define background task scheduling system architecture",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "pre-ingest-1.2.2",
             "title": "Implement asyncio-based scheduler",
             "description": "Create async task scheduler for background ingestion",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "pre-ingest-1.2.3",
             "title": "Add ingestion rate limiting",
             "description": "Implement rate limiting to respect docs.rs resource usage",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           }
         ]
       },

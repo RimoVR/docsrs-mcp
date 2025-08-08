@@ -1179,6 +1179,69 @@
             "typeExtraction": "Both trait and for fields may contain complex type information requiring careful parsing",
             "nameGeneration": "Generate meaningful searchable names from otherwise empty name fields in rustdoc JSON"
           }
+        },
+        {
+          "lesson": "Background task reference management patterns",
+          "context": "Implementing background schedulers with proper task lifecycle management",
+          "details": "Background tasks must maintain strong references to prevent garbage collection. Use a set data structure (self.background_tasks = set()) to store task references, then add callback functions with task.add_done_callback(lambda t: self.background_tasks.discard(t)) for automatic cleanup when tasks complete",
+          "impact": "Prevents background tasks from being garbage collected prematurely while ensuring proper cleanup to avoid memory leaks",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/scheduler.py"],
+          "codePattern": "self.background_tasks = set(); task = asyncio.create_task(func()); self.background_tasks.add(task); task.add_done_callback(lambda t: self.background_tasks.discard(t))"
+        },
+        {
+          "lesson": "Jitter implementation for distributed scheduler coordination",
+          "context": "Preventing synchronized execution when multiple schedulers run simultaneously",
+          "details": "Add random jitter to scheduler intervals using formula: base_interval + random.uniform(-jitter_range, jitter_range). Default ±10% variance (jitter_range = base_interval * 0.1) provides good distribution without significantly affecting scheduling accuracy",
+          "impact": "Prevents thundering herd problems when multiple scheduler instances start simultaneously, distributing load more evenly",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/scheduler.py"],
+          "implementationNotes": {
+            "formula": "jittered_interval = base_interval + random.uniform(-jitter_range, jitter_range)",
+            "defaultVariance": "±10% of base interval",
+            "purpose": "Load distribution and coordination prevention"
+          }
+        },
+        {
+          "lesson": "Memory-aware background task scheduling",
+          "context": "Implementing resource-conscious background operations to prevent OOM errors",
+          "details": "Check system memory usage before starting memory-intensive background tasks using psutil.virtual_memory().percent. Set reasonable thresholds (e.g., 80%) to leave headroom for memory spikes during processing. Skip operations when memory usage is too high and reschedule for next interval",
+          "impact": "Prevents out-of-memory errors during background processing while maintaining system stability under varying load conditions",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/scheduler.py"],
+          "implementationNotes": {
+            "memoryCheck": "psutil.virtual_memory().percent < 80",
+            "threshold": "80% leaves headroom for processing spikes",
+            "fallbackBehavior": "Skip operation and wait for next scheduled interval"
+          }
+        },
+        {
+          "lesson": "Environment-driven scheduler configuration best practices",
+          "context": "Making background schedulers configurable without requiring code changes",
+          "details": "Use environment variables for all scheduler settings: enable/disable flags, intervals, memory thresholds, and jitter ranges. Default to enabled for better user experience but provide clear disable mechanism (SCHEDULER_ENABLED=false) for resource-constrained deployments. Document all configuration options clearly",
+          "impact": "Enables flexible deployment configurations without code modifications while maintaining good defaults for most use cases",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/scheduler.py", "README.md"],
+          "configurationPattern": {
+            "enableFlag": "SCHEDULER_ENABLED (default: true)",
+            "intervals": "Environment variables with reasonable defaults",
+            "thresholds": "Configurable memory and resource limits",
+            "jitter": "Configurable variance ranges"
+          }
+        },
+        {
+          "lesson": "Background task testing patterns with timeouts",
+          "context": "Testing background schedulers and long-running tasks in test suites",
+          "details": "Use asyncio.wait_for() with short timeouts when testing background tasks. Background tasks will timeout (expected behavior), but this allows testing of initialization, configuration, and cleanup without waiting for full execution cycles. Test both enabled and disabled states for backward compatibility",
+          "impact": "Enables comprehensive testing of background task systems without extending test suite execution time or requiring complex mocking",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["tests/test_scheduler.py"],
+          "testingPatterns": {
+            "timeoutPattern": "asyncio.wait_for(background_task(), timeout=0.1)",
+            "expectedBehavior": "TimeoutError is normal and expected",
+            "statesTesting": "Test both enabled=True and enabled=False configurations",
+            "cleanupTesting": "Verify proper task cleanup and reference management"
+          }
         }
       ]
     },
@@ -1457,6 +1520,18 @@
       "No database schema modifications needed - use existing item_type field for impl blocks",
       "Complex type information may be nested in both trait and for fields - parse carefully",
       "Empty name fields are normal for impl blocks - don't treat as parsing errors"
+    ],
+    "backgroundScheduler": [
+      "Use set() to maintain strong references: self.background_tasks = set() with add/discard callbacks",
+      "Add jitter to prevent coordination: base_interval + random.uniform(-jitter_range, jitter_range)",
+      "Check memory before intensive operations: psutil.virtual_memory().percent < 80",
+      "Use environment variables for configuration: SCHEDULER_ENABLED, intervals, thresholds",
+      "Test with asyncio.wait_for() and short timeouts - background tasks will timeout (expected)",
+      "Test both enabled and disabled states for backward compatibility",
+      "Background task cleanup: task.add_done_callback(lambda t: self.background_tasks.discard(t))",
+      "Default jitter: ±10% variance provides good load distribution without affecting accuracy",
+      "Memory threshold: 80% leaves headroom for processing spikes, skip operations when exceeded",
+      "Configuration pattern: Default enabled for UX, clear disable mechanism for resource constraints"
     ]
   },
   "performanceMetrics": {
