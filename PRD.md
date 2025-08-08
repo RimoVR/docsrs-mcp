@@ -34,15 +34,44 @@ all through the open MCP tool-calling standard, **without** proprietary services
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `get_crate_summary`       | Return crate name, resolved version, README/description (≤ 1 k chars), comprehensive item index, module hierarchy, and tool links.                             |
 | `search_items`            | k-NN cosine search across all documented items with type filtering (functions, structs, traits, modules). Default k = 5.                                        |
-| `get_item_doc`            | Complete markdown/HTML for a single item, incl. code blocks. Supports fuzzy path matching with helpful suggestions when exact paths fail.                      |
+| `get_item_doc`            | Complete markdown/HTML for a single item, incl. code blocks. Supports fuzzy path matching with helpful suggestions when exact paths fail. **⚠️ Path resolution requires exact module paths - needs common alias mapping (e.g., serde::Deserialize → serde::de::Deserialize)**. |
 | `get_module_tree`         | Navigate module hierarchy with structured tree representation and item counts.                                                                                   |
-| `search_examples`         | Search and retrieve code examples from documentation with context.                                                                                               |
+| `search_examples`         | 🚨 **CRITICAL BUG**: Search and retrieve code examples from documentation with context. **Currently returns individual characters instead of complete code blocks due to string iteration bug in ingest.py:761**. |
 | `list_versions`           | List all published versions (`yanked` flag, latest default).                                                                                                     |
-| MCP discovery             | `/mcp/manifest`, `/mcp/tools/*` per MCP 2025-06-18 spec with enhanced boolean parameter declarations using anyOf patterns for better client compatibility.     |
+| MCP discovery             | `/mcp/manifest`, `/mcp/tools/*` per MCP 2025-06-18 spec with enhanced boolean parameter declarations using anyOf patterns for better client compatibility. **⚠️ Current MCP parameter validation rejects numeric values like k=2 - needs anyOf pattern fixes**. |
 | On-disk cache             | One **SQLite + VSS** file per `crate@version`, auto-evicted LRU when total > 2 GiB.                                                                              |
 | **Reliability hardening** | \* Per-crate ingest lock prevents duplicate downloads. \* Graceful fallback when rustdoc JSON is unavailable (see §6.2). \* Batch writes keep peak RAM in check. |
 
 **Out of scope (v1):** cross-crate search, authentication, analytics, popularity ranking, GPU off-load, multi-tenant quotas.
+
+## 3.1 · Critical Bug Fixes Required
+
+**🚨 URGENT - BROKEN FUNCTIONALITY:**
+
+1. **searchExamples Character Fragmentation Bug** (CRITICAL - BLOCKING)
+   - **Problem**: `ingest.py:761` iterates over code example strings as individual characters instead of treating them as complete code blocks
+   - **Impact**: searchExamples returns `["[", "{", "\""]` instead of actual code examples
+   - **Root Cause**: String iteration in code example processing logic
+   - **Fix Required**: Treat code example strings as single entities, not character sequences
+
+2. **MCP Parameter Type Validation** (HIGH)
+   - **Problem**: MCP parameter validation rejects numeric values like `k=2`
+   - **Impact**: Tool calls with numeric parameters fail unexpectedly
+   - **Fix Required**: Add anyOf patterns in MCP manifest for consistent type handling
+
+3. **Path Alias Resolution** (MEDIUM)
+   - **Problem**: Path resolution requires exact module paths, no common aliases supported
+   - **Impact**: Users must know precise internal paths (e.g., `serde::de::Deserialize` not `serde::Deserialize`)
+   - **Fix Required**: Add path alias mapping for common patterns
+
+**ACTUAL FEATURE STATUS (Live Testing):**
+- ❌ searchExamples: BROKEN (character fragmentation bug)
+- ✅ Fuzzy path resolution: WORKING (provides suggestions)
+- ✅ Error messages: GOOD (helpful suggestions)  
+- ✅ Cache warming: EXISTS (LRU with TTL)
+- ⚠️ Trait search: PARTIAL (foundation exists)
+- ❌ See-also suggestions: MISSING
+- ❌ Dependency graph: MISSING
 
 ---
 
@@ -94,7 +123,7 @@ all through the open MCP tool-calling standard, **without** proprietary services
 | `/mcp/tools/search_items`      | POST   | Vector search with type filtering.                | JSON array `{score, item_path, item_type, header, snippet}` |
 | `/mcp/tools/get_item_doc`      | POST   | Full rustdoc for `item_path` with fuzzy matching. | `text/markdown` or suggestions JSON on path miss |
 | `/mcp/tools/get_module_tree`   | POST   | Navigate module hierarchy.                        | JSON tree structure with item counts            |
-| `/mcp/tools/search_examples`   | POST   | Search code examples in documentation.           | JSON array `{score, item_path, example_text, context}` |
+| `/mcp/tools/search_examples`   | POST   | 🚨 **BROKEN**: Search code examples in documentation. **Returns individual chars ["[", "{", "\""] instead of code blocks**.           | JSON array `{score, item_path, example_text, context}` |
 | `/mcp/resources/versions`      | GET    | List published versions.                          | JSON                                             |
 | `/health`                      | GET    | Liveness/readiness probe.                         | `200 OK`                                         |
 
@@ -110,7 +139,7 @@ Responses validate against in-repo JSON Schema before send (pydantic). MCP manif
 | **1. Resolve version**                                                                                                                                                                                                           | `GET https://docs.rs/crate/{crate}/latest/json` (or explicit version) → 302 target file. Honour `~semver` selectors & optional `target=` triple.                                                                                                      |
 | **1b. Fallback**                                                                                                                                                                                                                 | If rustdoc JSON is `404` or missing (older crates never rebuilt) → return `crate_not_documented` error **without** building locally, keeping MVP lean. *Docs.rs hosts rustdoc-JSON for the majority of modern crates but not all.* ([docs.rs][1])     |
 | **2. Download & decompress**                                                                                                                                                                                                     | Supports `.json`, `.json.zst` (preferred), `.json.gz`. Enforce max compressed 30 MiB and max decompressed 100 MiB; only `https://docs.rs/` URLs accepted.                                                                                             |
-| **3. Chunk**                                                                                                                                                                                                                     | One passage per item (`fn/struct/trait/mod`) with comprehensive item indexing. Embedded text = `header + "\n\n" + docstring` (code blocks excluded from embedding but stored separately for example search). Store `item_path`, stable `item_id`, `item_type`, and extracted code examples from rustdoc JSON. |
+| **3. Chunk**                                                                                                                                                                                                                     | One passage per item (`fn/struct/trait/mod`) with comprehensive item indexing. Embedded text = `header + "\n\n" + docstring` (code blocks excluded from embedding but stored separately for example search). Store `item_path`, stable `item_id`, `item_type`, and extracted code examples from rustdoc JSON. **🚨 CRITICAL: ingest.py:761 has character iteration bug - treats code example strings as individual characters instead of complete blocks**. |
 | **4. Embed**                                                                                                                                                                                                                     | FastEmbed ONNX, batch-size 32. First dummy embed at startup warms model (\~400 ms).                                                                                                                                                                   |
 | **5. Persist**                                                                                                                                                                                                                   | Enhanced SQLite schema per crate-db:  \`\`\`sql                                                                                                                                                                                                       |
 | CREATE TABLE passages(                                                                                                                                                                                                           |                                                                                                                                                                                                                                                       |
@@ -178,7 +207,7 @@ LIMIT :k;
 * **Origin allow-list:** only fetch from `https://docs.rs/…`.
 * **Size caps:** 30 MiB compressed / 100 MiB decompressed.
 * **Path safety:** databases saved as `cache/{crate}/{version}.db` using sanitised names.
-* **Input validation:** strict pydantic models with comprehensive parameter validation; reject unknown fields (`extra="forbid"`). All numeric parameters (k, limit, offset) validate against reasonable bounds and types using anyOf schema patterns. Boolean parameters (has_examples, deprecated) use consistent anyOf declarations matching numeric parameter handling.
+* **Input validation:** strict pydantic models with comprehensive parameter validation; reject unknown fields (`extra="forbid"`). **⚠️ NEEDS FIX**: All numeric parameters (k, limit, offset) must validate against reasonable bounds and accept both integer and string types using anyOf schema patterns. Boolean parameters (has_examples, deprecated) use consistent anyOf declarations matching numeric parameter handling.
 * **Fuzzy path resolution:** when exact item paths are not found, RapidFuzz provides intelligent path suggestions with similarity scoring to guide users to the intended documentation items.
 * **Error model**
 
@@ -289,16 +318,20 @@ uvx docsrs-mcp@latest
 3. `POST /mcp/tools/get_crate_summary` for crate **tokio** (version omitted) returns latest version & overview.
 4. `POST /mcp/tools/search_items` with query `"spawn task"` and optional type filter returns ≥ 1 passage containing `tokio::spawn` with item type information.
 5. `POST /mcp/tools/get_module_tree` for crate **tokio** returns structured hierarchy with item counts per module.
-6. `POST /mcp/tools/search_examples` with query `"async"` returns ≥ 1 code example from tokio documentation.
+6. **🚨 CRITICAL FIX REQUIRED**: `POST /mcp/tools/search_examples` with query `"async"` returns ≥ 1 **complete code block** from tokio documentation (not individual characters like `["[", "{", "\""]`).
 7. `POST /mcp/tools/get_item_doc` with `item_path="tokio::spawn"` returns markdown including a runnable example.
 7b. `POST /mcp/tools/get_item_doc` with a slightly misspelled `item_path="tokio::spwan"` returns fuzzy match suggestions including `"tokio::spawn"`.
+7c. **⚠️ PATH ALIAS FIX REQUIRED**: `POST /mcp/tools/get_item_doc` with common alias `item_path="serde::Deserialize"` automatically resolves to `serde::de::Deserialize` without user needing exact internal path.
 8. Cold ingest of crate **serde** (< 5 MiB compressed) with full item indexing and example extraction completes in ≤ 2 s on an M1/Ryzen 5; crates up to 10 MiB complete in ≤ 3 s.
 9. After ingesting 50 average crates with comprehensive indexing, `cache/` ≤ 2 GiB and server RSS ≤ 1 GiB.
 10. A single IP exceeding 30 requests/s receives HTTP 429.
-11. All numeric parameters (k, limit, type filters) are properly validated with helpful error messages.
+11. **⚠️ MCP VALIDATION FIX REQUIRED**: All numeric parameters (k=2, limit=10, type filters) are properly validated and **accept both integer and string types** using anyOf patterns with helpful error messages.
 12. Boolean parameters in MCP manifest use anyOf patterns consistent with numeric parameters for improved client compatibility.
 13. Fuzzy path matching provides helpful suggestions when exact item paths are not found, with similarity scores ≥ 0.6.
 14. All package management operations use `uv` exclusively (no pip/conda mixing).
+15. **🚨 CRITICAL**: searchExamples must return complete code blocks, not individual characters - fix ingest.py:761 character iteration bug.
+16. **⚠️ REQUIRED**: MCP parameter validation accepts numeric values like k=2 through proper anyOf schema patterns.
+17. **⚠️ REQUIRED**: Common path aliases (serde::Deserialize → serde::de::Deserialize) resolve automatically without user intervention.
 
 ---
 

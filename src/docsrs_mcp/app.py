@@ -610,6 +610,15 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
                     # Parse the JSON examples - handle both old list format and new dict format
                     examples_data = json.loads(examples_json)
 
+                    # Handle string input - wrap in list to prevent character iteration
+                    if isinstance(examples_data, str):
+                        examples_data = [examples_data]
+                    elif not examples_data:
+                        logger.warning(
+                            f"Empty examples_data for {params.crate_name}/{params.version} at {item_path}"
+                        )
+                        continue
+
                     # Handle old format (list of strings)
                     if isinstance(examples_data, list) and all(
                         isinstance(e, str) for e in examples_data

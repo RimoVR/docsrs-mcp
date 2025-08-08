@@ -1,9 +1,9 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-07T21:30:00Z",
-    "priorities": ["high", "medium", "low"],
-    "statuses": ["pending", "in_progress", "completed", "blocked"]
+    "lastUpdated": "2025-08-08T16:00:00Z",
+    "priorities": ["critical", "high", "medium", "low"],
+    "statuses": ["pending", "in_progress", "completed", "blocked", "failed"]
   },
   "tasks": {
     "high": [
@@ -708,6 +708,57 @@
         ]
       }
     ],
+    "critical": [
+      {
+        "id": "fix-examples-1",
+        "title": "Fix searchExamples character fragmentation bug",
+        "description": "Fix iteration bug in generate_example_embeddings that causes string to be split into characters",
+        "status": "completed",
+        "priority": "critical",
+        "progress": 100,
+        "location": "src/docsrs_mcp/ingest.py:761-769",
+        "dependencies": [],
+        "effort": "small",
+        "impact": "high",
+        "relatedTasks": ["examples-1", "examples-2"],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T16:00:00Z",
+          "implementation": "Fixed critical bug where string iteration caused character-level fragmentation in code example embeddings",
+          "notes": "Added isinstance() string type check after json.loads() to wrap single strings in list before iteration. Files modified: src/docsrs_mcp/ingest.py (line 758-762), src/docsrs_mcp/app.py (line 614-620). searchExamples now returns complete code blocks instead of individual characters.",
+          "filesModified": [
+            "src/docsrs_mcp/ingest.py (lines 758-762)",
+            "src/docsrs_mcp/app.py (lines 614-620)"
+          ],
+          "bugFix": "Added isinstance() check to handle string vs list inputs in generate_example_embeddings",
+          "impact": "searchExamples MCP tool now returns meaningful code blocks instead of fragmented characters"
+        },
+        "details": {
+          "bugDescription": "The generate_example_embeddings function iterates over a string directly, causing each character to be processed as a separate embedding instead of processing the full example code as intended.",
+          "affectedFunctionality": "searchExamples MCP tool endpoint returns fragmented character-based results instead of meaningful code examples",
+          "fixRequired": "Change iteration logic to process examples as complete strings rather than individual characters",
+          "solution": "Added isinstance() string type check after json.loads() to wrap single strings in list before iteration"
+        }
+      },
+      {
+        "id": "fix-mcp-1",
+        "title": "Fix MCP parameter type validation",
+        "description": "Add anyOf patterns to MCP manifest for all numeric parameters",
+        "status": "pending",
+        "priority": "high",
+        "location": "src/docsrs_mcp/app.py:151-297",
+        "dependencies": [],
+        "effort": "small",
+        "impact": "medium",
+        "relatedTasks": ["mcp-2", "param-1"],
+        "roadblocks": [],
+        "details": {
+          "issueDescription": "MCP manifest needs anyOf patterns for numeric parameters to handle both string and integer inputs from MCP clients",
+          "affectedEndpoints": "All MCP tool endpoints with numeric parameters",
+          "fixRequired": "Update MCP manifest generation to include anyOf patterns for numeric parameter validation"
+        }
+      }
+    ],
     "medium": [
       {
         "id": "param-1",
@@ -794,6 +845,9 @@
           "completedDate": "2025-08-07T16:45:00Z",
           "implementation": "Enhanced code example extraction with language detection, JSON storage, and MCP search functionality",
           "notes": "Successfully implemented enhanced extract_code_examples function with pygments language detection, updated storage format to JSON with structure [{'code': str, 'language': str, 'detected': bool}], added SearchExamplesRequest and SearchExamplesResponse models, implemented search_examples MCP tool endpoint at /mcp/tools/search_examples, added search_examples to MCP manifest, updated ranking weight for examples from 0.05 to 0.15 (reduced vector weight to 0.60), added comprehensive unit tests for enhanced extraction, and successfully tested search_examples functionality."
+        },
+        "issues": {
+          "characterFragmentationBug": "RESOLVED: Critical bug in generate_example_embeddings fixed on 2025-08-08. Added isinstance() check to properly handle string vs list inputs, preventing character-level fragmentation in embeddings."
         },
         "subtasks": [
           {
@@ -1052,6 +1106,129 @@
             "description": "Test and validate all documentation examples work correctly",
             "status": "completed",
             "progress": 100
+          }
+        ]
+      },
+      {
+        "id": "enhance-path-1",
+        "title": "Add path alias resolution",
+        "description": "Implement common path aliases before fuzzy matching",
+        "status": "pending",
+        "priority": "high",
+        "location": "src/docsrs_mcp/fuzzy_resolver.py",
+        "dependencies": ["fix-examples-1"],
+        "effort": "medium",
+        "impact": "high",
+        "relatedTasks": ["fuzzy-1"],
+        "roadblocks": [],
+        "details": {
+          "enhancement": "Add common path alias resolution (e.g., 'std::vec' -> 'std::vec::Vec', 'tokio::spawn' -> 'tokio::task::spawn') before applying fuzzy matching",
+          "benefit": "Improves user experience by handling common path shortcuts and abbreviations",
+          "implementation": "Extend fuzzy_resolver.py with alias mapping and resolution logic"
+        },
+        "subtasks": [
+          {
+            "id": "enhance-path-1.1",
+            "title": "Create alias mapping system",
+            "description": "Design and implement common Rust path alias mappings",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "enhance-path-1.2",
+            "title": "Integrate with existing fuzzy resolver",
+            "description": "Add alias resolution as first step before fuzzy matching",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "enhance-path-1.3",
+            "title": "Add comprehensive tests for alias resolution",
+            "description": "Test common alias patterns and edge cases",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "trait-search-1",
+        "title": "Enhance trait implementation search",
+        "description": "Extract and index trait implementations from rustdoc",
+        "status": "pending",
+        "priority": "medium",
+        "location": "src/docsrs_mcp/ingest.py",
+        "dependencies": ["fix-examples-1", "enhance-path-1"],
+        "effort": "large",
+        "impact": "high",
+        "relatedTasks": ["idx-1"],
+        "roadblocks": [],
+        "details": {
+          "enhancement": "Extract trait implementations from rustdoc JSON and create searchable index for 'impl Trait for Type' relationships",
+          "benefit": "Enable users to find trait implementations and understand trait usage patterns across crates",
+          "implementation": "Parse impl blocks from rustdoc JSON, extract trait-type relationships, and add to vector search index"
+        },
+        "subtasks": [
+          {
+            "id": "trait-search-1.1",
+            "title": "Parse impl blocks from rustdoc JSON",
+            "description": "Extract impl block information including trait and type relationships",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "trait-search-1.2",
+            "title": "Create trait implementation index",
+            "description": "Add database schema and indexing for trait implementations",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "trait-search-1.3",
+            "title": "Add MCP endpoint for trait search",
+            "description": "Create search_trait_impls MCP tool endpoint",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "see-also-1",
+        "title": "Add see-also suggestions",
+        "description": "Use vector similarity for related item suggestions",
+        "status": "pending",
+        "priority": "low",
+        "location": "src/docsrs_mcp/database.py",
+        "dependencies": ["trait-search-1"],
+        "effort": "medium",
+        "impact": "medium",
+        "relatedTasks": ["search-1"],
+        "roadblocks": [],
+        "details": {
+          "enhancement": "Add 'see also' suggestions to search results using vector similarity to find related items",
+          "benefit": "Help users discover related functionality and improve documentation browsing experience",
+          "implementation": "Use existing vector embeddings to find similar items and add suggestions to search responses"
+        },
+        "subtasks": [
+          {
+            "id": "see-also-1.1",
+            "title": "Implement similarity-based suggestions",
+            "description": "Use vector similarity to find related items for suggestions",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "see-also-1.2",
+            "title": "Add suggestions to search responses",
+            "description": "Include related item suggestions in MCP search tool responses",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "see-also-1.3",
+            "title": "Configure suggestion relevance thresholds",
+            "description": "Set appropriate similarity thresholds for meaningful suggestions",
+            "status": "pending",
+            "progress": 0
           }
         ]
       },

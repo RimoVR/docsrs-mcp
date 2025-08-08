@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-07",
+  "lastUpdated": "2025-08-08",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -194,6 +194,43 @@
           "prevention": "Always implement backward compatibility checks when changing data formats",
           "dateEncountered": "2025-08-07",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "searchExamples character fragmentation - returns individual characters instead of code blocks",
+          "context": "ingest.py:761 and app.py:614-620 - for loop iterates over string as characters when examples_data is string type",
+          "solution": "Add type check before iteration: if isinstance(examples_data, str): examples_data = [examples_data]; for example in examples_data: # Now safely iterate list. Applied in both generate_example_embeddings (ingest.py:758-762) and searchExamples (app.py:614-620)",
+          "prevention": "Always validate data types before iteration, especially when data might be either string or list",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/app.py"],
+          "priority": "CRITICAL",
+          "symptoms": [
+            "Code examples unusable",
+            "Each character returned as separate example",
+            "Affects all crates with code examples"
+          ],
+          "rootCause": "String iteration returns characters when examples_data is string type instead of list",
+          "testingVerification": "Verified with live MCP calls to serde crate",
+          "resolutionStatus": "FIXED - Applied type guard pattern in both locations, tested and verified working",
+          "fixPattern": "if isinstance(examples_data, str): examples_data = [examples_data]",
+          "impact": "Fixed critical bug that rendered searchExamples unusable, now returns complete code blocks instead of individual characters"
+        },
+        {
+          "error": "MCP parameter validation - numeric parameters like k=2 rejected",
+          "context": "MCP manifest missing anyOf patterns for type flexibility with numeric values",
+          "solution": "Update MCP manifest with anyOf pattern: 'k': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]} in src/docsrs_mcp/app.py:151-297",
+          "prevention": "Always use anyOf patterns in MCP manifests for parameters that may arrive as different types from various clients",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "note": "Models.py has coercion but manifest needs updating for JSON Schema validation"
+        },
+        {
+          "error": "Path resolution exactness - common paths like serde::Deserialize return 404",
+          "context": "Users expect common module paths to work but need exact rustdoc paths",
+          "solution": "Add PATH_ALIASES dictionary in fuzzy_resolver.py with mappings like 'serde::Deserialize': 'serde::de::Deserialize', 'tokio::spawn': 'tokio::task::spawn', 'Result': 'std::result::Result'",
+          "prevention": "Maintain common path aliases for frequently accessed items to improve user experience",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/fuzzy_resolver.py"],
+          "currentBehavior": "Provides fuzzy suggestions but requires exact module paths"
         }
       ]
     },
@@ -227,6 +264,20 @@
             "searchLatency": "150-360ms warm, 1.4s cold (model loading)",
             "deduplicationRate": "~30% reduction in stored embeddings"
           }
+        },
+        {
+          "issue": "Vector search performance bottlenecks",
+          "solution": "Initial queries slow until vectors cached, implement cache warming for popular crates",
+          "context": "First-time vector searches experience significant latency due to model loading and cache population",
+          "dateDiscovered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "issue": "Memory spikes with large crates",
+          "solution": "Already using streaming + generators, monitor with psutil for proactive management",
+          "context": "Large crates can cause memory spikes despite streaming implementation",
+          "dateDiscovered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
         }
       ]
     },
@@ -374,6 +425,24 @@
             "patternConsistency": "Follow existing numeric parameter anyOf patterns for all flexible types"
           },
           "resolutionStatus": "Fixed and tested - boolean parameters now accept both native booleans and string representations"
+        },
+        {
+          "lesson": "Critical searchExamples character fragmentation bug and testing methodology",
+          "context": "searchExamples returns individual characters instead of complete code blocks due to string iteration bug",
+          "solution": "Always test with direct MCP calls instead of REST to catch protocol-specific issues. Use fresh databases to avoid legacy data conflicts. Fix requires type checking before iteration in ingest.py:761",
+          "prevention": "Implement comprehensive testing methodology: 1) Test searchExamples returns full code blocks not characters, 2) Test common path aliases resolve correctly, 3) Test numeric parameters accept both integer and string types, 4) Verify response times <500ms for warm queries, 5) Always use fresh databases for testing to avoid cached data issues",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/app.py"],
+          "testingMethodology": {
+            "directMcpTesting": "Use mcp__docsrs__ tools directly instead of REST endpoints",
+            "freshDatabases": "Always test with new DBs to avoid legacy data issues",
+            "verificationSteps": [
+              "1. Test searchExamples returns full code blocks",
+              "2. Test common path aliases resolve",
+              "3. Test numeric parameters accept both types",
+              "4. Verify <500ms response times"
+            ]
+          }
         }
       ]
     },
@@ -963,7 +1032,8 @@
       "Store full path_info dictionaries instead of just path strings when building module hierarchies",
       "Extract item kind from inner field as single-key dictionary in rustdoc JSON parsing",
       "Module names are derived from last element of path arrays, not separate name fields",
-      "Preserve full data structures when building hierarchies to maintain context information"
+      "Preserve full data structures when building hierarchies to maintain context information",
+      "FIXED: Always check if examples_data is string before iteration to prevent character fragmentation - apply type guard: if isinstance(examples_data, str): examples_data = [examples_data]"
     ],
     "rateLimiting": [
       "MUST include Request parameter in endpoint function signatures or rate limiting won't work",
@@ -990,6 +1060,14 @@
       "Test REST endpoints: curl -s http://localhost:8000/endpoint | jq . (server runs on port 8000, not 8080)",
       "Test MCP manifest: Use --mode rest to test MCP manifest endpoints at localhost:8000",
       "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\""
+    ],
+    "criticalBugs": [
+      "RESOLVED: searchExamples character fragmentation bug - FIXED in ingest.py:758-762 and app.py:614-620",
+      "Previous issue: String iteration bug caused characters instead of code blocks to be returned",
+      "Root cause was: isinstance(examples_data, str) not checked before iteration, causing ['[', '{', '\"'] instead of complete blocks",
+      "Solution applied: Added type guard pattern: if isinstance(examples_data, str): examples_data = [examples_data]",
+      "Testing: Verified fix with live MCP calls to serde crate - now returns complete code blocks",
+      "Status: RESOLVED 2025-08-08 - All example functionality now working correctly"
     ],
     "mcpServer": [
       "Run MCP mode (default): uvx docsrs-mcp",

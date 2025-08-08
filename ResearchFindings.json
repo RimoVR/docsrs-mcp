@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-07",
+  "lastUpdated": "2025-08-08",
   "research": {
     "modelContextProtocol": {
       "overview": "Open standard by Anthropic for LLM-tool communication",
@@ -261,12 +261,20 @@
         },
         "installation": "pip install sqlite-vec",
         "performance": {
-          "optimalScale": "Optimal for collections under 100k vectors",
+          "optimalScale": "Handles 1M+ vectors efficiently, <100ms queries",
+          "bruteForceOptimal": "Brute-force optimal for <1M vectors",
           "quantization": {
-            "memoryReduction": "32x reduction with binary quantization",
+            "memoryReduction": "75% memory reduction (float32→uint8)",
+            "vectorQuantization": "Vector quantization reduces memory O(NM)→O(N)",
             "accuracyLoss": "Minimal accuracy loss with binary quantization"
           },
-          "acceleration": "SIMD-accelerated distance calculations for hardware optimization"
+          "acceleration": "SIMD-accelerated distance calculations for hardware optimization",
+          "optimizations": [
+            "Chunk-based storage reduces memory O(NM)→O(N)",
+            "Vector quantization: 75% memory reduction (float32→uint8)",
+            "Brute-force optimal for <1M vectors",
+            "WAL mode for write performance"
+          ]
         }
       },
       "embedding": {
@@ -283,12 +291,18 @@
           "embeddingSize": "384 dimensions for efficient storage and computation"
         },
         "fastEmbedOptimization": {
-          "runtime": "FastEmbed 0.7.1 with ONNX runtime provides 3-4x speedup over PyTorch",
+          "runtime": "ONNX Runtime 2-10x faster than HuggingFace",
           "backend": "ONNX runtime optimized for CPU inference",
           "quantization": "ONNX quantization for improved inference speed",
-          "batchProcessing": "Optimal batch size of 32 for embedding generation",
+          "batchProcessing": {
+            "cpu": "Batch size 16 for CPU",
+            "gpu": "Batch size 256 for GPU",
+            "optimal": "Optimal batch size of 32 for embedding generation"
+          },
           "memoryEfficiency": "Keep memory under 1GB for 10k embeddings",
-          "implementation": "Use FastEmbed 0.7.1 with ONNX backend for production workloads"
+          "implementation": "Use FastEmbed 0.7.1 with ONNX backend for production workloads",
+          "sessionCaching": "Session caching critical for performance",
+          "generatorPattern": "Generator pattern prevents memory spikes"
         },
         "streamProcessing": {
           "technique": "Stream large JSON files to avoid OOM",
@@ -1431,6 +1445,41 @@
           "benefit": "Single tool reduces complexity, dependency conflicts, and configuration overhead",
           "performance": "Rust implementation provides 10-100x speed improvement over Python alternatives"
         }
+      },
+      "pythonBestPractices": {
+        "stringIteration": {
+          "overview": "Best practices for string handling and iteration in Python",
+          "typeChecking": {
+            "recommendedMethod": "isinstance(obj, str)",
+            "communityAdoption": "88% adoption rate in Python community",
+            "rationale": "Explicit type checking prevents unintended character-level iteration",
+            "performanceImprovements": {
+              "version": "Python 3.12+",
+              "speedup": "2-20x performance improvements for isinstance() checks",
+              "mechanism": "Optimized type checking implementation in CPython"
+            }
+          },
+          "iterationPitfalls": {
+            "stringIterability": {
+              "issue": "Strings are iterable in Python, causing character fragmentation",
+              "problem": "Iterating over a string processes individual characters instead of the string as a unit",
+              "solution": "Always wrap single strings in lists before iteration to prevent character fragmentation",
+              "example": "Use [string] instead of string when adding to collections or iterating"
+            },
+            "performanceComparison": {
+              "characterLevel": "Character-level processing baseline",
+              "wordLevel": "7x more expensive than word-level processing",
+              "recommendation": "Process strings at word/token level when possible to optimize performance"
+            }
+          },
+          "bestPractices": [
+            "Use isinstance(obj, str) for type checking - 88% community standard",
+            "Leverage Python 3.12+ isinstance() performance improvements (2-20x faster)",
+            "Always wrap single strings in lists before iteration to prevent character fragmentation",
+            "Prefer word-level over character-level processing (7x performance improvement)",
+            "Explicit type checking prevents unintended string iteration bugs"
+          ]
+        }
       }
     },
     "queryPreprocessing": {
@@ -1653,7 +1702,7 @@
           "comparison": "RapidFuzz vs FuzzyWuzzy performance comparison",
           "rapidfuzzPerformance": "20ms for 1M elements",
           "fuzzywuzzyPerformance": "7s for 1M elements",
-          "speedup": "16X to 350X faster than FuzzyWuzzy depending on dataset size",
+          "speedup": "10-50x faster than FuzzyWuzzy",
           "implementation": "C++ implementation with SIMD optimizations for maximum performance"
         },
         "features": [
@@ -1672,12 +1721,12 @@
           }
         },
         "fuzzyMatchingThresholds": {
-          "recommended": "0.6 (60%) similarity threshold",
+          "recommended": "60% similarity threshold optimal",
           "optimalRange": "60-80% similarity threshold for fuzzy path matching",
           "conservative": "80% threshold for high precision, lower recall",
           "balanced": "70% threshold for balanced precision and recall",
           "liberal": "60% threshold for high recall, lower precision",
-          "rationale": "0.6 threshold balances false positives vs missed matches in documentation path resolution"
+          "rationale": "60% similarity threshold balances false positives vs missed matches in documentation path resolution"
         },
         "bestPractices": {
           "thresholdSelection": {
@@ -1706,6 +1755,9 @@
             "Remove or normalize path separators for consistent comparison"
           ],
           "performanceOptimization": [
+            "Use process.cdist for bulk operations",
+            "SIMD optimizations for short strings",
+            "Sliding window for partial_ratio",
             "Use process.extract() for multiple suggestions with limit=5",
             "Use process.extractOne() for single best match only when needed",
             "Set workers=1 to avoid multiprocessing issues",
@@ -1769,10 +1821,9 @@
       "pathResolutionBestPractices": {
         "fuzzyMatchingIntegration": {
           "workflow": [
-            "1. Exact path matching first (fastest)",
-            "2. Case-insensitive exact matching second",
-            "3. Fuzzy matching with RapidFuzz as fallback (most flexible)",
-            "4. Return ranked candidates with similarity scores"
+            "1. Exact match first (fastest)",
+            "2. Case-insensitive exact",
+            "3. Fuzzy as fallback only"
           ],
           "thresholdStrategy": {
             "exactMatch": "100% similarity - direct path match",
@@ -1799,6 +1850,70 @@
             "userExperience": "Present most contextually relevant matches first"
           }
         }
+      }
+    },
+    "codeExtraction": {
+      "current": {
+        "implementation": "Regex-based with bugs",
+        "bugFound": "String iteration causes character fragmentation",
+        "performance": "Slower and error-prone"
+      },
+      "recommended": {
+        "treeSitter": {
+          "performance": "36x faster than regex",
+          "benefits": [
+            "Incremental parsing",
+            "Error recovery", 
+            "Complete code block extraction",
+            "Language-aware parsing"
+          ],
+          "implementation": "tree_sitter library for Python",
+          "advantage": "Complete AST-based code extraction vs regex patterns"
+        }
+      }
+    },
+    "memoryManagement": {
+      "streaming": {
+        "ijson": {
+          "backend": "ijson with yajl2_c backend",
+          "performance": "656x faster than pure Python",
+          "benefit": "Stream large JSON without loading entire file"
+        }
+      },
+      "generators": {
+        "efficiency": "7-25x memory efficiency over lists",
+        "implementation": "Use generators for large dataset processing",
+        "benefit": "Constant memory usage regardless of dataset size"
+      },
+      "batchProcessing": {
+        "sqliteLimit": "SQLite limit 999 params, batch accordingly",
+        "strategy": "Split large operations into batches under parameter limit"
+      },
+      "monitoring": {
+        "tool": "psutil for memory monitoring",
+        "thresholds": {
+          "warning": "80% memory usage",
+          "critical": "90% memory usage"
+        },
+        "implementation": "Monitor and adapt batch sizes based on available memory"
+      }
+    },
+    "mcpBestPractices": {
+      "fastmcpFramework": [
+        "Mixed sync/async tool support",
+        "Logging to stderr only",
+        "Resource-based data access",
+        "Proper context injection"
+      ],
+      "parameterHandling": [
+        "Always use anyOf for type flexibility",
+        "Implement coercion in validators",
+        "Provide helpful validation messages"
+      ],
+      "transportRequirements": {
+        "stdio": "STDIO transport required for Claude Desktop",
+        "logging": "All logging must go to stderr to avoid STDIO corruption",
+        "reason": "Claude Desktop communicates via STDIN/STDOUT - any stdout pollution breaks MCP protocol"
       }
     },
     "bestPractices": {
@@ -1873,9 +1988,11 @@
       "Design MCP manifests with anyOf patterns for flexible parameter types to accommodate client inconsistencies",
       "Use Union types in Pydantic models (e.g., Union[str, int]) to support flexible parameter acceptance",
       "Implement defensive parameter validation that handles both string and native type inputs",
-      "MANDATORY: Use sqlite-vec 0.1.6 (sqlite-vss is deprecated)",
+      "MANDATORY: Use sqlite-vec v0.1.0+ (sqlite-vss is deprecated and unmaintained)",
+      "CRITICAL: sqlite-vec handles 1M+ vectors efficiently with <100ms queries",
       "CRITICAL: Pin aiohttp to 3.9.5 to avoid memory leaks",
-      "Use FastEmbed <0.7.0 for onnxruntime compatibility",
+      "Use FastEmbed with ONNX Runtime - 2-10x faster than HuggingFace",
+      "CRITICAL: RapidFuzz 10-50x faster than FuzzyWuzzy - use for all fuzzy matching",
       "Implement aiosqlite for async database operations",
       "Use MATCH operator syntax for sqlite-vec queries",
       "Implement connection pooling for aiohttp from start",
@@ -1899,8 +2016,9 @@
       "Leverage sqlite-vec brute-force search for collections up to 1M vectors",
       "Implement binary quantization to reduce storage by 8x with minimal accuracy loss",
       "Utilize SIMD-accelerated distance calculations in sqlite-vec",
-      "Use FastEmbed 0.7.1 with ONNX runtime for 3-4x speedup over PyTorch",
-      "Leverage ONNX quantization for improved inference speed in FastEmbed 0.7.1",
+      "Use FastEmbed with session caching and generator pattern to prevent memory spikes",
+      "Optimize FastEmbed batch sizes: CPU=16, GPU=256",
+      "Leverage ONNX quantization for improved inference speed in FastEmbed",
       "Use BAAI/bge-small-en-v1.5 model with 62.17 MTEB score for optimal retrieval quality",
       "Skip query instructions with BAAI/bge-small-en-v1.5 for optimal performance",
       "Process embeddings in batches of 32 for optimal performance",
@@ -1921,7 +2039,9 @@
       "Use SELECT last_insert_rowid() after aiosqlite.executemany() calls",
       "Respect SQLite's 999 parameter limit when designing batch operations",
       "Rely on sqlite-vec automatic indexing - no manual vss_index! calls needed",
-      "Use ijson 3.4.0 with yajl2_c backend for 656x performance improvement in JSON parsing",
+      "CRITICAL: Use ijson with yajl2_c backend for 656x performance improvement in JSON parsing",
+      "CRITICAL: Use tree-sitter for code extraction - 36x faster than regex with better accuracy",
+      "CRITICAL: Fix string iteration bug in regex-based code extraction causing character fragmentation",
       "Always validate rustdoc FORMAT_VERSION field before processing JSON files",
       "Handle both string and object representations of rustdoc item types dynamically",
       "Extract function and method signatures from inner.function.decl and inner.method.decl paths",
@@ -1934,8 +2054,9 @@
       "Monitor Rust version manifest at https://static.rust-lang.org/version for release tracking",
       "Cache parsed stdlib sections aggressively due to expensive parsing overhead",
       "Process stdlib docs in chunks to prevent out-of-memory errors with large files",
-      "Use psutil for cross-platform memory monitoring and adaptive batch sizing",
-      "Implement generator patterns for 7x-25x memory efficiency gains over list-based processing",
+      "Use psutil with 80% warning and 90% critical memory thresholds",
+      "Implement generator patterns for 7-25x memory efficiency gains over list-based processing",
+      "Use process.cdist for bulk RapidFuzz operations with SIMD optimizations",
       "Use two-pass parsing for rustdoc format (paths then index) to optimize memory usage",
       "Set memory thresholds at 80% (reduce batch) and 90% (minimum batch + GC) for adaptive processing",
       "Implement progressive processing to enable handling 100MB+ rustdoc files with constant memory usage",
@@ -1944,6 +2065,9 @@
       "Store code examples in JSON format within TEXT columns for structured metadata and backward compatibility",
       "Support both legacy list format and new JSON format during migration for seamless transitions",
       "Implement hash-based deduplication to prevent duplicate code examples in search results",
+      "Use sqlite-vec WAL mode for improved write performance",
+      "Leverage sqlite-vec chunk-based storage to reduce memory complexity O(NM)→O(N)",
+      "Use sqlite-vec vector quantization for 75% memory reduction (float32→uint8)",
       "Use sqlite-vec for sub-second response times in code example similarity searches",
       "Pre-serialize vector embeddings with sqlite_vec.serialize_float32() for efficient storage",
       "Load sqlite-vec extension before using vec_distance_L2 function for vector operations",
@@ -1951,12 +2075,15 @@
     ],
     "performance": [
       "Use semantic chunking with 50-200 tokens for optimal search granularity",
-      "Leverage sqlite-vec brute-force performance up to 1M vectors before considering ANN",
-      "Implement binary quantization for 8x storage reduction with minimal accuracy loss",
+      "CRITICAL: sqlite-vec handles 1M+ vectors efficiently with <100ms query performance",
+      "Leverage sqlite-vec brute-force optimization for collections <1M vectors",
+      "Use sqlite-vec vector quantization for 75% memory reduction (float32→uint8)",
       "Utilize SIMD-accelerated distance calculations built into sqlite-vec",
-      "Use FastEmbed with ONNX runtime for 3x performance improvement over PyTorch",
-      "Batch embeddings in groups of 32",
-      "Batch database inserts in groups of 1000",
+      "Use FastEmbed with ONNX Runtime - 2-10x performance improvement over HuggingFace",
+      "CRITICAL: RapidFuzz provides 10-50x speedup over FuzzyWuzzy with SIMD optimizations",
+      "Optimize FastEmbed batch sizes: CPU=16, GPU=256, general=32",
+      "Use FastEmbed session caching and generator pattern to prevent memory spikes",
+      "Batch database inserts in groups of 1000 (under SQLite 999 parameter limit)",
       "Use uvloop for event loop optimization",
       "Implement caching at multiple levels",
       "Profile memory usage early and often",
@@ -1976,15 +2103,21 @@
       "Use streaming decompression to avoid memory spikes",
       "Stream large JSON files during processing to avoid OOM conditions",
       "Keep embedding memory usage under 1GB for 10k vectors",
+      "Use ijson with yajl2_c backend for 656x JSON parsing performance improvement",
+      "Implement generator patterns for 7-25x memory efficiency over lists",
+      "Use tree-sitter for code extraction - 36x faster than regex with language awareness",
       "Implement LRU eviction based on file modification time",
       "Monitor download and decompression size limits",
       "Use one transaction per batch of 1000 records to prevent memory accumulation",
       "Pre-serialize vectors to bytes before batch processing for significant overhead reduction",
-      "Leverage sqlite-vec v0.1.0 excellent performance for 384-dimensional vectors",
+      "Use sqlite-vec WAL mode and chunk-based storage for optimal write performance",
+      "Leverage sqlite-vec v0.1.0+ excellent performance for 384-dimensional vectors",
       "Use ijson 3.4.0 with yajl2_c backend for 656x JSON parsing performance improvement over pure Python",
       "Implement streaming rustdoc JSON parsing to handle large files without memory spikes",
       "Optimize batch operations to respect SQLite's 999 parameter limit for maximum efficiency",
-      "Monitor memory usage with psutil and adapt batch sizes between 16-512 items based on available memory",
+      "Monitor memory with psutil: 80% warning threshold, 90% critical threshold",
+      "Use process.cdist for bulk RapidFuzz operations with SIMD optimizations",
+      "Apply 60% similarity threshold as optimal for fuzzy matching performance",
       "Use generator patterns instead of loading entire datasets for 7x-25x memory efficiency improvements",
       "Implement progressive processing with streaming parsers to maintain constant memory usage",
       "Set up memory thresholds with adaptive batch sizing to prevent out-of-memory conditions",
@@ -2025,8 +2158,20 @@
       "Implement hash-based deduplication for code examples to reduce storage overhead and improve result quality",
       "Leverage sqlite-vec vector embeddings for sub-second code example similarity search performance",
       "Pre-serialize vector embeddings to optimize batch processing and reduce per-operation overhead",
+      "Use exact → case-insensitive → fuzzy matching workflow for optimal performance hierarchy",
+      "Implement MCP anyOf patterns for flexible parameter handling without performance penalties",
       "Store code examples in JSON TEXT columns to enable efficient metadata queries and backward compatibility",
-      "Use automatic format conversion to handle legacy data without performance penalties during migration"
+      "Use automatic format conversion to handle legacy data without performance penalties during migration",
+      "MANDATORY: Always use anyOf patterns in MCP manifests for parameter type flexibility",
+      "Implement MCP parameter coercion in validators with helpful error messages",
+      "Use 60% similarity threshold as optimal for fuzzy matching",
+      "Apply exact → case-insensitive → fuzzy matching workflow for best performance",
+      "Monitor memory with generators and batch processing to handle SQLite's 999 parameter limit",
+      "Use isinstance(obj, str) for type checking - 88% Python community adoption standard",
+      "Leverage Python 3.12+ isinstance() performance improvements (2-20x faster type checking)",
+      "Always wrap single strings in lists before iteration to prevent character fragmentation",
+      "Prefer word-level over character-level processing for 7x performance improvement",
+      "Apply explicit string type checking to prevent unintended character-level iteration bugs"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

@@ -754,6 +754,15 @@ async def generate_example_embeddings(
             try:
                 examples_data = json.loads(examples_json)
 
+                # Handle string input - wrap in list to prevent character iteration
+                if isinstance(examples_data, str):
+                    examples_data = [examples_data]
+                elif not examples_data:
+                    logger.warning(
+                        f"Empty examples_data for {crate_name}/{version} at {item_path}"
+                    )
+                    continue
+
                 # Handle both old list format and new dict format
                 if isinstance(examples_data, list) and all(
                     isinstance(e, str) for e in examples_data
