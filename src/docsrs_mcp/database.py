@@ -10,12 +10,17 @@ from typing import Any
 
 import aiosqlite
 import sqlite_vec
+import structlog
 
 from . import config as app_config
 from .cache import get_search_cache
 from .config import CACHE_DIR, DB_TIMEOUT, EMBEDDING_DIM
 
-logger = logging.getLogger(__name__)
+# Use structlog for structured logging when available, fallback to standard logging
+try:
+    logger = structlog.get_logger(__name__)
+except AttributeError:
+    logger = logging.getLogger(__name__)
 
 # Prepared statement cache for common queries
 _prepared_statements = {}
@@ -437,6 +442,20 @@ async def search_embeddings(
 
     start_time = time.time()
     filter_times = {}
+    debug_info = {"filters_applied": [], "results_at_stage": {}, "timing": {}}
+
+    # Log search initiation with parameters
+    logger.debug(
+        "search_embeddings_start",
+        k=k,
+        type_filter=type_filter,
+        crate_filter=crate_filter,
+        module_path=module_path,
+        has_examples=has_examples,
+        min_doc_length=min_doc_length,
+        visibility=visibility,
+        deprecated=deprecated,
+    )
 
     # Check cache first
     cache = get_search_cache()
@@ -484,38 +503,68 @@ async def search_embeddings(
             # Module pattern needs to account for crate name prefix
             # Get crate name from the db path (format: cache/{crate}/{version}.db)
             crate_name = db_path.parent.name if db_path.parent.name != "cache" else None
-            module_pattern = (
-                f"{crate_name}::{module_path}::%%"
-                if module_path and crate_name
-                else None
-            )
 
-            cursor = await db.execute(
-                """
+            # Fix: Allow both the module itself AND items within it
+            module_patterns = []
+            if module_path and crate_name:
+                module_patterns = [
+                    f"{crate_name}::{module_path}",  # The module itself
+                    f"{crate_name}::{module_path}::%",  # Items in the module
+                ]
+
+            # Build module filter clause for selectivity analysis
+            module_filter_clause = "1=1"
+            if module_patterns:
+                module_conditions = " OR ".join(
+                    ["item_path LIKE ?" for _ in module_patterns]
+                )
+                module_filter_clause = f"({module_conditions})"
+
+            query = f"""
                 SELECT COUNT(*) FROM embeddings
                 WHERE (:type_filter IS NULL OR item_type = :type_filter)
                     AND (:crate_pattern IS NULL OR item_path LIKE :crate_pattern)
-                    AND (:module_pattern IS NULL OR item_path LIKE :module_pattern)
+                    AND {module_filter_clause}
                     AND (:deprecated IS NULL OR deprecated = :deprecated)
                     AND (:has_examples IS NULL OR (:has_examples = 0 OR examples IS NOT NULL))
-            """,
-                {
-                    "type_filter": type_filter,
-                    "crate_pattern": crate_pattern,
-                    "module_pattern": module_pattern,
-                    "deprecated": deprecated,
-                    "has_examples": has_examples,
-                },
+            """
+
+            params = (
+                [
+                    type_filter,
+                    crate_pattern,
+                ]
+                + module_patterns
+                + [
+                    deprecated,
+                    has_examples,
+                ]
             )
+
+            cursor = await db.execute(query, params)
             result = await cursor.fetchone()
             prefilter_count = result[0] if result else 0
             filter_times["selectivity_analysis"] = (time.time() - filter_start) * 1000
 
             # Use progressive filtering if result set is small enough (<10K items)
             should_prefilter = prefilter_count < 10000 and prefilter_count > 0
+
+            # Log filter selectivity analysis
             logger.debug(
-                f"Filter selectivity: {prefilter_count} items, prefilter={should_prefilter}"
+                "filter_selectivity_analysis",
+                prefilter_count=prefilter_count,
+                should_prefilter=should_prefilter,
+                elapsed_ms=filter_times["selectivity_analysis"],
+                filters={
+                    "type_filter": type_filter,
+                    "crate_filter": crate_filter,
+                    "module_path": module_path,
+                    "has_examples": has_examples,
+                    "deprecated": deprecated,
+                },
             )
+
+            debug_info["results_at_stage"]["after_filters"] = prefilter_count
 
         # Fetch k+10 results to allow for re-ranking
         fetch_k = min(k + 10, 50)  # Cap at 50 for performance
@@ -524,13 +573,27 @@ async def search_embeddings(
         crate_pattern = f"{crate_filter}::%%" if crate_filter else None
         # Module pattern needs to account for crate name prefix
         crate_name = db_path.parent.name if db_path.parent.name != "cache" else None
-        module_pattern = (
-            f"{crate_name}::{module_path}::%%" if module_path and crate_name else None
-        )
+
+        # Fix: Allow both the module itself AND items within it
+        module_patterns = []
+        if module_path and crate_name:
+            module_patterns = [
+                f"{crate_name}::{module_path}",  # The module itself
+                f"{crate_name}::{module_path}::%",  # Items in the module
+            ]
+
+        # Build module filter clause for main query
+        module_filter_clause = "1=1"
+        module_params = []
+        if module_patterns:
+            module_conditions = " OR ".join(
+                ["e.item_path LIKE ?" for _ in module_patterns]
+            )
+            module_filter_clause = f"({module_conditions})"
+            module_params = module_patterns
 
         # Perform vector search with additional metadata for ranking and filtering
-        cursor = await db.execute(
-            """
+        query = f"""
             SELECT
                 v.distance,
                 e.item_path,
@@ -543,28 +606,40 @@ async def search_embeddings(
                 e.deprecated
             FROM vec_embeddings v
             JOIN embeddings e ON v.rowid = e.id
-            WHERE v.embedding MATCH :embedding AND k = :k
-                AND (:type_filter IS NULL OR e.item_type = :type_filter)
-                AND (:crate_pattern IS NULL OR e.item_path LIKE :crate_pattern)
-                AND (:module_pattern IS NULL OR e.item_path LIKE :module_pattern)
-                AND (:visibility IS NULL OR e.visibility = :visibility)
-                AND (:deprecated IS NULL OR e.deprecated = :deprecated)
-                AND (:has_examples IS NULL OR (:has_examples = 0 OR e.examples IS NOT NULL))
-                AND (:min_doc_length IS NULL OR LENGTH(e.content) >= :min_doc_length)
+            WHERE v.embedding MATCH ? AND k = ?
+                AND (? IS NULL OR e.item_type = ?)
+                AND (? IS NULL OR e.item_path LIKE ?)
+                AND {module_filter_clause}
+                AND (? IS NULL OR e.visibility = ?)
+                AND (? IS NULL OR e.deprecated = ?)
+                AND (? IS NULL OR (? = 0 OR e.examples IS NOT NULL))
+                AND (? IS NULL OR LENGTH(e.content) >= ?)
             ORDER BY v.distance
-            """,
-            {
-                "embedding": bytes(sqlite_vec.serialize_float32(query_embedding)),
-                "k": fetch_k,
-                "type_filter": type_filter,
-                "crate_pattern": crate_pattern,
-                "module_pattern": module_pattern,
-                "visibility": visibility,
-                "deprecated": deprecated,
-                "has_examples": has_examples,
-                "min_doc_length": min_doc_length,
-            },
+            """
+
+        params = (
+            [
+                bytes(sqlite_vec.serialize_float32(query_embedding)),
+                fetch_k,
+                type_filter,
+                type_filter,
+                crate_pattern,
+                crate_pattern,
+            ]
+            + module_params
+            + [
+                visibility,
+                visibility,
+                deprecated,
+                deprecated,
+                has_examples,
+                has_examples,
+                min_doc_length,
+                min_doc_length,
+            ]
         )
+
+        cursor = await db.execute(query, params)
 
         results = await cursor.fetchall()
 
@@ -623,24 +698,44 @@ async def search_embeddings(
 
         # Performance monitoring
         elapsed_ms = (time.time() - start_time) * 1000
-        if elapsed_ms > 100:
-            logger.warning(f"Slow search query: {elapsed_ms:.2f}ms for k={k}")
-        else:
-            logger.debug(f"Search completed in {elapsed_ms:.2f}ms for k={k}")
+        debug_info["timing"]["total_ms"] = elapsed_ms
+        debug_info["timing"]["filter_times"] = filter_times
+        debug_info["results_at_stage"]["final"] = len(top_results)
 
-        # Log filter execution metrics
-        if filter_times:
-            logger.debug(f"Filter execution times: {filter_times}")
-            if should_prefilter:
-                logger.debug(
-                    f"Progressive filtering reduced candidates to {prefilter_count} items"
-                )
-
-        # Log score distribution for monitoring
+        # Calculate score distribution
         if top_results:
             scores = [score for score, _, _, _ in top_results]
+            debug_info["score_distribution"] = {
+                "min": min(scores),
+                "max": max(scores),
+                "avg": sum(scores) / len(scores),
+            }
+
+        # Log comprehensive search metrics
+        if elapsed_ms > 100:
+            logger.warning(
+                "slow_search_query",
+                elapsed_ms=elapsed_ms,
+                k=k,
+                results_count=len(top_results),
+                debug_info=debug_info,
+            )
+        else:
             logger.debug(
-                f"Score distribution - min: {min(scores):.3f}, max: {max(scores):.3f}, avg: {sum(scores) / len(scores):.3f}"
+                "search_completed",
+                elapsed_ms=elapsed_ms,
+                k=k,
+                results_count=len(top_results),
+                cache_hit=False,
+                filters_applied=bool(
+                    type_filter
+                    or crate_filter
+                    or module_path
+                    or has_examples
+                    or deprecated is not None
+                ),
+                score_distribution=debug_info.get("score_distribution"),
+                filter_impact=debug_info.get("results_at_stage"),
             )
 
         # Store in cache before returning

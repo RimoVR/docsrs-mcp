@@ -38,6 +38,7 @@ dependencies = [
     "rapidfuzz>=3.5.2,<3.9.0",
     "msgpack>=1.1.1",
     "filelock>=3.18.0",
+    "structlog>=24.1.0",
 ]
 
 [project.scripts]

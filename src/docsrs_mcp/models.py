@@ -1030,14 +1030,28 @@ class SearchExamplesRequest(BaseModel):
             try:
                 value = int(v)
                 if value < 1:
-                    raise ValueError(f"k must be at least 1, got {value}")
+                    raise ValueError(
+                        f"k parameter must be at least 1 (requested: {value}). "
+                        f"Use k=1 for single result, k=5 for standard results, k=10 for comprehensive."
+                    )
                 if value > 20:
-                    raise ValueError(f"k cannot exceed 20, got {value}")
+                    raise ValueError(
+                        f"k parameter cannot exceed 20 (requested: {value}). "
+                        f"Large result sets may impact performance. Use k=10 for comprehensive results."
+                    )
                 return value
             except ValueError as err:
                 if "invalid literal" in str(err):
-                    raise ValueError(f"k must be a valid integer, got '{v}'") from err
+                    raise ValueError(
+                        f"k parameter must be a valid integer between 1-20, got '{v}'. "
+                        f"Examples: k=5 (default), k=10 (comprehensive), k=20 (maximum)"
+                    ) from err
                 raise
+        if isinstance(v, int) and (v < 1 or v > 20):
+            raise ValueError(
+                f"k must be between 1-20, got {v}. "
+                f"Use k=5 for standard results, k=10 for comprehensive search."
+            )
         return v
 
     model_config = ConfigDict(extra="forbid")
@@ -1104,17 +1118,62 @@ class StartPreIngestionRequest(BaseModel):
         description="Number of crates to pre-ingest (10-500, default: 100)",
     )
 
-    @field_validator("concurrency", "count", mode="before")
+    @field_validator("concurrency", mode="before")
     @classmethod
-    def coerce_to_int(cls, v):
+    def coerce_concurrency_to_int(cls, v):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
             return v
         if isinstance(v, str):
             try:
-                return int(v)
+                value = int(v)
+                if value < 1 or value > 10:
+                    raise ValueError(
+                        f"concurrency must be between 1-10, got {value}. "
+                        f"Use concurrency=3 for balanced performance, concurrency=10 for maximum speed."
+                    )
+                return value
             except ValueError as err:
-                raise ValueError(f"Cannot convert '{v}' to integer") from err
+                if "invalid literal" in str(err):
+                    raise ValueError(
+                        f"concurrency must be a valid integer between 1-10, got '{v}'. "
+                        f"Examples: concurrency=3 (default), concurrency=5 (moderate), concurrency=10 (maximum)"
+                    ) from err
+                raise
+        if isinstance(v, int) and (v < 1 or v > 10):
+            raise ValueError(
+                f"concurrency must be between 1-10, got {v}. "
+                f"Use concurrency=3 for balanced performance, concurrency=10 for maximum speed."
+            )
+        return v
+
+    @field_validator("count", mode="before")
+    @classmethod
+    def coerce_count_to_int(cls, v):
+        """Convert string numbers to int for MCP client compatibility."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            try:
+                value = int(v)
+                if value < 10 or value > 500:
+                    raise ValueError(
+                        f"count must be between 10-500, got {value}. "
+                        f"Use count=100 for standard cache, count=200 for comprehensive, count=500 for maximum."
+                    )
+                return value
+            except ValueError as err:
+                if "invalid literal" in str(err):
+                    raise ValueError(
+                        f"count must be a valid integer between 10-500, got '{v}'. "
+                        f"Examples: count=100 (default), count=200 (comprehensive), count=500 (maximum)"
+                    ) from err
+                raise
+        if isinstance(v, int) and (v < 10 or v > 500):
+            raise ValueError(
+                f"count must be between 10-500, got {v}. "
+                f"Use count=100 for standard cache, count=200 for comprehensive, count=500 for maximum."
+            )
         return v
 
     model_config = ConfigDict(extra="forbid")

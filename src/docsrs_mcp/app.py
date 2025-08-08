@@ -888,10 +888,24 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
 
                     # Handle string input - wrap in list to prevent character iteration
                     if isinstance(examples_data, str):
-                        examples_data = [examples_data]
+                        # Ensure string is not fragmented into characters
+                        examples_data = [
+                            {
+                                "code": examples_data,
+                                "language": "rust",
+                                "detected": False,
+                            }
+                        ]
                     elif not examples_data:
                         logger.warning(
                             f"Empty examples_data for {params.crate_name}/{params.version} at {item_path}"
+                        )
+                        continue
+
+                    # Additional validation for unexpected data types
+                    if not isinstance(examples_data, (list, dict)):
+                        logger.warning(
+                            f"Unexpected examples_data type {type(examples_data).__name__} for {item_path}"
                         )
                         continue
 
@@ -905,41 +919,63 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
                         ]
 
                     for example in examples_data:
-                        # Handle both dict format and potential string format
-                        if isinstance(example, str):
-                            example = {
-                                "code": example,
-                                "language": "rust",
-                                "detected": False,
-                            }
+                        # Wrap in try-catch for resilience
+                        try:
+                            # Handle both dict format and potential string format
+                            if isinstance(example, str):
+                                example = {
+                                    "code": example,
+                                    "language": "rust",
+                                    "detected": False,
+                                }
 
-                        # Filter by language if specified
-                        if (
-                            params.language
-                            and example.get("language") != params.language
-                        ):
-                            continue
+                            # Validate example structure
+                            if not isinstance(example, dict):
+                                logger.debug(
+                                    f"Skipping non-dict example: {type(example).__name__}"
+                                )
+                                continue
 
-                        code = example.get("code", "")
-                        # Simple deduplication by code hash
-                        code_hash = hash(code)
-                        if code_hash in seen_codes:
-                            continue
-                        seen_codes.add(code_hash)
+                            # Filter by language if specified
+                            if (
+                                params.language
+                                and example.get("language") != params.language
+                            ):
+                                continue
 
-                        # Calculate relevance score (inverse of distance)
-                        score = 1.0 / (1.0 + distance)
+                            code = example.get("code", "")
 
-                        examples_list.append(
-                            CodeExample(
-                                code=code,
-                                language=example.get("language", "rust"),
-                                detected=example.get("detected", False),
-                                item_path=item_path,
-                                context=content[:200] if content else None,
-                                score=score,
+                            # Validate code content
+                            if not code or not isinstance(code, str):
+                                logger.debug(
+                                    f"Skipping example with invalid code for {item_path}"
+                                )
+                                continue
+
+                            # Simple deduplication by code hash
+                            code_hash = hash(code)
+                            if code_hash in seen_codes:
+                                continue
+                            seen_codes.add(code_hash)
+
+                            # Calculate relevance score (inverse of distance)
+                            score = 1.0 / (1.0 + distance)
+
+                            examples_list.append(
+                                CodeExample(
+                                    code=code,
+                                    language=example.get("language", "rust"),
+                                    detected=example.get("detected", False),
+                                    item_path=item_path,
+                                    context=content[:200] if content else None,
+                                    score=score,
+                                )
                             )
-                        )
+                        except Exception as ex:
+                            logger.debug(
+                                f"Error processing example for {item_path}: {ex}"
+                            )
+                            continue
 
                         if len(examples_list) >= params.k:
                             break

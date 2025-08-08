@@ -296,7 +296,7 @@
         "replacement": "sqlite-vec (REQUIRED for new projects)"
       },
       "sqliteVec": {
-        "status": "Current standard for SQLite vector search",
+        "status": "Current standard for SQLite vector search (pre-v1, breaking changes expected)",
         "version": "0.1.6",
         "backend": "Native SQLite extension",
         "features": [
@@ -310,6 +310,16 @@
           "SIMD acceleration for distance calculations",
           "WHERE clause support in MATCH queries for metadata filtering"
         ],
+        "performanceOptimizations": {
+          "queryRequirements": "Requires explicit k parameter in WHERE clause for optimal performance",
+          "complexQueries": "Use CTEs (Common Table Expressions) for complex queries to avoid query planner issues",
+          "scalabilityLimits": "Performance degrades above 1M vectors",
+          "bestPractices": [
+            "Always specify k parameter explicitly",
+            "Use CTEs for multi-step queries",
+            "Monitor performance with vector counts approaching 1M"
+          ]
+        },
         "syntax": {
           "searchOperator": "MATCH (not vec_distance)",
           "knnConstraint": "Requires 'k = ?' parameter for KNN queries",
@@ -2060,16 +2070,18 @@
       "rapidfuzz": {
         "overview": "High-performance fuzzy string matching library for Python",
         "version": {
-          "recommended": "3.5.2 to <3.9.0",
+          "recommended": "3.13.0",
+          "previousRecommendation": "3.5.2 to <3.9.0",
           "avoid": "v3.9.6 due to multiprocessing bug",
-          "rationale": "v3.5.2+ provides optimal performance while avoiding known issues in later versions"
+          "rationale": "v3.13.0 is the latest stable version with all performance optimizations and bug fixes"
         },
         "performanceAdvantages": {
           "comparison": "RapidFuzz vs FuzzyWuzzy performance comparison",
           "rapidfuzzPerformance": "20ms for 1M elements",
           "fuzzywuzzyPerformance": "7s for 1M elements",
-          "speedup": "10-50x faster than FuzzyWuzzy",
-          "implementation": "C++ implementation with SIMD optimizations for maximum performance"
+          "speedup": "350x faster than FuzzyWuzzy for fuzzy matching",
+          "implementation": "C++ implementation with Python bindings and SIMD acceleration support",
+          "license": "MIT licensed"
         },
         "features": [
           "Levenshtein distance calculation",
@@ -2253,6 +2265,27 @@
               "4. Fall back to fuzzy matching if needed"
             ],
             "benefit": "Maintains performance for exact matches while improving UX for common aliases"
+          },
+          "rustPathAliases": {
+            "commonPatterns": {
+              "stdLibrary": "std library items often in submodules (collections, sync, etc)",
+              "reExports": "Re-exports at crate root for convenience",
+              "examples": [
+                "std::collections::HashMap vs HashMap",
+                "std::sync::Arc vs Arc",
+                "std::thread::spawn vs spawn"
+              ]
+            },
+            "implementationApproach": {
+              "current": "Manual aliases practical for common cases",
+              "future": "Could parse rustdoc JSON for automatic discovery",
+              "benefit": "Reduces cognitive load for developers using common types"
+            },
+            "discoverySources": {
+              "rustdocJson": "Contains comprehensive type information and re-export mappings",
+              "crateRoot": "Check for common re-exports at crate root level",
+              "useStatements": "Analyze common use statement patterns in real codebases"
+            }
           }
         }
       }

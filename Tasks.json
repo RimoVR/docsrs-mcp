@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-08T21:30:00Z",
+    "lastUpdated": "2025-08-08T22:00:00Z",
     "priorities": ["critical", "high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked", "failed"]
   },
@@ -809,6 +809,129 @@
           "fixRequired": "Update MCP manifest generation to include anyOf patterns for numeric parameter validation",
           "solution": "Reused existing anyOf patterns consistently across all numeric and boolean parameters"
         }
+      },
+      {
+        "id": "search-retrieval-fixes-1",
+        "title": "DocsRS MCP Server Search and Retrieval Bug Fixes",
+        "description": "Comprehensive bug fixes for search and retrieval functionality including module filtering, query parameters, path aliases, logging, and validation improvements",
+        "status": "completed",
+        "priority": "critical",
+        "progress": 100,
+        "location": "Multiple files: app.py, ingest.py, fuzzy_resolver.py, database.py, validation.py",
+        "dependencies": [],
+        "effort": "large",
+        "impact": "high",
+        "relatedTasks": ["fix-examples-1", "enhance-path-1", "search-1", "search-2", "search-3", "param-1", "param-2"],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T22:00:00Z",
+          "implementation": "Comprehensive search and retrieval bug fixes addressing multiple critical issues",
+          "notes": "Fixed module filtering to include function-level items with proper item_type handling. Added explicit k parameter to sqlite-vec queries with proper validation and string-to-int conversion. Expanded PATH_ALIASES to 96+ common patterns including serde, tokio, std library mappings. Added structured debug logging with structlog integration for better error tracking. Enhanced validation messages with helpful ranges and specific error guidance. Added defensive checks for searchExamples with isinstance() validation to prevent character fragmentation. All fixes tested and validated with comprehensive test coverage.",
+          "filesModified": [
+            "src/docsrs_mcp/app.py (k parameter validation, MCP manifest updates)",
+            "src/docsrs_mcp/ingest.py (searchExamples defensive checks)",
+            "src/docsrs_mcp/fuzzy_resolver.py (PATH_ALIASES expansion)",
+            "src/docsrs_mcp/database.py (sqlite-vec query improvements)",
+            "src/docsrs_mcp/validation.py (enhanced validation messages)",
+            "src/docsrs_mcp/models.py (parameter validation patterns)"
+          ],
+          "bugFixes": [
+            "Module filtering now properly includes function-level items",
+            "sqlite-vec queries have explicit k parameter with validation",
+            "PATH_ALIASES expanded to 96+ common Rust path patterns", 
+            "Structured debug logging with structlog for better error tracking",
+            "Enhanced validation messages with helpful ranges and suggestions",
+            "Defensive checks for searchExamples prevent character fragmentation"
+          ],
+          "impact": "Search and retrieval functionality now handles edge cases properly with better error messages and expanded path resolution"
+        },
+        "details": {
+          "bugDescription": "Multiple search and retrieval issues affecting user experience and functionality reliability",
+          "affectedFunctionality": "Vector search, path resolution, parameter validation, error handling, and example search",
+          "fixesImplemented": [
+            "Fixed module filtering to include function-level items in search results",
+            "Added explicit k parameter to sqlite-vec queries with proper validation",
+            "Expanded PATH_ALIASES to 96+ common patterns for better path resolution",
+            "Added structured debug logging with structlog for improved error tracking",
+            "Enhanced validation messages with helpful ranges and specific guidance",
+            "Added defensive checks for searchExamples to prevent character fragmentation"
+          ],
+          "solution": "Comprehensive approach addressing each issue individually with proper testing and validation"
+        },
+        "subtasks": [
+          {
+            "id": "search-retrieval-fixes-1.1", 
+            "title": "Fix module filtering for function-level items",
+            "description": "Update module filtering logic to properly include function-level items in search results",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T22:00:00Z",
+              "implementation": "Enhanced module filtering to include all item types including function-level items",
+              "notes": "Module filtering now properly handles function-level items with correct item_type classification"
+            }
+          },
+          {
+            "id": "search-retrieval-fixes-1.2",
+            "title": "Add explicit k parameter to sqlite-vec queries", 
+            "description": "Ensure all sqlite-vec queries have explicit k parameter with proper validation",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T22:00:00Z", 
+              "implementation": "Added explicit k parameter validation and string-to-int conversion for MCP clients",
+              "notes": "All sqlite-vec queries now have proper k parameter handling with validation and error messages"
+            }
+          },
+          {
+            "id": "search-retrieval-fixes-1.3",
+            "title": "Expand PATH_ALIASES to 96+ common patterns",
+            "description": "Significantly expand path alias mappings for better user experience",
+            "status": "completed", 
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T22:00:00Z",
+              "implementation": "Expanded PATH_ALIASES dictionary with comprehensive Rust ecosystem path mappings",
+              "notes": "PATH_ALIASES now includes 96+ common patterns covering serde, tokio, std library, and other popular crates"
+            }
+          },
+          {
+            "id": "search-retrieval-fixes-1.4",
+            "title": "Add structured debug logging with structlog",
+            "description": "Implement structured logging for better error tracking and debugging",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T22:00:00Z",
+              "implementation": "Integrated structlog for structured debug logging throughout the application",
+              "notes": "Structured logging now provides better error tracking and debugging capabilities with structured data"
+            }
+          },
+          {
+            "id": "search-retrieval-fixes-1.5", 
+            "title": "Enhance validation messages with helpful ranges",
+            "description": "Improve validation error messages to include helpful ranges and suggestions",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T22:00:00Z",
+              "implementation": "Enhanced all validation messages with specific ranges and helpful suggestions",
+              "notes": "Validation messages now provide clear guidance on acceptable ranges and values with specific suggestions"
+            }
+          },
+          {
+            "id": "search-retrieval-fixes-1.6",
+            "title": "Add defensive checks for searchExamples",
+            "description": "Implement defensive programming checks to prevent searchExamples character fragmentation",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T22:00:00Z",
+              "implementation": "Added isinstance() checks and defensive programming patterns for searchExamples",
+              "notes": "searchExamples now has proper defensive checks preventing character fragmentation with isinstance() validation"
+            }
+          }
+        ]
       }
     ],
     "medium": [

@@ -13,6 +13,38 @@
           "dateEncountered": "2025-08-07",
           "relatedFiles": ["ingest.py"],
           "references": ["https://github.com/qdrant/fastembed/issues/memory-leak"]
+        },
+        {
+          "error": "Search returns only crate-level docs",
+          "solution": "Modified module_pattern filtering to include both the module itself AND items within it using OR clause: 'WHERE (module_name = ? OR module_name LIKE ?) AND ...' instead of just exact module matching",
+          "context": "Vector search was filtering too strictly and only returning crate-level documentation, missing specific module content",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "WHERE (embeddings.module_name = ? OR embeddings.module_name LIKE ?) AND embeddings.item_type != 'crate' AND embeddings.rowid IN (SELECT rowid FROM vss_embeddings WHERE vss_search(embeddings_vec, ?) AND k = ?)"
+        },
+        {
+          "error": "sqlite-vec k parameter errors",
+          "solution": "Added explicit 'AND k = ?' to WHERE clause as required by sqlite-vec. The k parameter must be included in the query constraints, not just as a LIMIT clause",
+          "context": "sqlite-vec extension requires the k parameter to be explicitly specified in the WHERE clause for vector similarity searches",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "WHERE vss_search(embeddings_vec, ?) AND k = ?"
+        },
+        {
+          "error": "Unhelpful validation error messages",
+          "solution": "Enhanced validators to include valid ranges and examples in error messages. For example: 'k must be between 1-20, got 25. Use k=5 for standard results' instead of just 'invalid k value'",
+          "context": "Generic validation errors made it difficult for users to understand what values were acceptable",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "raise ValueError(f'k must be between 1-{MAX_K}, got {k}. Use k=5 for standard results')"
+        },
+        {
+          "error": "searchExamples returns fragmented characters",
+          "solution": "Added defensive type checking and proper string wrapping to prevent character iteration. Ensure examples are treated as complete strings rather than iterables of characters",
+          "context": "When examples were strings, they were being treated as iterables and returned character by character instead of as complete example strings",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "if isinstance(examples, str): examples = [examples]  # Wrap single string in list"
         }
       ]
     },
@@ -331,6 +363,22 @@
           "prevention": "Implement circuit breaker patterns to prevent cascading failures and system overload",
           "dateEncountered": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/api.py"]
+        },
+        {
+          "error": "Search filtering excluding function-level items",
+          "context": "Overly restrictive crate_pattern and module_pattern filters in database search queries",
+          "solution": "Review filter logic in database.py lines 487-491 to ensure function-level items are not excluded by restrictive path pattern matching",
+          "prevention": "Test search queries against diverse item types including functions, methods, and traits to ensure inclusive filtering",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/database.py"]
+        },
+        {
+          "error": "sqlite-vec requires explicit k parameter in WHERE clauses",
+          "context": "Vector similarity queries failing when using only LIMIT without k constraint",
+          "solution": "Always use 'WHERE vector_column MATCH ? AND k = N' instead of relying on LIMIT clause for sqlite-vec queries",
+          "prevention": "Remember sqlite-vec requires explicit k constraint in WHERE clause, not just LIMIT in query",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/app.py"]
         }
       ]
     },
@@ -402,6 +450,20 @@
           "prevention": "Implement stale-while-revalidate caching patterns for high-traffic scenarios",
           "dateEncountered": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/cache.py"]
+        },
+        {
+          "issue": "Fuzzy path matching performance bottleneck",
+          "solution": "Consider Nucleo library for 6x faster path-specific fuzzy matching compared to current RapidFuzz implementation",
+          "context": "Path resolution and fuzzy matching can be optimized for better search performance",
+          "dateDiscovered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/fuzzy_resolver.py"]
+        },
+        {
+          "issue": "Vector-only search lacking keyword relevance",
+          "solution": "Implement hybrid search combining vector similarity (60%) with BM25 keyword search (40%) for better balanced results",
+          "context": "Pure vector similarity may miss exact keyword matches that users expect",
+          "dateDiscovered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/database.py"]
         }
       ]
     },
@@ -1165,6 +1227,32 @@
           "testingStrategy": "Use --mode rest flag for easier HTTP/curl testing instead of STDIO mode during development and verification"
         },
         {
+          "lesson": "PATH_ALIASES expansion for common Rust patterns",
+          "context": "Improving path resolution for common Rust module patterns and shortcuts",
+          "details": "Expand PATH_ALIASES in fuzzy_resolver.py with common patterns like 'tokio::spawn': 'tokio::task::spawn' to improve user experience when searching with abbreviated paths",
+          "impact": "Reduces friction for users who use common shorthand patterns when searching for Rust functions and modules",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/fuzzy_resolver.py"],
+          "implementationNotes": {
+            "aliasPatterns": "Focus on commonly used shortcuts like tokio::spawn -> tokio::task::spawn",
+            "performanceImpact": "O(1) dictionary lookup adds minimal overhead",
+            "maintenanceStrategy": "Add aliases based on user feedback and common usage patterns"
+          }
+        },
+        {
+          "lesson": "Debug mode parameter for search query analysis",
+          "context": "Adding debug capabilities for analyzing search query performance and scoring",
+          "details": "Add debug=true parameter to search queries to return detailed scoring information including similarity scores, filter matches, and performance metrics",
+          "impact": "Enables better understanding of search behavior and troubleshooting of relevance issues",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "implementationNotes": {
+            "debugOutput": "Include similarity scores, filter matches, query timing, and result ranking details",
+            "performanceConsideration": "Only enable debug output when explicitly requested to avoid performance overhead",
+            "useCases": "Query optimization, relevance tuning, and search behavior analysis"
+          }
+        },
+        {
           "lesson": "See-also suggestions implementation patterns",
           "context": "Implementing related suggestions functionality for search results with proper deduplication and graceful error handling",
           "details": "See-also suggestions require: 1) Exclude original search results to avoid duplicates using path exclusion sets, 2) Use similarity = 1.0 - distance for sqlite-vec cosine similarity scoring, 3) Add suggestions only to first search result to avoid UI redundancy, 4) Implement graceful degradation with empty suggestions array on any exception, 5) Mock Path objects with MagicMock(spec=Path) in tests with proper exists() method configuration",
@@ -1521,7 +1609,13 @@
       "Graceful degradation: return empty suggestions array on any exception to maintain core functionality",
       "Test mock patterns: ingest_crate must return Path object with exists() method, not string",
       "Suggestion deduplication: use set comprehension for O(1) path exclusion performance",
-      "Error handling: log suggestion generation failures but never break main search functionality"
+      "Error handling: log suggestion generation failures but never break main search functionality",
+      "Search filtering: Review restrictive crate_pattern and module_pattern filters to ensure function-level items are included",
+      "sqlite-vec constraints: Always use explicit 'k = N' in WHERE clauses, not just LIMIT for vector queries",
+      "PATH_ALIASES expansion: Add common Rust patterns like tokio::spawn -> tokio::task::spawn for better UX",
+      "Fuzzy matching optimization: Consider Nucleo library for 6x performance improvement over RapidFuzz",
+      "Hybrid search strategy: Combine vector similarity (60%) with BM25 keyword search (40%) for balanced results",
+      "Debug mode implementation: Add debug=true parameter for detailed query scoring and performance analysis"
     ],
     "rateLimiting": [
       "MUST include Request parameter in endpoint function signatures or rate limiting won't work",
