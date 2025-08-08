@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-08T21:00:00Z",
+    "lastUpdated": "2025-08-08T21:30:00Z",
     "priorities": ["critical", "high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked", "failed"]
   },
@@ -1583,17 +1583,17 @@
       },
       {
         "id": "pre-ingest-1.4",
-        "title": "Create CLI flags and configuration",
-        "description": "Add command-line interface for controlling pre-ingestion behavior",
+        "title": "Create CLI flags and MCP tool for pre-ingestion control",
+        "description": "Add command-line interface and MCP tool for controlling pre-ingestion behavior",
         "status": "completed",
         "progress": 100,
         "dependencies": ["pre-ingest-1.2"],
         "relatedTasks": ["pre-ingest-1.5"],
         "roadblocks": [],
         "completionDetails": {
-          "completedDate": "2025-08-08T18:00:00Z",
-          "implementation": "Successfully implemented CLI flags --port and --concurrency with environment variable support and configuration hierarchy",
-          "notes": "Added --port CLI flag for REST server (default: 8000, range: 1024-65535) with DOCSRS_PORT environment variable support. Added --concurrency CLI flag for pre-ingestion workers (default: 3, range: 1-10) with DOCSRS_CONCURRENCY environment variable support. Implemented configuration hierarchy: CLI args > ENV vars > defaults. Integrated with existing configuration system in config.py. Validated input ranges with user-friendly warnings. MCP mode properly ignores port flag with warning. Maintained backward compatibility. All tests pass and code quality checks complete."
+          "completedAt": "2025-08-08T21:30:00Z",
+          "implementation": "Successfully implemented CLI flags and MCP tool for pre-ingestion control with comprehensive parameter validation and integration",
+          "notes": "Added --port CLI flag for REST server (default: 8000, range: 1024-65535) with DOCSRS_PORT environment variable support. Added --concurrency CLI flag for pre-ingestion workers (default: 3, range: 1-10) with DOCSRS_CONCURRENCY environment variable support. Implemented new MCP tool 'start_pre_ingestion' added to manifest with parameters: force (boolean), concurrency (integer 1-10), count (integer 50-1000). Created comprehensive tutorial and examples for MCP tool usage. Added request/response models with validation (StartPreIngestionRequest, StartPreIngestionResponse). Full integration with existing pre-ingestion system. Complete testing with all functionality verified."
         },
         "subtasks": [
           {

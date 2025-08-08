@@ -1069,4 +1069,73 @@ class SearchExamplesResponse(BaseModel):
     )
     total_count: int = Field(..., description="Total number of examples found")
 
+
+# Pre-Ingestion Control Models
+class StartPreIngestionRequest(BaseModel):
+    """
+    Request for start_pre_ingestion tool.
+
+    Controls the pre-ingestion system that caches popular Rust crates
+    to eliminate cold-start latency.
+
+    Example:
+        ```json
+        {
+            "force": false,
+            "concurrency": 5,
+            "count": 200
+        }
+        ```
+    """
+
+    force: bool = Field(
+        default=False, description="Force restart if pre-ingestion is already running"
+    )
+    concurrency: int | None = Field(
+        default=None,
+        ge=1,
+        le=10,
+        description="Number of parallel download workers (1-10, default: 3)",
+    )
+    count: int | None = Field(
+        default=None,
+        ge=10,
+        le=500,
+        description="Number of crates to pre-ingest (10-500, default: 100)",
+    )
+
+    @field_validator("concurrency", "count", mode="before")
+    @classmethod
+    def coerce_to_int(cls, v):
+        """Convert string numbers to int for MCP client compatibility."""
+        if v is None:
+            return v
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError as err:
+                raise ValueError(f"Cannot convert '{v}' to integer") from err
+        return v
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class StartPreIngestionResponse(BaseModel):
+    """Response model for start_pre_ingestion tool."""
+
+    status: Literal["started", "already_running", "restarted"] = Field(
+        ..., description="Current status of the pre-ingestion operation"
+    )
+    message: str = Field(..., description="Detailed message about the operation result")
+    stats: dict[str, Any] | None = Field(
+        default=None, description="Current ingestion statistics if available"
+    )
+    monitoring: dict[str, str] = Field(
+        default_factory=lambda: {
+            "health_endpoint": "/health",
+            "detailed_status": "/health/pre-ingestion",
+        },
+        description="Endpoints for monitoring pre-ingestion progress",
+    )
+
     model_config = ConfigDict(extra="forbid")

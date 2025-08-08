@@ -13,6 +13,22 @@
           "method": "FastMCP.from_fastapi()",
           "features": "Automatic REST to MCP conversion",
           "integrationStatus": "Successfully integrated",
+          "autoDiscovery": {
+            "version": "2.11.1",
+            "mechanism": "POST /mcp/tools/{tool_name} pattern",
+            "description": "FastMCP 2.11.1 provides automatic tool discovery via REST endpoints",
+            "implementation": "Tools defined in MCPManifest with MCPTool objects are automatically discoverable",
+            "benefit": "Eliminates need for manual MCP tool registration and configuration"
+          },
+          "toolDefinition": {
+            "structure": "MCPManifest with MCPTool objects",
+            "fields": {
+              "tutorial": "Rich documentation field for AI agent guidance",
+              "examples": "Concrete usage examples for enhanced AI understanding",
+              "description": "Detailed tool purpose and functionality description"
+            },
+            "benefit": "Provides comprehensive tool documentation that enhances AI agent tool selection and usage"
+          },
           "transport": {
             "required": "STDIO transport for Claude Desktop integration",
             "critical": "All logging must go to stderr to avoid STDIO corruption",
@@ -65,7 +81,13 @@
                 "pattern": "@field_validator('numeric_field', mode='before') decorator with type conversion",
                 "timing": "Validators with mode='before' execute before Pydantic's built-in type validation",
                 "benefit": "Allows seamless conversion of MCP string parameters to expected Python types",
-                "mcpCompatibility": "Field validators with mode='before' essential for MCP client compatibility due to inconsistent parameter serialization"
+                "mcpCompatibility": "Field validators with mode='before' essential for MCP client compatibility due to inconsistent parameter serialization",
+                "rangeValidation": {
+                  "implementation": "Combined type coercion and range validation in single field_validator",
+                  "constraints": "Use Pydantic Field() with ge/le constraints for range validation",
+                  "pattern": "field_validator converts string to int, then Field(ge=1, le=100) validates range",
+                  "benefit": "Seamless MCP client compatibility with robust parameter validation"
+                }
               }
             },
             "parameterValidation": {
@@ -1304,6 +1326,33 @@
             },
             "routeDocstrings": "FastAPI extracts route function docstrings for operation descriptions",
             "responseModels": "Define response_model parameter for complete API documentation"
+          }
+        },
+        "errorHandling": {
+          "httpExceptions": {
+            "library": "FastAPI HTTPException",
+            "purpose": "Consistent HTTP error responses across MCP tools",
+            "implementation": "raise HTTPException(status_code=422, detail='error message')",
+            "statusCodes": {
+              "422": "Unprocessable Entity - for validation errors",
+              "400": "Bad Request - for malformed requests",
+              "404": "Not Found - for missing resources",
+              "500": "Internal Server Error - for server-side failures"
+            },
+            "benefit": "Standardized error format compatible with MCP clients"
+          },
+          "loggingBestPractices": {
+            "stderrLogging": {
+              "requirement": "All logging must go to stderr to prevent STDIO corruption",
+              "reason": "MCP protocol uses STDIN/STDOUT for communication with Claude Desktop",
+              "implementation": "Configure all loggers to write to stderr instead of stdout",
+              "criticality": "STDOUT pollution breaks MCP protocol communication"
+            },
+            "validationErrorLogging": {
+              "pattern": "Log validation errors with sufficient detail for debugging",
+              "implementation": "Include parameter values and validation constraints in error messages",
+              "benefit": "Facilitates troubleshooting of MCP tool parameter issues"
+            }
           }
         }
       },
@@ -2619,6 +2668,17 @@
             "implementation": "Use asyncio.create_task() to start background tasks without awaiting",
             "benefit": "Server remains responsive during background task initialization",
             "pattern": "Start background tasks in startup event handler without blocking"
+          },
+          "duplicateTaskPrevention": {
+            "mechanism": "Global state checking prevents duplicate task execution",
+            "implementation": "Use global variables to track running background tasks",
+            "pattern": "Check global state before creating new background tasks",
+            "benefit": "Prevents resource conflicts and unnecessary duplicate processing",
+            "forceParameter": {
+              "purpose": "Allows controlled restart of background tasks",
+              "implementation": "Force parameter bypasses global state checking",
+              "useCase": "Administrative control over background task lifecycle"
+            }
           },
           "errorIsolation": {
             "principle": "Background task errors shouldn't prevent server startup",

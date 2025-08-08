@@ -378,6 +378,7 @@ graph TD
         SEARCH_EX[search_examples<br/>Semantic code example search<br/>Input: query, language filter<br/>Output: scored code examples with deduplication]
         GET_SIG[get_item_signature<br/>Item signature retrieval<br/>Input: item_path<br/>Output: complete signature]
         INGEST_TOOL[ingest_crate<br/>Manual crate ingestion<br/>Input: crate name/version<br/>Output: ingestion status]
+        START_PRE_INGEST[start_pre_ingestion<br/>Start pre-ingestion system<br/>Input: force, concurrency, count<br/>Output: status, message, stats, monitoring]
         GET_MOD_TREE[get_module_tree<br/>Module hierarchy navigation<br/>Input: crate, version, module_path<br/>Output: hierarchical tree structure]
     end
     
@@ -393,6 +394,7 @@ graph TD
         REST_SEARCH_EX[POST /search_examples<br/>Code example search endpoint]
         REST_SIG[POST /get_item_signature<br/>Signature endpoint]
         REST_INGEST[POST /ingest<br/>FastAPI endpoint]
+        REST_START_PRE[POST /mcp/tools/start_pre_ingestion<br/>Pre-ingestion control endpoint]
         REST_MOD_TREE[POST /get_module_tree<br/>Module tree endpoint]
         HEALTH[GET /health<br/>Liveness probe]
     end
@@ -402,6 +404,7 @@ graph TD
     FASTMCP --> GET_EX
     FASTMCP --> GET_SIG
     FASTMCP --> INGEST_TOOL
+    FASTMCP --> START_PRE_INGEST
     FASTMCP --> GET_MOD_TREE
     SEARCH_DOC -->|converts| REST_SEARCH_DOC
     NAV_MOD -->|converts| REST_NAV
@@ -409,6 +412,7 @@ graph TD
     SEARCH_EX -->|converts| REST_SEARCH_EX
     GET_SIG -->|converts| REST_SIG
     INGEST_TOOL -->|converts| REST_INGEST
+    START_PRE_INGEST -->|converts| REST_START_PRE
     GET_MOD_TREE -->|converts| REST_MOD_TREE
     STDIO_TRANSPORT --> FASTMCP
 ```
@@ -495,6 +499,7 @@ graph TB
         EXAMPLES["/mcp/tools/get_examples"<br/>30/minute per IP]
         SIGNATURE["/mcp/tools/get_item_signature"<br/>30/minute per IP]
         INGEST["/mcp/tools/ingest_crate"<br/>30/minute per IP]
+        START_PRE["/mcp/tools/start_pre_ingestion"<br/>30/second per IP]
         MODULE_TREE["/mcp/tools/get_module_tree"<br/>30/minute per IP]
     end
     
@@ -3275,6 +3280,120 @@ classDiagram
 - **Atomic Operations**: File locking and atomic writes prevent data corruption during failures
 - **Graceful Degradation**: Failed pre-ingestion attempts don't impact on-demand user requests
 - **Comprehensive Logging**: Detailed error tracking without impacting user-facing performance
+
+## MCP Pre-Ingestion Control Tool Architecture
+
+The `start_pre_ingestion` MCP tool provides programmatic control over the background pre-ingestion system, enabling external services and agents to efficiently manage cache warming and performance optimization.
+
+### Tool Integration Architecture
+
+```mermaid
+graph TD
+    subgraph "MCP Tool Layer"
+        TOOL[start_pre_ingestion<br/>MCP Tool]
+        REQ[StartPreIngestionRequest<br/>force, concurrency, count]
+        RESP[StartPreIngestionResponse<br/>status, message, stats, monitoring]
+    end
+    
+    subgraph "REST API Layer"
+        ENDPOINT[POST /mcp/tools/start_pre_ingestion<br/>Rate Limited: 30/second per IP]
+        VALIDATION[Pydantic Model Validation<br/>Request parameter validation]
+    end
+    
+    subgraph "Control Logic"
+        STATE_CHECK[Global State Check<br/>worker and scheduler status]
+        DUPLICATE_GUARD[Duplicate Prevention<br/>unless force=true]
+        TASK_SPAWN[asyncio.create_task()<br/>Background execution]
+    end
+    
+    subgraph "Pre-Ingestion System"
+        MANAGER[PopularCratesManager<br/>Orchestration layer]
+        WORKER[PreIngestionWorker<br/>Execution layer]
+        SCHEDULER[IngestionScheduler<br/>Background scheduler]
+    end
+    
+    TOOL --> ENDPOINT
+    ENDPOINT --> REQ
+    REQ --> VALIDATION
+    VALIDATION --> STATE_CHECK
+    STATE_CHECK --> DUPLICATE_GUARD
+    DUPLICATE_GUARD --> TASK_SPAWN
+    TASK_SPAWN --> MANAGER
+    MANAGER --> WORKER
+    MANAGER --> SCHEDULER
+    WORKER --> RESP
+    RESP --> TOOL
+```
+
+### Request/Response Flow
+
+The tool implements a comprehensive state-aware execution model:
+
+**StartPreIngestionRequest Model**:
+- `force: bool` - Restart pre-ingestion even if already running (default: false)
+- `concurrency: int` - Number of concurrent workers (default: 3, max: 10)
+- `count: int` - Number of crates to process (default: derived from popular crates list)
+
+**StartPreIngestionResponse Model**:
+- `status: Literal["started", "already_running", "restarted"]` - Operation result
+- `message: str` - Detailed human-readable status message
+- `stats: dict[str, Any] | None` - Current ingestion statistics if available
+- `monitoring: dict[str, str]` - Health check and monitoring endpoint URLs
+
+### State Management Logic
+
+The tool implements sophisticated state management to prevent resource conflicts:
+
+```mermaid
+flowchart TD
+    START([Tool Invocation])
+    CHECK_STATE{Check Global Worker<br/>& Scheduler Status}
+    RUNNING{Is Pre-ingestion<br/>Running?}
+    FORCE{force=true?}
+    RETURN_RUNNING[Return: already_running]
+    STOP_EXISTING[Stop Existing Process]
+    START_NEW[asyncio.create_task(<br/>start_pre_ingestion)]
+    RETURN_STARTED[Return: started]
+    RETURN_RESTARTED[Return: restarted]
+    
+    START --> CHECK_STATE
+    CHECK_STATE --> RUNNING
+    RUNNING -->|Yes| FORCE
+    RUNNING -->|No| START_NEW
+    FORCE -->|No| RETURN_RUNNING
+    FORCE -->|Yes| STOP_EXISTING
+    STOP_EXISTING --> START_NEW
+    START_NEW --> RETURN_STARTED
+    START_NEW --> RETURN_RESTARTED
+```
+
+**Key State Management Features**:
+- **Global State Awareness**: Checks both worker and scheduler status before execution
+- **Duplicate Prevention**: Prevents multiple concurrent pre-ingestion processes unless forced
+- **Graceful Restart**: When `force=true`, cleanly stops existing processes before starting new ones
+- **Background Execution**: Uses `asyncio.create_task()` to avoid blocking the API response
+- **Resource Protection**: Validates concurrency limits to prevent resource exhaustion
+
+### Integration Points
+
+The tool integrates seamlessly with existing system components:
+
+**PopularCratesManager Integration**:
+- Reuses existing orchestration infrastructure
+- Inherits circuit breaker and resilience patterns
+- Maintains priority queue and memory monitoring
+
+**PreIngestionWorker Integration**:
+- Delegates actual ingestion work to established worker infrastructure
+- Benefits from existing rate limiting and error handling
+- Maintains compatibility with on-demand ingestion requests
+
+**Health Check Integration**:
+- Provides monitoring endpoints in response for status tracking
+- Integrates with existing `/health` endpoint statistics
+- Enables real-time progress monitoring through structured URLs
+
+This architecture ensures the MCP tool provides powerful pre-ingestion control while maintaining system reliability and performance characteristics.
 
 ## Enhanced MCP Tool Documentation Architecture
 
