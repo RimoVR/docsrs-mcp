@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-08T18:00:00Z",
+    "lastUpdated": "2025-08-08T20:00:00Z",
     "priorities": ["critical", "high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked", "failed"]
   },
@@ -1585,32 +1585,52 @@
         "id": "pre-ingest-1.4",
         "title": "Create CLI flags and configuration",
         "description": "Add command-line interface for controlling pre-ingestion behavior",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": ["pre-ingest-1.2"],
         "relatedTasks": ["pre-ingest-1.5"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T18:00:00Z",
+          "implementation": "Successfully implemented CLI flags --port and --concurrency with environment variable support and configuration hierarchy",
+          "notes": "Added --port CLI flag for REST server (default: 8000, range: 1024-65535) with DOCSRS_PORT environment variable support. Added --concurrency CLI flag for pre-ingestion workers (default: 3, range: 1-10) with DOCSRS_CONCURRENCY environment variable support. Implemented configuration hierarchy: CLI args > ENV vars > defaults. Integrated with existing configuration system in config.py. Validated input ranges with user-friendly warnings. MCP mode properly ignores port flag with warning. Maintained backward compatibility. All tests pass and code quality checks complete."
+        },
         "subtasks": [
           {
             "id": "pre-ingest-1.4.1",
             "title": "Add CLI flags for pre-ingestion",
             "description": "Create command-line options to enable/disable pre-ingestion",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T18:00:00Z",
+              "implementation": "Added --port and --concurrency CLI flags with proper validation and help text",
+              "notes": "Successfully implemented CLI flags with input validation, range checking, and integration with argument parser"
+            }
           },
           {
             "id": "pre-ingest-1.4.2",
             "title": "Add configuration file support",
             "description": "Support configuration files for pre-ingestion settings",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T18:00:00Z",
+              "implementation": "Integrated with existing configuration system in config.py for centralized configuration management",
+              "notes": "Configuration hierarchy properly established with CLI args taking precedence over environment variables and defaults"
+            }
           },
           {
             "id": "pre-ingest-1.4.3",
             "title": "Add environment variable support",
             "description": "Allow configuration through environment variables",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T18:00:00Z",
+              "implementation": "Added DOCSRS_PORT and DOCSRS_CONCURRENCY environment variable support with proper fallback chain",
+              "notes": "Environment variables properly integrated into configuration hierarchy with validation and error handling"
+            }
           }
         ]
       },
