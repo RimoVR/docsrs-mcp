@@ -262,6 +262,113 @@ async def test_evict_cache_if_needed(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_priority_aware_cache_eviction(tmp_path):
+    """Test priority-aware cache eviction that preserves popular crates."""
+    # Create mock cache structure
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    # Create test files with different crates and ages
+    import time
+
+    from docsrs_mcp.models import PopularCrate
+
+    # Create unknown/unpopular crate (oldest)
+    (cache_dir / "unknown_crate").mkdir()
+    unknown_db = cache_dir / "unknown_crate" / "1.0.0.db"
+    unknown_db.write_bytes(b"x" * 1000)
+    time.sleep(0.1)
+
+    # Create popular crate (middle age)
+    (cache_dir / "serde").mkdir()
+    serde_db = cache_dir / "serde" / "1.0.0.db"
+    serde_db.write_bytes(b"x" * 1000)
+    time.sleep(0.1)
+
+    # Create another unknown crate (newest)
+    (cache_dir / "random_crate").mkdir()
+    random_db = cache_dir / "random_crate" / "1.0.0.db"
+    random_db.write_bytes(b"x" * 1000)
+
+    # Mock popular crates data
+    mock_popular_crates = [
+        PopularCrate(
+            name="serde",
+            downloads=150000000,  # Very popular
+            description="Serialization framework",
+            version="1.0.219",
+            last_updated=time.time(),
+        ),
+        PopularCrate(
+            name="tokio",
+            downloads=100000000,
+            description="Async runtime",
+            version="1.0.0",
+            last_updated=time.time(),
+        ),
+    ]
+
+    # Mock the PopularCratesManager
+    mock_manager = AsyncMock()
+    mock_manager.get_popular_crates_with_metadata = AsyncMock(
+        return_value=mock_popular_crates
+    )
+
+    # Set cache limit to 2500 bytes (should evict one file)
+    with patch("docsrs_mcp.ingest.CACHE_DIR", cache_dir):
+        with patch("docsrs_mcp.ingest.CACHE_MAX_SIZE_BYTES", 2500):
+            with patch("docsrs_mcp.ingest.PRIORITY_CACHE_EVICTION_ENABLED", True):
+                with patch(
+                    "docsrs_mcp.popular_crates.get_popular_manager", return_value=lambda: mock_manager
+                ):
+                    await evict_cache_if_needed()
+
+    # Should evict unknown_crate (oldest unpopular), keep serde (popular) and random_crate
+    assert not unknown_db.exists()  # Evicted: unpopular and old
+    assert serde_db.exists()  # Kept: popular despite being older than random_crate
+    assert random_db.exists()  # Kept: newest file
+
+
+@pytest.mark.asyncio
+async def test_priority_eviction_fallback(tmp_path):
+    """Test fallback to time-based eviction when priority data unavailable."""
+    # Create mock cache structure
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    # Create test files
+    import time
+
+    (cache_dir / "old").mkdir()
+    old_db = cache_dir / "old" / "1.0.0.db"
+    old_db.write_bytes(b"x" * 1000)
+    time.sleep(0.1)
+
+    (cache_dir / "new").mkdir()
+    new_db = cache_dir / "new" / "1.0.0.db"
+    new_db.write_bytes(b"x" * 1000)
+
+    # Mock manager that fails
+    mock_manager = AsyncMock()
+    mock_manager.get_popular_crates_with_metadata = AsyncMock(
+        side_effect=Exception("API failure")
+    )
+
+    # Set cache limit to 1500 bytes
+    with patch("docsrs_mcp.ingest.CACHE_DIR", cache_dir):
+        with patch("docsrs_mcp.ingest.CACHE_MAX_SIZE_BYTES", 1500):
+            with patch("docsrs_mcp.ingest.PRIORITY_CACHE_EVICTION_ENABLED", True):
+                with patch(
+                    "docsrs_mcp.popular_crates.get_popular_manager", return_value=lambda: mock_manager
+                ):
+                    await evict_cache_if_needed()
+
+    # Should fall back to time-based eviction, removing oldest
+    assert not old_db.exists()
+    assert new_db.exists()
+
+
+@pytest.mark.asyncio
 async def test_download_rustdoc_with_compression():
     """Test downloading rustdoc with compression format detection."""
     # Mock compressed content

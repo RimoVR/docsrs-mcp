@@ -1304,6 +1304,32 @@
           "dateAdded": "2025-08-07"
         }
       ]
+    },
+    "cache_management": {
+      "description": "Cache management patterns and solutions",
+      "entries": [
+        {
+          "issue": "Circular import between ingest.py and popular_crates.py",
+          "solution": "Use lazy import inside function to avoid circular dependency. Import get_popular_manager inside evict_cache_if_needed() instead of at module level.",
+          "lesson": "When modules have bidirectional dependencies, use lazy imports inside functions rather than module-level imports to break the cycle.",
+          "context": "Priority-aware cache eviction feature implementation",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/popular_crates.py"]
+        }
+      ]
+    },
+    "testing": {
+      "description": "Testing patterns and solutions for complex scenarios",
+      "entries": [
+        {
+          "issue": "Mocking imported functions that are lazily imported",
+          "solution": "When a function is imported inside another function (lazy import), patch it at its original module location, not where it's imported. Example: patch 'module.function' not 'importing_module.function'",
+          "lesson": "Always patch at the source module, not at the import location, especially for lazy imports.",
+          "context": "Testing priority-aware cache eviction with lazy imports",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["tests/test_ingest.py"]
+        }
+      ]
     }
   },
   "errorTemplate": {

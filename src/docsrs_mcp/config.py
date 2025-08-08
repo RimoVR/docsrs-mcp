@@ -72,6 +72,12 @@ CACHE_MAX_SIZE_BYTES = int(
     os.getenv("DOCSRS_CACHE_MAX_SIZE_BYTES", str(2 * 1024**3))
 )  # 2GB
 
+# Priority-aware cache eviction configuration
+PRIORITY_CACHE_EVICTION_ENABLED = (
+    os.getenv("DOCSRS_PRIORITY_CACHE_EVICTION_ENABLED", "true").lower() == "true"
+)
+CACHE_PRIORITY_WEIGHT = float(os.getenv("DOCSRS_CACHE_PRIORITY_WEIGHT", "0.7"))
+
 # Rustdoc processing
 RUSTDOC_CHUNK_MAX_SIZE = int(os.getenv("DOCSRS_RUSTDOC_CHUNK_MAX_SIZE", "4096"))
 

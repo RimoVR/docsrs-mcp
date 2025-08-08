@@ -1632,6 +1632,65 @@
             "Prefer word-level over character-level processing (7x performance improvement)",
             "Explicit type checking prevents unintended string iteration bugs"
           ]
+        },
+        "cacheManagement": {
+          "overview": "Advanced cache management strategies and performance optimization techniques",
+          "priorityQueues": {
+            "library": "Python heapq",
+            "bestPractice": "Use 3-element list pattern [priority, counter, item] for tie-breaking in priority queues",
+            "rationale": "Prevents comparison errors when items with equal priority are not comparable",
+            "performance": "O(log n) operations for priority queue management",
+            "implementation": "Counter ensures stable ordering and prevents TypeError on equal priorities"
+          },
+          "evictionAlgorithms": {
+            "LRU": {
+              "description": "Least Recently Used - standard for most caching systems",
+              "suitability": "Optimal for temporal locality patterns in data access",
+              "implementation": "Maintains access order and evicts oldest unused items"
+            },
+            "hybridLRUPriority": {
+              "description": "Hybrid LRU+priority effectively balances recency and importance",
+              "advantage": "Combines temporal access patterns with explicit importance weighting",
+              "useCase": "Systems where some items have inherent importance beyond access patterns"
+            },
+            "logScaleScoring": {
+              "purpose": "Log scale scoring prevents extreme priority differences",
+              "benefit": "Avoids situations where high-priority items never get evicted",
+              "implementation": "Apply logarithmic transformation to priority scores for balanced eviction"
+            },
+            "S3FIFO": {
+              "performance": "6x better throughput compared to standard LRU",
+              "tradeoff": "Higher implementation complexity for significant performance gains",
+              "consideration": "Evaluate complexity vs performance benefits for specific use cases"
+            }
+          },
+          "pythonSpecificOptimizations": {
+            "osWalk": {
+              "optimizedVersion": "Python 3.5+ with scandir integration",
+              "performance": "Significantly faster directory traversal using os.scandir internally",
+              "recommendation": "Prefer os.walk for file system traversal in Python 3.5+"
+            },
+            "sizeLimits": {
+              "principle": "Always set size limits to prevent unbounded cache growth",
+              "rationale": "Prevents memory exhaustion and maintains predictable resource usage",
+              "implementation": "Implement both item count and total size constraints"
+            },
+            "functoolsLimitations": {
+              "library": "functools.lru_cache",
+              "limitation": "Unsuitable for complex priority schemes",
+              "reason": "Simple LRU implementation without priority or custom eviction support",
+              "alternative": "Implement custom cache with priority queue for complex scenarios"
+            }
+          },
+          "bestPractices": [
+            "Use 3-element heapq pattern [priority, counter, item] for stable priority queues",
+            "Implement hybrid LRU+priority for balanced recency and importance",
+            "Apply log scale scoring to prevent extreme priority differences",
+            "Always set cache size limits to prevent unbounded growth",
+            "Leverage Python 3.5+ os.walk performance optimizations",
+            "Avoid functools.lru_cache for complex priority-based eviction schemes",
+            "Consider S3-FIFO for high-throughput scenarios if complexity is acceptable"
+          ]
         }
       }
     },
@@ -2837,7 +2896,14 @@
       "Monitor memory usage with psutil at 80% threshold for adaptive scheduler performance decisions",
       "Use Python 3.12 eager tasks for 2-5x performance improvement in synchronous coroutines",
       "Implement non-blocking background task startup to maintain FastAPI server responsiveness",
-      "Create separate resource instances for background tasks to avoid resource contention performance impacts"
+      "Create separate resource instances for background tasks to avoid resource contention performance impacts",
+      "Use 3-element heapq pattern [priority, counter, item] for stable priority queue operations",
+      "Implement hybrid LRU+priority caching to balance recency and importance effectively",
+      "Apply log scale scoring to prevent extreme priority differences in cache eviction",
+      "Always set cache size limits to prevent unbounded memory growth",
+      "Leverage Python 3.5+ os.walk performance optimizations with scandir integration", 
+      "Avoid functools.lru_cache for complex priority-based eviction schemes",
+      "Consider S3-FIFO algorithm for 6x better throughput in high-performance scenarios"
     ],
     "production": [
       "Configure proper worker count for uvicorn",

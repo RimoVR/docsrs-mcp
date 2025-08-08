@@ -954,6 +954,16 @@ async def start_pre_ingestion() -> tuple[
         return None, None
 
 
+def get_popular_manager() -> PopularCratesManager:
+    """Get or create the global PopularCratesManager instance."""
+    global _popular_crates_manager
+
+    if _popular_crates_manager is None:
+        _popular_crates_manager = PopularCratesManager()
+
+    return _popular_crates_manager
+
+
 def get_popular_crates_status() -> dict[str, Any]:
     """Get combined status for health endpoint."""
     status = {

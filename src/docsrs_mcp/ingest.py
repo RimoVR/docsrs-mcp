@@ -7,8 +7,10 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import re
+import time
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,7 @@ from .config import (
     MAX_DOWNLOAD_SIZE,
     MODEL_NAME,
     PARSE_CHUNK_SIZE,
+    PRIORITY_CACHE_EVICTION_ENABLED,
     RUST_VERSION_MANIFEST_URL,
     STDLIB_CRATES,
 )
@@ -1235,7 +1238,7 @@ def calculate_cache_size() -> int:
 
 
 async def evict_cache_if_needed() -> None:
-    """Evict oldest cache files if total size exceeds limit."""
+    """Evict cache files with priority-aware logic if total size exceeds limit."""
     current_size = calculate_cache_size()
 
     if current_size <= CACHE_MAX_SIZE_BYTES:
@@ -1256,21 +1259,83 @@ async def evict_cache_if_needed() -> None:
                     file_path = os.path.join(root, file)
                     try:
                         stat_info = os.stat(file_path)
+
+                        # Extract crate name from path (cache/{crate}/{version}.db)
+                        path_obj = Path(file_path)
+                        crate_name = None
+                        try:
+                            # Get parent directory name as crate name
+                            crate_name = path_obj.parent.name
+                        except Exception:
+                            # If extraction fails, treat as unknown crate
+                            crate_name = None
+
                         cache_files.append(
                             {
                                 "path": file_path,
                                 "size": stat_info.st_size,
                                 "mtime": stat_info.st_mtime,
+                                "crate_name": crate_name,
                             }
                         )
                     except OSError:
                         pass
 
-        # Sort by modification time (oldest first)
-        cache_files.sort(key=lambda x: x["mtime"])
+        # Priority-aware eviction logic
+        if PRIORITY_CACHE_EVICTION_ENABLED:
+            try:
+                # Get popular crates data for priority scoring
+                # Import here to avoid circular dependency
+                from .popular_crates import get_popular_manager
+                
+                manager = get_popular_manager()
+                popular_crates = await manager.get_popular_crates_with_metadata()
 
-        # Remove oldest files until under limit
+                # Create lookup dictionary for O(1) access
+                popular_dict = (
+                    {c.name: c.downloads for c in popular_crates}
+                    if popular_crates
+                    else {}
+                )
+
+                # Calculate priority scores for each file
+                for file_info in cache_files:
+                    crate_name = file_info.get("crate_name")
+                    downloads = popular_dict.get(crate_name, 0) if crate_name else 0
+
+                    # Calculate priority score using log scale for downloads
+                    # Popular crates get higher priority (lower eviction priority)
+                    if downloads > 0:
+                        # Use log scale to prevent extreme differences
+                        priority = math.log10(downloads + 1)
+                    else:
+                        priority = 0
+
+                    file_info["priority"] = priority
+                    file_info["downloads"] = downloads
+
+                # Hybrid sorting: primary by priority (ascending = evict low priority first),
+                # secondary by mtime (oldest first within same priority tier)
+                cache_files.sort(
+                    key=lambda x: (
+                        x.get("priority", 0),  # Lower priority first (evict first)
+                        x["mtime"],  # Older files first within same priority
+                    )
+                )
+
+                logger.debug("Using priority-aware cache eviction")
+
+            except Exception as e:
+                # Fallback to time-based eviction if priority scoring fails
+                logger.warning(f"Priority eviction failed, using time-based: {e}")
+                cache_files.sort(key=lambda x: x["mtime"])
+        else:
+            # Standard time-based eviction
+            cache_files.sort(key=lambda x: x["mtime"])
+
+        # Remove files until under limit
         removed_size = 0
+        removed_count = 0
         for file_info in cache_files:
             if current_size - removed_size <= CACHE_MAX_SIZE_BYTES:
                 break
@@ -1278,13 +1343,31 @@ async def evict_cache_if_needed() -> None:
             try:
                 os.remove(file_info["path"])
                 removed_size += file_info["size"]
-                logger.info(
-                    f"Evicted cache file: {file_info['path']} ({file_info['size']} bytes)"
-                )
+                removed_count += 1
+
+                # Enhanced logging with priority information
+                if PRIORITY_CACHE_EVICTION_ENABLED and "priority" in file_info:
+                    crate_info = file_info.get("crate_name", "unknown")
+                    priority = file_info.get("priority", 0)
+                    downloads = file_info.get("downloads", 0)
+                    age_days = (time.time() - file_info["mtime"]) / 86400
+
+                    logger.info(
+                        f"Evicted: {crate_info} "
+                        f"(priority: {priority:.2f}, downloads: {downloads}, "
+                        f"age: {age_days:.1f} days, size: {file_info['size']} bytes)"
+                    )
+                else:
+                    logger.info(
+                        f"Evicted cache file: {file_info['path']} ({file_info['size']} bytes)"
+                    )
+
             except OSError as e:
                 logger.warning(f"Error removing cache file {file_info['path']}: {e}")
 
-        logger.info(f"Evicted {removed_size} bytes from cache")
+        logger.info(
+            f"Evicted {removed_count} files totaling {removed_size} bytes from cache"
+        )
 
     except Exception as e:
         logger.error(f"Error during cache eviction: {e}")

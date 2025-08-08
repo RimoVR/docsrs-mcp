@@ -2254,10 +2254,36 @@ sequenceDiagram
 - **Performance Impact**: ~10-15% overhead for enhanced metadata + memory monitoring
 
 ### Cache Management Strategy
-- **LRU Algorithm**: Based on file system modification time (mtime)
+
+The cache management system implements a multi-layered approach to maintain optimal cache performance while preserving frequently accessed documentation:
+
+**Traditional LRU Foundation:**
 - **Size Monitoring**: Uses `os.walk()` and `os.stat()` for efficient calculation
-- **Eviction Process**: Removes oldest files first until under size limit
+- **Eviction Process**: Removes files based on eviction strategy until under size limit
 - **Error Handling**: Graceful handling of file system errors during cleanup
+
+#### Priority-Aware Cache Eviction
+
+The cache eviction system now implements priority-aware eviction that preserves popular crates during cache pressure:
+
+**Key Components:**
+- **Priority Scoring**: Uses logarithmic scale of download counts to calculate retention priority
+- **Hybrid Eviction**: Combines priority scores with modification time for eviction decisions
+- **PopularCratesManager Integration**: Leverages existing popular crates data for priority information
+- **Graceful Fallback**: Automatically falls back to time-based LRU eviction if priority data unavailable
+
+**Implementation Details:**
+- Extracts crate names from cache file paths (cache/{crate}/{version}.db)
+- Fetches download counts from PopularCratesManager's cached metadata
+- Calculates priority score: log10(downloads + 1) for popular crates, 0 for unknown
+- Sorts cache files by (priority, mtime) - evicts low priority, old files first
+- Enhanced logging shows eviction decisions with priority, downloads, and age
+
+**Configuration:**
+- `PRIORITY_CACHE_EVICTION_ENABLED`: Enable/disable priority eviction (default: true)
+- `CACHE_PRIORITY_WEIGHT`: Priority vs recency weight (default: 0.7)
+
+This ensures popular crates like serde, tokio, and clap remain cached longer, providing sub-100ms response times for frequently accessed documentation.
 
 ### Enhanced Rustdoc Implementation Summary
 
