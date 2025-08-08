@@ -60,6 +60,42 @@
           "relatedFiles": ["tests/test_ingest.py"]
         },
         {
+          "error": "pytest-asyncio fixture compatibility issues in 0.23.x versions",
+          "context": "Testing async functions and fixtures with pytest-asyncio",
+          "solution": "Downgrade to pytest-asyncio==0.21.1 for stable async fixture support",
+          "prevention": "Pin pytest-asyncio to 0.21.1 in development dependencies and avoid 0.23.x until issues are resolved",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["pyproject.toml", "tests/"],
+          "command": "uv add --dev pytest-asyncio==0.21.1"
+        },
+        {
+          "error": "prometheus-client memory leak warnings in high-cardinality scenarios",
+          "context": "Prometheus metrics collection with many unique label combinations",
+          "solution": "Monitor memory usage and implement label cardinality limits, use histogram buckets instead of individual metrics where possible",
+          "prevention": "Design metric labels carefully to avoid high cardinality, regularly review metric memory footprint in production",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["monitoring/metrics.py"],
+          "references": ["Prometheus best practices documentation on cardinality"]
+        },
+        {
+          "error": "fetch_current_stable_version session parameter missing",
+          "context": "HTTP session not properly passed to version fetching function",
+          "solution": "Always pass aiohttp session parameter to fetch_current_stable_version function calls",
+          "prevention": "Use type hints and validate session parameter in function signature",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/version_utils.py"],
+          "pattern": "fetch_current_stable_version(session=session)"
+        },
+        {
+          "error": "hypothesis module not found for property-based testing",
+          "context": "Running property-based tests that require hypothesis library",
+          "solution": "Install hypothesis for property-based testing support",
+          "prevention": "Include hypothesis in development dependencies for comprehensive testing",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["tests/", "pyproject.toml"],
+          "command": "uv add --dev hypothesis"
+        },
+        {
           "error": "Variable scope in exception handlers",
           "context": "Referencing variables in exception blocks that may not be defined",
           "solution": "Avoid referencing variables that may not be defined in exception scope",

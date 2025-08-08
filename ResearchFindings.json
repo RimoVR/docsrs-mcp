@@ -381,6 +381,40 @@
           "installation": "pip install aiosqlite",
           "moduleHierarchy": "Essential for non-blocking module hierarchy extraction and storage"
         },
+        "pytestAsyncio": {
+          "stableVersion": "0.21.1",
+          "description": "Pytest plugin for testing asyncio code",
+          "compatibility": {
+            "stable": {
+              "version": "0.21.1",
+              "status": "Stable and reliable for fixture compatibility",
+              "fixtures": "Full support for async fixtures and test functions",
+              "eventLoop": "Proper event loop management for async tests"
+            },
+            "problematic": {
+              "versions": "0.23.x series",
+              "issues": [
+                "Fixture compatibility problems with async context managers",
+                "Event loop isolation issues in test execution",
+                "Breaking changes in fixture handling"
+              ],
+              "recommendation": "Avoid 0.23.x versions until compatibility issues are resolved"
+            }
+          },
+          "installation": "uv add --dev pytest-asyncio==0.21.1",
+          "configuration": {
+            "pyprojectToml": "[tool.pytest.ini_options] asyncio_mode = \"auto\"",
+            "markerUsage": "@pytest.mark.asyncio for individual test functions",
+            "fixtureSupport": "Supports async fixtures with proper cleanup"
+          },
+          "bestPractices": [
+            "Pin to 0.21.1 for stable testing environment",
+            "Use asyncio_mode = \"auto\" for automatic async test detection",
+            "Test async database operations with proper fixture setup",
+            "Verify async context manager behavior in tests",
+            "Monitor for compatibility updates in newer versions"
+          ]
+        },
         "batchInsertion": {
           "sqliteParameterLimit": {
             "constant": "SQLITE_MAX_VARIABLE_NUMBER",
@@ -2911,6 +2945,87 @@
       "Implement health checks and monitoring",
       "Use volume mounts for cache persistence",
       "Plan for horizontal scaling if needed"
-    ]
+    ],
+    "monitoring": {
+      "prometheusInstrumentation": {
+        "library": "prometheus-fastapi-instrumentator",
+        "version": "6.1.0",
+        "description": "FastAPI integration for Prometheus metrics collection",
+        "features": [
+          "Automatic HTTP request metrics (latency, status codes, request count)",
+          "Memory and CPU usage metrics",
+          "Custom metric creation support",
+          "Built-in /metrics endpoint",
+          "Configurable metric labels and buckets"
+        ],
+        "memoryOverhead": {
+          "baseline": "~2-5MB for basic instrumentation",
+          "perEndpoint": "~100KB per unique endpoint-method combination",
+          "perMetric": "~50KB per custom metric with moderate cardinality",
+          "recommendation": "Monitor memory usage in production, especially with high-cardinality labels"
+        },
+        "configuration": {
+          "basicSetup": "from prometheus_fastapi_instrumentator import Instrumentator; Instrumentator().instrument(app).expose(app)",
+          "customMetrics": "Use Instrumentator.add() for custom metrics",
+          "filtering": "Use should_instrument_requests and should_respect_env_var for filtering",
+          "performance": "Enable only required metrics to minimize overhead"
+        },
+        "bestPractices": [
+          "Keep label cardinality low to prevent memory bloat",
+          "Use histogram buckets appropriate for your latency patterns",
+          "Monitor the /metrics endpoint itself for scrape performance",
+          "Consider sampling for high-throughput applications",
+          "Test memory impact under realistic load before production deployment"
+        ],
+        "integration": {
+          "fastapi": "Native FastAPI integration with middleware support",
+          "grafana": "Compatible with standard Grafana dashboards",
+          "alerting": "Supports standard Prometheus alerting rules",
+          "exporters": "Works with standard Prometheus exporters and collectors"
+        }
+      },
+      "overheadGuidelines": {
+        "targetThreshold": "<5% application overhead",
+        "memoryImpact": "Monitor RSS memory growth under load",
+        "cpuImpact": "Measure P95 latency increase due to instrumentation",
+        "networkImpact": "Consider /metrics endpoint scrape frequency and payload size",
+        "recommendations": [
+          "Profile before and after instrumentation implementation",
+          "Use selective metric collection based on operational needs",
+          "Implement circuit breakers for metric collection if needed",
+          "Monitor metric cardinality growth over time",
+          "Set up alerts for monitoring system resource usage"
+        ]
+      },
+      "healthCheckPatterns": {
+        "endpoints": {
+          "basic": "/health - simple alive/dead status",
+          "detailed": "/health/detailed - comprehensive system status",
+          "readiness": "/ready - application ready to serve traffic",
+          "liveness": "/live - application is running (for k8s)"
+        },
+        "bestPractices": [
+          "Keep health checks lightweight (<10ms response time)",
+          "Separate health checks from application rate limiting",
+          "Include downstream dependency status in detailed health",
+          "Use different endpoints for different health aspects",
+          "Implement graceful degradation indicators",
+          "Cache health status for high-frequency checks"
+        ],
+        "statusCodes": {
+          "200": "Healthy - all systems operational",
+          "503": "Unhealthy - service unavailable",
+          "429": "Degraded - service overloaded but functional",
+          "timeout": "Consider 2-5 second timeouts for health checks"
+        },
+        "monitoringIntegration": [
+          "Include health check metrics in monitoring dashboard",
+          "Set up alerting for health check failures",
+          "Track health check response time trends",
+          "Monitor health check success rates",
+          "Use health status for load balancer decisions"
+        ]
+      }
+    }
   }
 }
