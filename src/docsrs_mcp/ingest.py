@@ -1287,7 +1287,7 @@ async def evict_cache_if_needed() -> None:
                 # Get popular crates data for priority scoring
                 # Import here to avoid circular dependency
                 from .popular_crates import get_popular_manager
-                
+
                 manager = get_popular_manager()
                 popular_crates = await manager.get_popular_crates_with_metadata()
 

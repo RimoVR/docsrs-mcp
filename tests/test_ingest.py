@@ -319,7 +319,8 @@ async def test_priority_aware_cache_eviction(tmp_path):
         with patch("docsrs_mcp.ingest.CACHE_MAX_SIZE_BYTES", 2500):
             with patch("docsrs_mcp.ingest.PRIORITY_CACHE_EVICTION_ENABLED", True):
                 with patch(
-                    "docsrs_mcp.popular_crates.get_popular_manager", return_value=lambda: mock_manager
+                    "docsrs_mcp.popular_crates.get_popular_manager",
+                    return_value=lambda: mock_manager,
                 ):
                     await evict_cache_if_needed()
 
@@ -359,7 +360,8 @@ async def test_priority_eviction_fallback(tmp_path):
         with patch("docsrs_mcp.ingest.CACHE_MAX_SIZE_BYTES", 1500):
             with patch("docsrs_mcp.ingest.PRIORITY_CACHE_EVICTION_ENABLED", True):
                 with patch(
-                    "docsrs_mcp.popular_crates.get_popular_manager", return_value=lambda: mock_manager
+                    "docsrs_mcp.popular_crates.get_popular_manager",
+                    return_value=lambda: mock_manager,
                 ):
                     await evict_cache_if_needed()
 

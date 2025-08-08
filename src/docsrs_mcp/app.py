@@ -1,9 +1,11 @@
 """FastAPI application for docsrs-mcp server."""
 
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import aiosqlite
+import psutil
 from fastapi import FastAPI, HTTPException, Request
 from slowapi.errors import RateLimitExceeded
 
@@ -121,14 +123,125 @@ async def health_check():
     - Service operational status
     - Popular crates cache statistics
     - Pre-ingestion progress if enabled
+    - Subsystem health checks
     """
-    health_status = {
-        "status": "ok",
+    base_health = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
         "service": "docsrs-mcp",
-        "popular_crates": get_popular_crates_status(),
+        "version": "0.1.0",
     }
 
-    return health_status
+    # Add subsystem health checks
+    subsystems = {}
+
+    # Database health - check cache directory
+    try:
+        from .database import CACHE_DIR
+
+        cache_count = len(list(CACHE_DIR.glob("*/*.db")))
+        subsystems["database"] = {
+            "status": "healthy",
+            "cache_count": cache_count,
+            "cache_dir": str(CACHE_DIR),
+        }
+    except Exception as e:
+        subsystems["database"] = {"status": "unhealthy", "error": str(e)}
+
+    # Pre-ingestion health
+    popular_crates_status = get_popular_crates_status()
+    if popular_crates_status and any(popular_crates_status.values()):
+        subsystems["pre_ingestion"] = popular_crates_status
+        # Check if pre-ingestion is actively running
+        ingestion_stats = popular_crates_status.get("ingestion_stats", {})
+        if ingestion_stats.get("is_running"):
+            subsystems["pre_ingestion"]["status"] = "active"
+        else:
+            subsystems["pre_ingestion"]["status"] = "idle"
+    else:
+        subsystems["pre_ingestion"] = {"status": "not_initialized"}
+
+    # Memory health
+    try:
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        memory_mb = memory_info.rss / (1024 * 1024)
+        subsystems["memory"] = {
+            "status": "healthy" if memory_mb < 900 else "warning",
+            "usage_mb": round(memory_mb, 2),
+            "threshold_mb": 900,
+            "percent": round(process.memory_percent(), 2),
+        }
+    except Exception as e:
+        subsystems["memory"] = {"status": "unknown", "error": str(e)}
+
+    base_health["subsystems"] = subsystems
+
+    # Overall health based on subsystems
+    if any(s.get("status") == "unhealthy" for s in subsystems.values()):
+        base_health["status"] = "unhealthy"
+    elif any(s.get("status") == "warning" for s in subsystems.values()):
+        base_health["status"] = "degraded"
+
+    return base_health
+
+
+@app.get(
+    "/health/pre-ingestion",
+    tags=["health"],
+    summary="Pre-ingestion Health",
+    response_description="Detailed pre-ingestion progress and health",
+)
+async def pre_ingestion_health():
+    """
+    Get detailed pre-ingestion progress and health.
+
+    Returns comprehensive status including:
+    - Worker running status
+    - Ingestion statistics with ETA
+    - Scheduler status if enabled
+    - Cache statistics from PopularCratesManager
+    """
+    from .popular_crates import (
+        _ingestion_scheduler,
+        _popular_crates_manager,
+        _pre_ingestion_worker,
+    )
+
+    if not _pre_ingestion_worker:
+        return {"status": "not_initialized", "message": "Pre-ingestion is not enabled"}
+
+    response = {
+        "status": "healthy",
+        "worker": {
+            "running": _pre_ingestion_worker._monitor_task is not None
+            and not _pre_ingestion_worker._monitor_task.done()
+            if _pre_ingestion_worker
+            else False,
+            "stats": _pre_ingestion_worker.get_ingestion_stats()
+            if _pre_ingestion_worker
+            else {},
+        },
+    }
+
+    # Add scheduler status if available
+    if _ingestion_scheduler:
+        response["scheduler"] = {
+            "enabled": _ingestion_scheduler.enabled,
+            "status": _ingestion_scheduler.get_scheduler_status(),
+        }
+    else:
+        response["scheduler"] = {"enabled": False, "status": "not_initialized"}
+
+    # Add cache statistics if available
+    if _popular_crates_manager:
+        response["cache"] = {
+            "stats": _popular_crates_manager.get_cache_stats(),
+        }
+    else:
+        response["cache"] = {"status": "not_initialized"}
+
+    return response
 
 
 @app.get(

@@ -197,7 +197,6 @@ class TestFuzzyResolver:
     async def test_cache_usage(self, temp_db):
         """Test that paths are cached after first retrieval."""
         # Clear the cache before test
-        import docsrs_mcp.fuzzy_resolver
 
         docsrs_mcp.fuzzy_resolver._path_cache.clear()
 

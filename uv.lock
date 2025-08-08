@@ -149,15 +149,6 @@ wheels = [
 ]
 
 [[package]]
-name = "backports-asyncio-runner"
-version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8e/ff/70dca7d7cb1cbc0edb2c6cc0c38b65cba36cccc491eca64cabd5fe7f8670/backports_asyncio_runner-1.2.0.tar.gz", hash = "sha256:a5aa7b2b7d8f8bfcaa2b57313f70792df84e32a2a746f585213373f900b42162", size = 69893, upload-time = "2025-07-02T02:27:15.685Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/59/76ab57e3fe74484f48a53f8e337171b4a2349e506eabe136d7e01d059086/backports_asyncio_runner-1.2.0-py3-none-any.whl", hash = "sha256:0da0a936a8aeb554eccb426dc55af3ba63bcdc69fa1a600b5bb305413a4477b5", size = 12313, upload-time = "2025-07-02T02:27:14.263Z" },
-]
-
-[[package]]
 name = "certifi"
 version = "2025.8.3"
 source = { registry = "https://pypi.org/simple" }
@@ -519,6 +510,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "httpx" },
+    { name = "hypothesis" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -550,8 +542,9 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx", specifier = ">=0.24" },
+    { name = "hypothesis", specifier = ">=6.0" },
     { name = "pytest", specifier = ">=7.0" },
-    { name = "pytest-asyncio", specifier = ">=0.21" },
+    { name = "pytest-asyncio", specifier = "==0.21.1" },
     { name = "pytest-cov", specifier = ">=4.0" },
     { name = "ruff", specifier = ">=0.1.0" },
 ]
@@ -904,6 +897,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cc/3f/2c29224acb2e2df4d2046e4c73ee2662023c58ff5b113c4c1adac0886c43/humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc", size = 360702, upload-time = "2021-09-17T21:40:43.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/0f/310fb31e39e2d734ccaa2c0fb981ee41f7bd5056ce9bc29b2248bd569169/humanfriendly-10.0-py2.py3-none-any.whl", hash = "sha256:1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477", size = 86794, upload-time = "2021-09-17T21:40:39.897Z" },
+]
+
+[[package]]
+name = "hypothesis"
+version = "6.137.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "sortedcontainers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/92/70f29b04e4d7acf7f9a0c3dd52619853715ad9ae092a8e5d89bc7bdc39ec/hypothesis-6.137.1.tar.gz", hash = "sha256:b086e644456da79ad460fdaf8fbf90a41a661e8a4076232dd4ea64cfbc0d0529", size = 460593, upload-time = "2025-08-05T06:31:46.777Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/13/92753f97f70f3584a70ccbd2a678878ea43d5880c4e009664c3fe9fe7e50/hypothesis-6.137.1-py3-none-any.whl", hash = "sha256:7cbda6a98ed4d32aad31a5fc5bff5e119b9275fe2579a7b08863cba313a4b9be", size = 527566, upload-time = "2025-08-05T06:31:43.323Z" },
 ]
 
 [[package]]
@@ -2282,15 +2289,14 @@ wheels = [
 
 [[package]]
 name = "pytest-asyncio"
-version = "1.1.0"
+version = "0.21.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "backports-asyncio-runner", marker = "python_full_version < '3.11'" },
     { name = "pytest" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4e/51/f8794af39eeb870e87a8c8068642fc07bce0c854d6865d7dd0f2a9d338c2/pytest_asyncio-1.1.0.tar.gz", hash = "sha256:796aa822981e01b68c12e4827b8697108f7205020f24b5793b3c41555dab68ea", size = 46652, upload-time = "2025-07-16T04:29:26.393Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/85/d39ef5f69d5597a206f213ce387bcdfa47922423875829f7a98a87d33281/pytest-asyncio-0.21.1.tar.gz", hash = "sha256:40a7eae6dded22c7b604986855ea48400ab15b069ae38116e8c01238e9eeb64d", size = 30492, upload-time = "2023-07-12T10:19:59.698Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/9d/bf86eddabf8c6c9cb1ea9a869d6873b46f105a5d292d3a6f7071f5b07935/pytest_asyncio-1.1.0-py3-none-any.whl", hash = "sha256:5fe2d69607b0bd75c656d1211f969cadba035030156745ee09e7d71740e58ecf", size = 15157, upload-time = "2025-07-16T04:29:24.929Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/2c/2e5ab8708667972ee31b88bb6fed680ed5ba92dfc2db28e07d0d68d8b3b1/pytest_asyncio-0.21.1-py3-none-any.whl", hash = "sha256:8666c1c8ac02631d7c51ba282e0c69a8a452b211ffedf2599099845da5c5c37b", size = 13228, upload-time = "2023-07-12T10:19:57.81Z" },
 ]
 
 [[package]]
@@ -2693,6 +2699,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f23394729afe52f3bf7adec04bf9ed2c820b39e19299111/sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88", size = 30594, upload-time = "2021-05-16T22:03:42.897Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0", size = 29575, upload-time = "2021-05-16T22:03:41.177Z" },
 ]
 
 [[package]]

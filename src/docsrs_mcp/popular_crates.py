@@ -9,6 +9,7 @@ import logging
 import random
 import tempfile
 import time
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -24,10 +25,44 @@ from tenacity import (
 )
 
 from . import config
-from .ingest import fetch_current_stable_version, ingest_crate
+from .ingest import ingest_crate
 from .models import PopularCrate
 
 logger = logging.getLogger(__name__)
+
+
+async def fetch_current_stable_version(crate_name: str) -> str | None:
+    """Fetch the current stable version of a crate from crates.io API."""
+    try:
+        url = f"https://crates.io/api/v1/crates/{crate_name}"
+        headers = {
+            "User-Agent": f"docsrs-mcp/{config.VERSION} (https://github.com/anthropics/docsrs-mcp)"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    logger.debug(
+                        f"Failed to fetch crate info for {crate_name}: HTTP {resp.status}"
+                    )
+                    return None
+
+                data = await resp.json()
+                crate_data = data.get("crate", {})
+
+                # Try different version fields
+                version = (
+                    crate_data.get("max_stable_version")
+                    or crate_data.get("max_version")
+                    or crate_data.get("newest_version")
+                )
+
+                return version
+    except Exception as e:
+        logger.debug(f"Error fetching version for {crate_name}: {e}")
+        return None
 
 
 class PopularCratesManager:
@@ -446,6 +481,12 @@ class PreIngestionWorker:
         self._processed_crates: set[str] = set()  # For duplicate detection
         self._memory_monitor_task: asyncio.Task | None = None
         self._adaptive_concurrency = config.PRE_INGEST_CONCURRENCY
+        # Progress tracking enhancements
+        self.crate_progress = {}  # {crate_name: {"status": str, "started": float, "percent": int}}
+        self.processing_history = deque(
+            maxlen=100
+        )  # Rolling window of completed crates
+        self.current_crate = None  # Currently processing crate name
 
     async def start(self):
         """Start pre-ingestion in background (non-blocking)."""
@@ -549,29 +590,96 @@ class PreIngestionWorker:
                 self.queue.task_done()
 
     async def _ingest_single_crate(self, crate_name: str):
-        """Ingest a single crate with error handling."""
+        """Ingest a single crate with error handling and progress tracking."""
+        start_time = time.time()
+        self.current_crate = crate_name
+
+        # Initialize progress tracking for this crate
+        self.crate_progress[crate_name] = {
+            "status": "resolving",
+            "started": start_time,
+            "percent": 0,
+        }
+
         try:
-            # Get the latest stable version
+            # Get the latest stable version (0-10% progress)
             version = await fetch_current_stable_version(crate_name)
             if not version:
                 logger.debug(f"No stable version found for {crate_name}, skipping")
                 self.stats["skipped"] += 1
+                self.crate_progress[crate_name]["status"] = "skipped"
+                self.crate_progress[crate_name]["percent"] = 100
                 return
+
+            # Update progress: downloading (10-30%)
+            self.crate_progress[crate_name]["status"] = "downloading"
+            self.crate_progress[crate_name]["percent"] = 10
 
             # Ingest the crate using existing pipeline
             logger.debug(f"Pre-ingesting {crate_name} v{version}")
+
+            # Note: We can't track internal progress of ingest_crate without modifying it
+            # So we'll mark it as processing (30-90%)
+            self.crate_progress[crate_name]["status"] = "processing"
+            self.crate_progress[crate_name]["percent"] = 30
+
             success = await ingest_crate(crate_name, version)
+
+            # Mark as complete (100%)
+            self.crate_progress[crate_name]["percent"] = 100
 
             if success:
                 self.stats["success"] += 1
+                self.crate_progress[crate_name]["status"] = "completed"
                 logger.debug(f"Successfully pre-ingested {crate_name} v{version}")
+
+                # Add to processing history
+                duration = time.time() - start_time
+                self.processing_history.append(
+                    {
+                        "crate": crate_name,
+                        "version": version,
+                        "duration": duration,
+                        "status": "success",
+                    }
+                )
             else:
                 self.stats["failed"] += 1
+                self.crate_progress[crate_name]["status"] = "failed"
                 logger.debug(f"Failed to pre-ingest {crate_name} v{version}")
+
+                # Add to processing history
+                duration = time.time() - start_time
+                self.processing_history.append(
+                    {
+                        "crate": crate_name,
+                        "version": version,
+                        "duration": duration,
+                        "status": "failed",
+                    }
+                )
 
         except Exception as e:
             self.stats["failed"] += 1
+            self.crate_progress[crate_name]["status"] = "error"
+            self.crate_progress[crate_name]["percent"] = 100
             logger.debug(f"Error pre-ingesting {crate_name}: {e}")
+
+            # Add to processing history
+            duration = time.time() - start_time
+            self.processing_history.append(
+                {
+                    "crate": crate_name,
+                    "version": "unknown",
+                    "duration": duration,
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
+        finally:
+            # Clear current crate when done
+            if self.current_crate == crate_name:
+                self.current_crate = None
 
     async def _monitor_progress(self):
         """Monitor and log progress periodically."""
@@ -657,7 +765,7 @@ class PreIngestionWorker:
                 await asyncio.sleep(10)
 
     def get_ingestion_stats(self) -> dict[str, Any]:
-        """Get pre-ingestion statistics for health endpoint."""
+        """Get pre-ingestion statistics for health endpoint with enhanced progress tracking."""
         stats = self.stats.copy()
 
         # Add progress information
@@ -674,10 +782,50 @@ class PreIngestionWorker:
             stats["elapsed_seconds"] = elapsed
             stats["rate_per_second"] = processed / elapsed if elapsed > 0 else 0
 
-            # Estimate completion time
-            if stats["remaining"] > 0 and stats["rate_per_second"] > 0:
+            # Enhanced ETA calculation based on rolling average
+            if self.processing_history and stats["remaining"] > 0:
+                # Calculate average time from recent completions
+                successful_durations = [
+                    h["duration"]
+                    for h in self.processing_history
+                    if h.get("status") == "success"
+                ]
+                if successful_durations:
+                    avg_time = sum(successful_durations) / len(successful_durations)
+                    # Account for concurrent processing
+                    effective_rate = (
+                        self._adaptive_concurrency / avg_time if avg_time > 0 else 0
+                    )
+                    eta_seconds = (
+                        stats["remaining"] / effective_rate if effective_rate > 0 else 0
+                    )
+                    stats["eta_seconds"] = int(eta_seconds)
+                    stats["eta_formatted"] = self._format_duration(int(eta_seconds))
+                    stats["avg_processing_time"] = avg_time
+            elif stats["remaining"] > 0 and stats["rate_per_second"] > 0:
+                # Fallback to simple calculation if no history
                 eta_seconds = stats["remaining"] / stats["rate_per_second"]
-                stats["eta_seconds"] = eta_seconds
+                stats["eta_seconds"] = int(eta_seconds)
+                stats["eta_formatted"] = self._format_duration(int(eta_seconds))
+
+        # Add current crate details
+        stats["current_crate"] = self.current_crate
+        if self.current_crate and self.current_crate in self.crate_progress:
+            stats["crate_details"] = self.crate_progress[self.current_crate]
+        else:
+            stats["crate_details"] = {}
+
+        # Add recent processing history summary
+        if self.processing_history:
+            recent = list(self.processing_history)[-5:]  # Last 5 crates
+            stats["recent_crates"] = [
+                {
+                    "crate": h["crate"],
+                    "status": h.get("status", "unknown"),
+                    "duration": round(h.get("duration", 0), 2),
+                }
+                for h in recent
+            ]
 
         stats["adaptive_concurrency"] = self._adaptive_concurrency
         stats["is_running"] = (
@@ -685,6 +833,19 @@ class PreIngestionWorker:
         )
 
         return stats
+
+    def _format_duration(self, seconds: int) -> str:
+        """Format duration in seconds to human-readable string."""
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            secs = seconds % 60
+            return f"{minutes}m {secs}s"
+        else:
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            return f"{hours}h {minutes}m"
 
     def _log_final_stats(self):
         """Log final statistics after pre-ingestion completes."""
