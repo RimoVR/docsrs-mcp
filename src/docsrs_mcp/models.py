@@ -775,6 +775,7 @@ class SearchResult(BaseModel):
     item_path: str = Field(..., description="Full path to the documented item")
     header: str = Field(..., description="Item header/signature")
     snippet: str = Field(..., description="Documentation excerpt (max 200 chars)")
+    suggestions: list[str] | None = None  # See-also suggestions for related items
 
     @field_validator("score", mode="before")
     @classmethod

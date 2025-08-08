@@ -610,6 +610,52 @@
             ]
           }
         }
+      },
+      "seeAlsoRecommendations": {
+        "description": "Research findings from implementing see-also suggestion features using vector embeddings and similarity scoring",
+        "sqliteVecConstraints": {
+          "kParameterRequirement": {
+            "finding": "sqlite-vec requires explicit k parameter in WHERE clause to avoid query planner errors",
+            "implementation": "Always include 'AND k = ?' in vector similarity queries",
+            "rationale": "Query planner optimization requires explicit result count constraint",
+            "example": "SELECT * FROM embeddings WHERE vec MATCH ? AND k = 5"
+          }
+        },
+        "embeddingModel": {
+          "optimalModel": "BAAI/bge-small-en-v1.5",
+          "similarityThresholds": {
+            "optimal": "0.7-0.8 similarity thresholds work best for suggestions",
+            "rationale": "Empirical testing shows this range provides best balance of relevance vs diversity",
+            "datasetDependency": "Cosine similarity thresholds are dataset-dependent and require empirical validation",
+            "industryStandard": "Industry standard for see-also features is 3-5 items with 0.6-0.8 similarity threshold"
+          }
+        },
+        "cognitiveOptimization": {
+          "suggestionCount": {
+            "optimal": "3-5 items based on cognitive research",
+            "rationale": "Cognitive research shows users can effectively process 3-5 related suggestions without overwhelm",
+            "implementation": "Limit see-also suggestions to maximum 5 items for optimal user experience"
+          }
+        },
+        "implementationDetails": {
+          "pydanticV2Requirements": {
+            "finding": "Pydantic v2 requires explicit default=None for optional fields",
+            "implementation": "Use 'field: Optional[Type] = None' syntax for optional parameters",
+            "rationale": "Pydantic v2 stricter validation requires explicit default values"
+          },
+          "cachingStrategy": {
+            "recommendation": "TTL LRU cache with 60-second TTL recommended for suggestion caching",
+            "rationale": "Balances fresh results with performance optimization",
+            "implementation": "Use time-based cache eviction to maintain suggestion relevance"
+          }
+        },
+        "thresholdValidation": {
+          "empiricalTesting": {
+            "requirement": "Cosine similarity thresholds are dataset-dependent and require empirical validation",
+            "approach": "Test different threshold values against your specific dataset",
+            "industryBaseline": "Start with 0.6-0.8 range and adjust based on result quality"
+          }
+        }
       }
     },
     "docsRsIntegration": {
@@ -2200,13 +2246,19 @@
       "Profile memory usage early and often",
       "Monitor aiohttp memory usage closely due to version constraints",
       "Use sqlite-vec MATCH operator for optimal query performance",
-      "Include k constraint in all KNN queries for sqlite-vec",
+      "Include k constraint in all KNN queries for sqlite-vec (required to avoid query planner errors)",
+      "Use TTL LRU cache with 60-second TTL for optimal see-also suggestion caching performance",
       "Implement Reciprocal Rank Fusion (RRF) for hybrid search ranking",
       "Normalize cosine similarity using (1 + cosine_similarity) / 2 formula",
       "Target sub-500ms latency for search responses to meet industry standards",
       "Use multi-factor scoring combining vector similarity with metadata signals",
       "Leverage sqlite-vec binary quantization for 32x memory reduction with minimal accuracy loss",
       "Utilize sqlite-vec metadata filtering capabilities for refined search results",
+      "Use 0.7-0.8 similarity thresholds for see-also suggestions with BAAI/bge-small-en-v1.5",
+      "Limit see-also recommendations to 3-5 items based on cognitive research",
+      "Use TTL LRU cache with 60-second TTL for suggestion caching optimization",
+      "Use explicit default=None for optional fields in Pydantic v2 models",
+      "Validate similarity thresholds empirically for dataset-specific optimization",
       "Use streaming JSON parser with zero-copy deserialization for large rustdoc files",
       "Implement symbol interning for repeated string lookups in rustdoc parsing",
       "Parse rustdoc JSON on-demand rather than loading entire AST into memory",

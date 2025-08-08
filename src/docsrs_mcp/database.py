@@ -660,6 +660,91 @@ async def search_embeddings(
         return top_results
 
 
+async def get_see_also_suggestions(
+    db_path: Path,
+    query_embedding: list[float],
+    original_item_paths: set[str],
+    k: int = 8,
+    similarity_threshold: float = 0.7,
+    max_suggestions: int = 5,
+) -> list[str]:
+    """Find related items for see-also suggestions using vector similarity.
+
+    Args:
+        db_path: Path to the database
+        query_embedding: Embedding vector to find similar items for
+        original_item_paths: Set of item paths to exclude from suggestions
+        k: Number of candidates to fetch (over-fetch for filtering)
+        similarity_threshold: Minimum similarity score (1.0 - distance) for suggestions
+        max_suggestions: Maximum number of suggestions to return
+
+    Returns:
+        List of item paths for see-also suggestions
+    """
+    if not db_path.exists():
+        return []
+
+    try:
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            await db.execute("PRAGMA journal_mode = WAL")
+            await db.execute("PRAGMA busy_timeout = 5000")
+            await db.execute("PRAGMA synchronous = NORMAL")
+            await db.execute("PRAGMA cache_size = -64000")
+
+            # Load sqlite-vec extension
+            await db.enable_load_extension(True)
+            await db.load_extension(sqlite_vec.loadable_path())
+            await db.enable_load_extension(False)
+
+            # Perform vector search with explicit k parameter (required by sqlite-vec)
+            cursor = await db.execute(
+                """
+                SELECT
+                    v.distance,
+                    e.item_path,
+                    e.item_type
+                FROM vec_embeddings v
+                JOIN embeddings e ON v.rowid = e.id
+                WHERE v.embedding MATCH :embedding AND k = :k
+                ORDER BY v.distance
+                """,
+                {
+                    "embedding": bytes(sqlite_vec.serialize_float32(query_embedding)),
+                    "k": k,
+                },
+            )
+
+            results = await cursor.fetchall()
+
+            # Process results: filter by threshold and exclude original items
+            suggestions = []
+            for distance, item_path, item_type in results:
+                # Calculate similarity score (1.0 - distance)
+                similarity_score = 1.0 - distance
+
+                # Apply similarity threshold
+                if similarity_score < similarity_threshold:
+                    continue
+
+                # Exclude original items
+                if item_path in original_item_paths:
+                    continue
+
+                # Add to suggestions
+                suggestions.append(item_path)
+
+                # Stop if we have enough suggestions
+                if len(suggestions) >= max_suggestions:
+                    break
+
+            return suggestions
+
+    except Exception as e:
+        logger.warning(f"Failed to get see-also suggestions: {e}")
+        # Fail gracefully - return empty suggestions
+        return []
+
+
 async def search_example_embeddings(
     db_path: Path,
     query_embedding: list[float],

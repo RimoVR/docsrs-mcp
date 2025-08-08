@@ -100,6 +100,46 @@
           "relatedFiles": ["src/docsrs_mcp/ingest.py"]
         },
         {
+          "error": "Path objects in test mocks must use MagicMock with proper spec",
+          "context": "Testing functions that check Path.exists() method with mocked Path objects",
+          "solution": "Use MagicMock(spec=Path) and configure exists() method explicitly: mock_path = MagicMock(spec=Path); mock_path.exists.return_value = True",
+          "prevention": "Always use spec parameter with MagicMock when mocking complex objects to ensure method availability",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["tests/test_ingest.py", "tests/test_app.py"]
+        },
+        {
+          "error": "sqlite-vec MATCH operator requires explicit k parameter",
+          "context": "Vector similarity search queries failing with 'A LIMIT or 'k = ?' constraint is required' error",
+          "solution": "Always include explicit k parameter in MATCH queries: 'SELECT * FROM vec_table WHERE vec_column MATCH ? AND k = ?'",
+          "prevention": "Never use MATCH operator without k parameter - sqlite-vec requires this constraint for all vector searches",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/database.py"]
+        },
+        {
+          "error": "See-also suggestions showing duplicate results from original search",
+          "context": "Implementing see-also functionality that excludes original search results to avoid redundancy",
+          "solution": "Filter out original search results from suggestions using path exclusion: exclude_paths = {result.path for result in original_results}",
+          "prevention": "Always exclude original search results when generating related suggestions to provide truly additional value",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "Similarity score calculation incorrect for sqlite-vec cosine distance",
+          "context": "Converting sqlite-vec distance to similarity score for ranking purposes",
+          "solution": "Use similarity = 1.0 - distance formula for cosine distance in sqlite-vec to get proper similarity scores (higher = more similar)",
+          "prevention": "Remember sqlite-vec returns distance (lower = more similar), convert to similarity (higher = more similar) with 1.0 - distance",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "Test mocks for ingest_crate returning string instead of Path object",
+          "context": "Testing ingest_crate function where db_path.exists() is called but mock returns string",
+          "solution": "Mock ingest_crate to return Path object with exists() method: mock_result = MagicMock(spec=Path); mock_result.exists.return_value = True; return mock_result",
+          "prevention": "When mocking functions that return Path objects, ensure the mock returns objects with proper Path methods configured",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["tests/test_app.py"]
+        },
+        {
           "error": "Path resolution not finding items without explicit path mapping",
           "context": "Items without path mappings in rustdoc JSON causing lookup failures",
           "solution": "Implement fallback to item name when no path mapping exists in rustdoc data",
@@ -977,6 +1017,37 @@
           "testingStrategy": "Use --mode rest flag for easier HTTP/curl testing instead of STDIO mode during development and verification"
         },
         {
+          "lesson": "See-also suggestions implementation patterns",
+          "context": "Implementing related suggestions functionality for search results with proper deduplication and graceful error handling",
+          "details": "See-also suggestions require: 1) Exclude original search results to avoid duplicates using path exclusion sets, 2) Use similarity = 1.0 - distance for sqlite-vec cosine similarity scoring, 3) Add suggestions only to first search result to avoid UI redundancy, 4) Implement graceful degradation with empty suggestions array on any exception, 5) Mock Path objects with MagicMock(spec=Path) in tests with proper exists() method configuration",
+          "impact": "Provides valuable related content discovery while maintaining clean UI and robust error handling",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "tests/test_app.py"],
+          "implementationNotes": {
+            "deduplication": "Use set comprehension for O(1) path exclusion: exclude_paths = {result.path for result in original_results}",
+            "scoringFormula": "Convert distance to similarity: similarity = 1.0 - distance (sqlite-vec uses cosine distance)",
+            "uiOptimization": "Add suggestions only to first result to prevent overwhelming the interface",
+            "errorHandling": "Return empty suggestions array on exceptions to maintain search functionality",
+            "testingPatterns": "Mock Path objects with spec parameter and configure exists() method explicitly"
+          }
+        },
+        {
+          "lesson": "Graceful degradation patterns for optional features",
+          "context": "Implementing see-also suggestions as optional enhancement that doesn't break core functionality",
+          "details": "Optional features should: 1) Never throw exceptions that break core functionality, 2) Return empty/null results on failure, 3) Log errors for debugging but continue execution, 4) Provide clear fallback behavior when external dependencies fail, 5) Design with graceful degradation from the start rather than adding it later",
+          "impact": "Ensures core search functionality remains reliable even when optional features encounter errors",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "UI redundancy prevention in suggestion systems",
+          "context": "Preventing information overload when displaying related suggestions to users",
+          "details": "Suggestion systems should: 1) Only add suggestions to primary or first result to avoid repetition, 2) Exclude original search results from suggestions to provide new information, 3) Limit suggestion count to prevent overwhelming users (typically 3-5 suggestions), 4) Consider UI space and user attention when designing suggestion placement, 5) Make suggestions clearly distinguishable from primary results",
+          "impact": "Improves user experience by providing valuable suggestions without cluttering the interface",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
           "lesson": "Rustdoc JSON impl block representation patterns",
           "context": "Implementing trait implementation search functionality in rustdoc JSON parsing",
           "details": "Rustdoc JSON represents impl blocks with empty names, requiring extraction from inner.trait and inner.for fields. Composite names like 'TraitName_for_TypeName' work well for impl block identification. Inherent impls (no trait) can be handled by checking for null trait field. The existing streaming parser architecture easily accommodates new item types without structural changes.",
@@ -1096,7 +1167,16 @@
       "Use composite naming pattern 'TraitName_for_TypeName' for trait implementations to create meaningful identifiers",
       "Check inner.trait for null to distinguish between trait implementations and inherent implementations",
       "Existing streaming parser architecture accommodates new item types without structural changes",
-      "No database schema changes needed for impl blocks - leverage existing item_type field patterns"
+      "No database schema changes needed for impl blocks - leverage existing item_type field patterns",
+      "CRITICAL: When mocking Path objects in tests, use MagicMock(spec=Path) with exists() method configured",
+      "CRITICAL: sqlite-vec MATCH operator requires explicit k parameter - never omit k constraint in vector queries",
+      "See-also suggestions: exclude original search results using path exclusion to avoid duplicates",
+      "sqlite-vec similarity scoring: use similarity = 1.0 - distance for proper ranking (higher = more similar)",
+      "UI optimization: add suggestions only to first search result to prevent interface redundancy",
+      "Graceful degradation: return empty suggestions array on any exception to maintain core functionality",
+      "Test mock patterns: ingest_crate must return Path object with exists() method, not string",
+      "Suggestion deduplication: use set comprehension for O(1) path exclusion performance",
+      "Error handling: log suggestion generation failures but never break main search functionality"
     ],
     "rateLimiting": [
       "MUST include Request parameter in endpoint function signatures or rate limiting won't work",

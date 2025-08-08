@@ -23,6 +23,7 @@ Built with FastAPI and sqlite-vec for efficient vector search, it caches crate d
 - 🔒 **Concurrent safety** - Per-crate locking prevents duplicate ingestion
 - 📦 **Self-contained** - Single Python process, file-backed SQLite
 - 🛠️ **Easy development** - UV-based tooling, async/await architecture
+- 🔗 **See-also suggestions** - Automatic discovery of related documentation items
 
 ## Quick Start
 
@@ -219,7 +220,7 @@ curl -X POST http://localhost:8000/mcp/tools/get_crate_summary \
 
 ### `search_items`
 
-Performs vector similarity search across complete rustdoc documentation.
+Performs vector similarity search across complete rustdoc documentation. Results now include see-also suggestions for related items.
 
 **Parameters:**
 - `crate_name` (string, required): Name of the crate to search within
@@ -251,23 +252,25 @@ curl -X POST http://localhost:8000/mcp/tools/search_items \
   "results": [
     {
       "item_path": "tokio::spawn",
-      "name": "spawn",
-      "description": "Spawns a new asynchronous task, returning a JoinHandle for it.",
-      "kind": "function",
-      "score": 0.89
+      "header": "spawn",
+      "snippet": "Spawns a new asynchronous task, returning a JoinHandle for it...",
+      "score": 0.89,
+      "suggestions": [
+        "tokio::runtime::Runtime",
+        "tokio::task::JoinHandle", 
+        "tokio::spawn_blocking"
+      ]
     },
     {
       "item_path": "tokio::task::spawn_blocking",
-      "name": "spawn_blocking",
-      "description": "Runs the provided blocking function on the current thread pool.",
-      "kind": "function",
+      "header": "spawn_blocking",
+      "snippet": "Runs the provided blocking function on the current thread pool...",
       "score": 0.82
     },
     {
       "item_path": "tokio::task",
-      "name": "task",
-      "description": "Asynchronous task utilities.",
-      "kind": "module",
+      "header": "task",
+      "snippet": "Asynchronous task utilities...",
       "score": 0.75
     }
   ]

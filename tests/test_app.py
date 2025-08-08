@@ -1,6 +1,7 @@
 """Tests for the FastAPI application."""
 
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -43,7 +44,9 @@ async def test_search_items_with_type_filter():
         with patch("docsrs_mcp.app.get_embedding_model") as mock_model:
             with patch("docsrs_mcp.app.search_embeddings") as mock_search:
                 # Setup mocks
-                mock_ingest.return_value = "/path/to/db"
+                mock_path = MagicMock(spec=Path)
+                mock_path.exists.return_value = True
+                mock_ingest.return_value = mock_path
                 mock_model.return_value.embed.return_value = [[0.1] * 768]
                 mock_search.return_value = [
                     (0.95, "tokio::spawn", "spawn", "Spawn a future onto the runtime")
@@ -80,7 +83,9 @@ async def test_search_items_with_crate_filter():
         with patch("docsrs_mcp.app.get_embedding_model") as mock_model:
             with patch("docsrs_mcp.app.search_embeddings") as mock_search:
                 # Setup mocks
-                mock_ingest.return_value = "/path/to/db"
+                mock_path = MagicMock(spec=Path)
+                mock_path.exists.return_value = True
+                mock_ingest.return_value = mock_path
                 mock_model.return_value.embed.return_value = [[0.1] * 768]
                 mock_search.return_value = [
                     (
@@ -122,7 +127,9 @@ async def test_search_items_with_combined_filters():
         with patch("docsrs_mcp.app.get_embedding_model") as mock_model:
             with patch("docsrs_mcp.app.search_embeddings") as mock_search:
                 # Setup mocks
-                mock_ingest.return_value = "/path/to/db"
+                mock_path = MagicMock(spec=Path)
+                mock_path.exists.return_value = True
+                mock_ingest.return_value = mock_path
                 mock_model.return_value.embed.return_value = [[0.1] * 768]
                 mock_search.return_value = [
                     (0.88, "tokio::sync::Mutex", "Mutex", "An asynchronous Mutex")
@@ -222,6 +229,124 @@ async def test_query_normalization_integration():
         assert response.status_code == 422
         error = response.json()
         assert "Query too long" in str(error)
+
+
+@pytest.mark.asyncio
+async def test_search_items_with_suggestions():
+    """Test that search_items returns see-also suggestions."""
+    transport = ASGITransport(app=app)
+
+    with patch("docsrs_mcp.app.ingest_crate") as mock_ingest:
+        with patch("docsrs_mcp.app.get_embedding_model") as mock_model:
+            with patch("docsrs_mcp.app.search_embeddings") as mock_search:
+                with patch(
+                    "docsrs_mcp.app.get_see_also_suggestions"
+                ) as mock_suggestions:
+                    # Setup mocks
+                    mock_path = MagicMock(spec=Path)
+                    mock_path.exists.return_value = True
+                    mock_ingest.return_value = mock_path
+                    mock_model.return_value.embed.return_value = [[0.1] * 768]
+                    mock_search.return_value = [
+                        (
+                            0.95,
+                            "tokio::spawn",
+                            "spawn",
+                            "Spawn a future onto the runtime",
+                        ),
+                        (0.85, "tokio::task", "task", "Task utilities"),
+                    ]
+                    # Mock suggestions - related items but not in main results
+                    mock_suggestions.return_value = [
+                        "tokio::runtime::Runtime",
+                        "tokio::task::JoinHandle",
+                        "tokio::spawn_blocking",
+                    ]
+
+                    async with AsyncClient(
+                        transport=transport, base_url="http://test"
+                    ) as client:
+                        response = await client.post(
+                            "/mcp/tools/search_items",
+                            json={
+                                "crate_name": "tokio",
+                                "query": "spawn task",
+                                "k": 2,
+                            },
+                        )
+
+                        assert response.status_code == 200
+                        data = response.json()
+
+                        # Check that results are returned
+                        assert "results" in data
+                        assert len(data["results"]) == 2
+
+                        # Check that suggestions are only added to the first result
+                        first_result = data["results"][0]
+                        assert "suggestions" in first_result
+                        assert first_result["suggestions"] == [
+                            "tokio::runtime::Runtime",
+                            "tokio::task::JoinHandle",
+                            "tokio::spawn_blocking",
+                        ]
+
+                        # Second result should not have suggestions
+                        second_result = data["results"][1]
+                        assert (
+                            "suggestions" not in second_result
+                            or second_result["suggestions"] is None
+                        )
+
+                        # Verify get_see_also_suggestions was called with correct params
+                        mock_suggestions.assert_called_once()
+                        call_args = mock_suggestions.call_args
+                        assert call_args.args[2] == {
+                            "tokio::spawn",
+                            "tokio::task",
+                        }  # original_paths
+                        assert call_args.kwargs["k"] == 10
+                        assert call_args.kwargs["similarity_threshold"] == 0.7
+                        assert call_args.kwargs["max_suggestions"] == 5
+
+
+@pytest.mark.asyncio
+async def test_search_items_no_suggestions_when_no_results():
+    """Test that no suggestions are computed when there are no search results."""
+    transport = ASGITransport(app=app)
+
+    with patch("docsrs_mcp.app.ingest_crate") as mock_ingest:
+        with patch("docsrs_mcp.app.get_embedding_model") as mock_model:
+            with patch("docsrs_mcp.app.search_embeddings") as mock_search:
+                with patch(
+                    "docsrs_mcp.app.get_see_also_suggestions"
+                ) as mock_suggestions:
+                    # Setup mocks - no search results
+                    mock_ingest.return_value = "/path/to/db"
+                    mock_model.return_value.embed.return_value = [[0.1] * 768]
+                    mock_search.return_value = []  # No results
+
+                    async with AsyncClient(
+                        transport=transport, base_url="http://test"
+                    ) as client:
+                        response = await client.post(
+                            "/mcp/tools/search_items",
+                            json={
+                                "crate_name": "tokio",
+                                "query": "nonexistent",
+                                "k": 5,
+                            },
+                        )
+
+                        assert response.status_code == 200
+                        data = response.json()
+
+                        # Check that results are empty
+                        assert "results" in data
+                        assert len(data["results"]) == 0
+
+                        # Verify get_see_also_suggestions was NOT called
+                        mock_suggestions.assert_not_called()
 
 
 @pytest.mark.asyncio

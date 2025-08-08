@@ -74,7 +74,7 @@ graph LR
         end
         
         subgraph "Storage Layer"
-            DB[database.py<br/>SQLite operations]
+            DB[database.py<br/>SQLite operations<br/>get_see_also_suggestions()]
             VSS[vector_search.py<br/>k-NN queries with ranking]
             RANK[ranking.py<br/>Multi-factor scoring<br/>Type-aware weights]
             CACHE[cache_manager.py<br/>LRU eviction with TTL]
@@ -160,11 +160,19 @@ sequenceDiagram
     
     API->>DB: Vector search query with ranking (using normalized query)
     DB->>DB: sqlite-vec MATCH similarity
-    DB->>DB: Multi-factor scoring (vector 70% + type 15% + quality 10% + examples 5%)
+    DB->>DB: Multi-factor scoring (vector 60% + type 15% + quality 10% + examples 15%)
     DB->>DB: Type-aware boost (functions 1.2x, traits 1.15x, structs 1.1x)
     DB->>DB: Score normalization to [0, 1] range
     DB-->>API: Ranked top-k results with scores
-    API-->>Client: JSON response with ranking scores
+    
+    alt Results Found (Generate Suggestions)
+        API->>DB: get_see_also_suggestions(query_embedding, main_result_paths)
+        Note over DB: Vector similarity search<br/>0.7 threshold, k=10 over-fetch<br/>Excludes main results
+        DB-->>API: Related item paths (max 5)
+        API->>API: Add suggestions to first SearchResult only
+    end
+    
+    API-->>Client: JSON response with ranking scores + see-also suggestions
 ```
 
 ## Database Schema
@@ -350,7 +358,7 @@ graph TB
 ```mermaid
 graph TD
     subgraph "Enhanced MCP Tools"
-        SEARCH_DOC[search_documentation<br/>Vector similarity search with type filtering<br/>Input: query text, item_type filter<br/>Output: ranked documentation items]
+        SEARCH_DOC[search_documentation<br/>Vector similarity search with type filtering<br/>Input: query text, item_type filter<br/>Output: ranked documentation items with see-also suggestions]
         NAV_MOD[navigate_modules<br/>Module hierarchy navigation<br/>Input: crate, path<br/>Output: module tree structure]
         GET_EX[get_examples<br/>Code example retrieval<br/>Input: item_id or query<br/>Output: relevant code examples]
         SEARCH_EX[search_examples<br/>Semantic code example search<br/>Input: query, language filter<br/>Output: scored code examples with deduplication]
@@ -365,7 +373,7 @@ graph TD
     end
     
     subgraph "Enhanced REST Endpoints"
-        REST_SEARCH_DOC[POST /search_documentation<br/>Enhanced search endpoint]
+        REST_SEARCH_DOC[POST /search_documentation<br/>Enhanced search endpoint with see-also suggestions]
         REST_NAV[POST /navigate_modules<br/>Module navigation endpoint]
         REST_EXAMPLES[POST /get_examples<br/>Example retrieval endpoint]
         REST_SEARCH_EX[POST /search_examples<br/>Code example search endpoint]
@@ -1086,7 +1094,47 @@ graph TD
 
 ### Multi-Factor Scoring Algorithm
 
-The search ranking system implements a sophisticated multi-factor scoring algorithm that combines multiple relevance signals to deliver highly relevant results:
+The search ranking system implements a sophisticated multi-factor scoring algorithm that combines multiple relevance signals to deliver highly relevant results, enhanced with see-also suggestions for improved discovery:
+
+#### See-Also Suggestions Feature
+
+The system provides intelligent see-also suggestions using the same vector embedding infrastructure to find semantically related items that complement the main search results.
+
+**Architecture**:
+- **Function**: `get_see_also_suggestions()` in database.py
+- **Integration**: Computed alongside main search in search_items endpoint  
+- **Reuse Strategy**: Leverages existing search_embeddings logic and query embeddings
+- **Threshold**: 0.7 similarity threshold for high-quality suggestions
+- **Limit**: Maximum 5 suggestions to avoid overwhelming users
+- **Exclusion**: Automatically excludes items already in main search results
+- **Fail-Safe**: Graceful degradation - suggestions never break main search functionality
+- **Performance**: Uses same sqlite-vec MATCH operator with k=10 over-fetch for filtering
+
+**SearchResult Model Enhancement**:
+- **Field**: `suggestions: list[str] | None` - optional field for backward compatibility
+- **Population**: Only first result includes suggestions to avoid redundancy
+- **Content**: List of item_path strings for related documentation items
+
+**Query Processing Flow**:
+```mermaid
+graph LR
+    subgraph "Search with Suggestions"
+        QUERY[User Query]
+        EMBED[Generate Embedding]
+        MAIN_SEARCH[Main Vector Search]
+        SUGGESTIONS[Get See-Also Suggestions]
+        EXCLUDE[Exclude Main Results]
+        RESPONSE[Enhanced SearchResult]
+    end
+    
+    QUERY --> EMBED
+    EMBED --> MAIN_SEARCH
+    EMBED --> SUGGESTIONS
+    MAIN_SEARCH --> EXCLUDE
+    EXCLUDE --> SUGGESTIONS
+    SUGGESTIONS --> RESPONSE
+    MAIN_SEARCH --> RESPONSE
+```
 
 ```mermaid
 graph TB
@@ -1211,7 +1259,8 @@ graph LR
 
 | Component | Target | Notes |
 |-----------|--------|-------|
-| Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH + multi-factor ranking + progressive filtering |
+| Search latency | < 100ms P95 | Vector search with sqlite-vec MATCH + multi-factor ranking + progressive filtering + see-also suggestions |
+| **See-also suggestions** | **< 15ms P95** | **Vector similarity search with 0.7 threshold, k=10 over-fetch, excludes main results** |
 | Query preprocessing | < 1ms | Unicode NFKC normalization for search consistency |
 | Ranking overhead | < 20ms P95 | Multi-factor scoring with type weights and normalization |
 | Filter latency | < 15ms P95 | Progressive filtering with selectivity analysis and partial indexes |
@@ -2313,7 +2362,7 @@ sequenceDiagram
 ```mermaid
 graph TD
     subgraph "Enhanced Search Tools"
-        SEARCH_DOC[search_documentation<br/>• Vector similarity search<br/>• Item type filtering (struct, function, trait, etc)<br/>• Module path filtering with SQL LIKE patterns<br/>• Signature matching<br/>• Tag-based filtering]
+        SEARCH_DOC[search_documentation<br/>• Vector similarity search<br/>• Item type filtering (struct, function, trait, etc)<br/>• Module path filtering with SQL LIKE patterns<br/>• Signature matching<br/>• Tag-based filtering<br/>• See-also suggestions (0.7 similarity threshold, max 5 items)]
         
         NAV_TREE[navigate_modules<br/>• Hierarchical module browsing<br/>• Parent-child relationships<br/>• Module content listing<br/>• Path-based navigation]
         

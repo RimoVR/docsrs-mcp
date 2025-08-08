@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from slowapi.errors import RateLimitExceeded
 
 from .database import get_module_tree as get_module_tree_from_db
-from .database import search_embeddings
+from .database import get_see_also_suggestions, search_embeddings
 from .fuzzy_resolver import get_fuzzy_suggestions_with_fallback, resolve_path_alias
 from .ingest import get_embedding_model, ingest_crate
 from .middleware import limiter, rate_limit_handler
@@ -413,16 +413,36 @@ async def search_items(request: Request, params: SearchItemsRequest):
             deprecated=params.deprecated,
         )
 
-        # Convert to response format
-        search_results = [
-            SearchResult(
+        # Get see-also suggestions if we have results
+        suggestions = []
+        if results:
+            # Get the item paths from the main results to exclude from suggestions
+            original_paths = {item_path for _, item_path, _, _ in results}
+
+            # Get suggestions using the same query embedding
+            # This finds items similar to what the user is searching for
+            suggestions = await get_see_also_suggestions(
+                db_path,
+                query_embedding,
+                original_paths,
+                k=10,  # Over-fetch to allow filtering
+                similarity_threshold=0.7,
+                max_suggestions=5,
+            )
+
+        # Convert to response format, adding suggestions only to the first result
+        search_results = []
+        for i, (score, item_path, header, content) in enumerate(results):
+            result = SearchResult(
                 score=score,
                 item_path=item_path,
                 header=header,
                 snippet=content[:200] + "..." if len(content) > 200 else content,
             )
-            for score, item_path, header, content in results
-        ]
+            # Add suggestions only to the first result to avoid redundancy
+            if i == 0 and suggestions:
+                result.suggestions = suggestions
+            search_results.append(result)
 
         return SearchItemsResponse(results=search_results)
 

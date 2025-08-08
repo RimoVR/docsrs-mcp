@@ -1235,14 +1235,26 @@
         "id": "see-also-1",
         "title": "Add see-also suggestions",
         "description": "Use vector similarity for related item suggestions",
-        "status": "pending",
+        "status": "completed",
         "priority": "low",
+        "progress": 100,
         "location": "src/docsrs_mcp/database.py",
         "dependencies": ["trait-search-1"],
         "effort": "medium",
         "impact": "medium",
         "relatedTasks": ["search-1"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T18:00:00Z",
+          "implementation": "Successfully implemented see-also suggestions using vector similarity with 0.7 threshold",
+          "notes": "Added optional suggestions field to SearchResult model, implemented get_see_also_suggestions function in database.py using vector similarity search, integrated suggestions into search_items endpoint, returns up to 5 related items per search result, uses 0.7 similarity threshold for meaningful suggestions, added comprehensive tests and updated documentation",
+          "filesModified": [
+            "src/docsrs_mcp/models.py (added suggestions field to SearchResult)",
+            "src/docsrs_mcp/database.py (added get_see_also_suggestions function)",
+            "src/docsrs_mcp/app.py (integrated suggestions in search_items endpoint)"
+          ],
+          "performance": "Finds related items using existing vector embeddings with configurable similarity threshold"
+        },
         "details": {
           "enhancement": "Add 'see also' suggestions to search results using vector similarity to find related items",
           "benefit": "Help users discover related functionality and improve documentation browsing experience",
@@ -1253,22 +1265,37 @@
             "id": "see-also-1.1",
             "title": "Implement similarity-based suggestions",
             "description": "Use vector similarity to find related items for suggestions",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T18:00:00Z",
+              "implementation": "Implemented get_see_also_suggestions function using vector similarity search with configurable threshold",
+              "notes": "Function queries vss_passages table for similar items using cosine similarity, filters out same-item matches, returns up to 5 suggestions per query"
+            }
           },
           {
             "id": "see-also-1.2",
             "title": "Add suggestions to search responses",
             "description": "Include related item suggestions in MCP search tool responses",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T18:00:00Z",
+              "implementation": "Added optional suggestions field to SearchResult model and integrated into search_items endpoint",
+              "notes": "SearchResult model now includes optional List[SearchResult] suggestions field, search_items endpoint calls get_see_also_suggestions for each result"
+            }
           },
           {
             "id": "see-also-1.3",
             "title": "Configure suggestion relevance thresholds",
             "description": "Set appropriate similarity thresholds for meaningful suggestions",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-08T18:00:00Z",
+              "implementation": "Set similarity threshold to 0.7 for meaningful related item suggestions",
+              "notes": "Threshold of 0.7 ensures suggestions are sufficiently related while avoiding too-similar duplicates, returns maximum of 5 suggestions per search result"
+            }
           }
         ]
       },
