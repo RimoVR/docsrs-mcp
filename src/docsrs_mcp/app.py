@@ -301,6 +301,17 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name"],
                 },
+                tutorial="Fetches crate metadata including version, description, and module structure. First-time ingestion may take 1-10 seconds.",
+                examples=[
+                    'get_crate_summary(crate_name="tokio")',
+                    'get_crate_summary(crate_name="serde", version="1.0.195")',
+                    'get_crate_summary(crate_name="std")',
+                ],
+                use_cases=[
+                    "Explore crate structure and modules",
+                    "Check available versions and metadata",
+                    "Get repository and documentation URLs",
+                ],
             ),
             MCPTool(
                 name="search_items",
@@ -357,6 +368,17 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name", "query"],
                 },
+                tutorial="Semantic search across crate documentation. Returns ranked results by similarity score using BAAI/bge-small-en-v1.5 embeddings.",
+                examples=[
+                    'search_items(crate_name="tokio", query="spawn tasks")',
+                    'search_items(crate_name="serde", query="deserialize JSON", k=10, item_type="trait")',
+                    'search_items(crate_name="std", query="file operations", module_path="fs")',
+                ],
+                use_cases=[
+                    "Find relevant functions and methods",
+                    "Discover traits and implementations",
+                    "Locate code examples in documentation",
+                ],
             ),
             MCPTool(
                 name="get_item_doc",
@@ -379,6 +401,17 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name", "item_path"],
                 },
+                tutorial="Retrieves complete documentation for a specific item by path. Use search_items first if unsure of exact path.",
+                examples=[
+                    'get_item_doc(crate_name="tokio", item_path="spawn")',
+                    'get_item_doc(crate_name="serde", item_path="Deserialize")',
+                    'get_item_doc(crate_name="std", item_path="vec::Vec")',
+                ],
+                use_cases=[
+                    "Read full documentation and examples",
+                    "View method signatures and parameters",
+                    "Access detailed trait information",
+                ],
             ),
             MCPTool(
                 name="search_examples",
@@ -410,6 +443,17 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name", "query"],
                 },
+                tutorial="Searches code examples in documentation. Language-aware filtering available. Returns snippets with context.",
+                examples=[
+                    'search_examples(crate_name="tokio", query="async runtime")',
+                    'search_examples(crate_name="clap", query="parse arguments", k=3)',
+                    'search_examples(crate_name="sqlx", query="database connection", language="rust")',
+                ],
+                use_cases=[
+                    "Find usage patterns and best practices",
+                    "Discover code snippets for learning",
+                    "Locate specific implementation examples",
+                ],
             ),
             MCPTool(
                 name="get_module_tree",
@@ -428,6 +472,17 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name"],
                 },
+                tutorial="Returns hierarchical module structure with item counts. Useful for navigating large crates and understanding organization.",
+                examples=[
+                    'get_module_tree(crate_name="tokio")',
+                    'get_module_tree(crate_name="actix-web", version="4.4.0")',
+                    'get_module_tree(crate_name="std")',
+                ],
+                use_cases=[
+                    "Navigate crate structure and organization",
+                    "Find submodules and nested items",
+                    "Understand crate architecture at a glance",
+                ],
             ),
         ],
         resources=[

@@ -1060,6 +1060,77 @@
             "performance": "Precompile expensive operations like regex patterns outside validators"
           }
         },
+        "fieldExtensions": {
+          "jsonSchemaExtra": {
+            "purpose": "Add custom metadata to Pydantic fields for enhanced JSON schema generation",
+            "syntax": "Field(..., json_schema_extra={key: value})",
+            "capabilities": [
+              "Custom field descriptions and examples",
+              "Additional validation constraints like maxLength, maxItems",
+              "Custom field metadata for documentation generation",
+              "Enhanced OpenAPI/JSON Schema output"
+            ],
+            "examples": {
+              "stringConstraints": "Field(..., json_schema_extra={'maxLength': 100, 'example': 'sample text'})",
+              "arrayConstraints": "Field(..., json_schema_extra={'maxItems': 10, 'description': 'List of items'})",
+              "customMetadata": "Field(..., json_schema_extra={'category': 'user_input', 'validation_level': 'strict'})"
+            },
+            "documentation": "https://docs.pydantic.dev/latest/concepts/fields/#customizing-json-schema"
+          },
+          "optionalFieldsPattern": {
+            "v2Syntax": "field: str | None = Field(None, description='Optional field')",
+            "backwardCompatibility": "Maintains compatibility with existing code while providing clear type hints",
+            "defaultValue": "Field(None, ...) explicitly sets default to None for optional fields",
+            "typeAnnotation": "Union syntax (str | None) preferred over Optional[str] in Pydantic v2",
+            "validation": "Pydantic v2 requires explicit defaults for optional fields to prevent validation errors",
+            "bestPractice": "Always use Field(None, ...) for optional fields rather than bare = None"
+          },
+          "strictValidation": {
+            "configDict": "ConfigDict(extra='forbid') maintains strict validation while allowing new optional fields",
+            "purpose": "Prevents unexpected fields while allowing controlled schema evolution",
+            "flexibility": "New optional fields can be added without breaking existing validation",
+            "errorHandling": "Unknown fields raise validation errors, ensuring data integrity",
+            "evolution": "Supports backward-compatible API changes through optional field additions"
+          },
+          "annotatedPattern": {
+            "syntax": "Annotated[str, Field(description='...', json_schema_extra={...})]",
+            "benefit": "Clean separation between type information and field metadata",
+            "readability": "Improves code readability by separating type and validation concerns",
+            "reusability": "Annotated types can be reused across multiple model definitions",
+            "example": "UsernameField = Annotated[str, Field(min_length=3, max_length=20, json_schema_extra={'pattern': '^[a-zA-Z0-9_]+$'})]",
+            "documentation": "https://docs.pydantic.dev/latest/concepts/types/#annotated-types"
+          },
+          "constraintSpecification": {
+            "stringConstraints": {
+              "maxLength": "json_schema_extra={'maxLength': n} for string length limits",
+              "pattern": "json_schema_extra={'pattern': 'regex'} for regex validation",
+              "format": "json_schema_extra={'format': 'email'} for format validation"
+            },
+            "arrayConstraints": {
+              "maxItems": "json_schema_extra={'maxItems': n} for array size limits",
+              "minItems": "json_schema_extra={'minItems': n} for minimum array size",
+              "uniqueItems": "json_schema_extra={'uniqueItems': true} for unique element validation"
+            },
+            "numericConstraints": {
+              "minimum": "json_schema_extra={'minimum': n} for numeric lower bounds",
+              "maximum": "json_schema_extra={'maximum': n} for numeric upper bounds",
+              "multipleOf": "json_schema_extra={'multipleOf': n} for divisibility constraints"
+            }
+          },
+          "bestPractices": {
+            "consistency": "Use consistent Field() patterns across the codebase for maintainability",
+            "documentation": "Leverage json_schema_extra for comprehensive API documentation",
+            "validation": "Combine Pydantic validators with json_schema_extra for complete validation coverage",
+            "migration": "Gradually migrate from Field() descriptions to json_schema_extra for enhanced metadata",
+            "testing": "Test both Pydantic validation and generated JSON schemas to ensure correctness"
+          },
+          "sources": [
+            "Pydantic v2 Field documentation: https://docs.pydantic.dev/latest/concepts/fields/",
+            "JSON Schema customization: https://docs.pydantic.dev/latest/concepts/json_schema/#customizing-the-json-schema",
+            "Annotated types guide: https://docs.pydantic.dev/latest/concepts/types/#annotated-types",
+            "Field constraints reference: https://docs.pydantic.dev/latest/api/fields/#pydantic.fields.Field"
+          ]
+        },
         "mcpParameterHandling": {
           "clientInconsistency": {
             "description": "MCP clients inconsistently send parameters as strings or native types",

@@ -387,6 +387,82 @@ async def test_mcp_manifest_includes_filter_parameters():
 
 
 @pytest.mark.asyncio
+async def test_mcp_manifest_includes_tutorials():
+    """Test that MCP manifest includes tutorial fields when present."""
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/mcp/manifest")
+        assert response.status_code == 200
+
+        manifest = response.json()
+        tools = manifest["tools"]
+
+        # Check that all tools have tutorial fields
+        expected_tools = [
+            "get_crate_summary",
+            "search_items",
+            "get_item_doc",
+            "search_examples",
+            "get_module_tree",
+        ]
+
+        found_tools = {tool["name"] for tool in tools}
+        for expected_tool in expected_tools:
+            assert expected_tool in found_tools, (
+                f"Tool {expected_tool} not found in manifest"
+            )
+
+        # Check each tool has tutorial fields
+        for tool in tools:
+            if tool["name"] in expected_tools:
+                # Tutorial fields should be present
+                assert "tutorial" in tool, f"Tool {tool['name']} missing tutorial field"
+                assert "examples" in tool, f"Tool {tool['name']} missing examples field"
+                assert "use_cases" in tool, (
+                    f"Tool {tool['name']} missing use_cases field"
+                )
+
+                # Verify tutorial is a non-empty string
+                assert isinstance(tool["tutorial"], str), (
+                    f"Tool {tool['name']} tutorial should be a string"
+                )
+                assert len(tool["tutorial"]) > 0, (
+                    f"Tool {tool['name']} tutorial should not be empty"
+                )
+
+                # Verify examples is a list of strings
+                assert isinstance(tool["examples"], list), (
+                    f"Tool {tool['name']} examples should be a list"
+                )
+                assert len(tool["examples"]) > 0, (
+                    f"Tool {tool['name']} should have at least one example"
+                )
+                for example in tool["examples"]:
+                    assert isinstance(example, str), (
+                        f"Tool {tool['name']} examples should be strings"
+                    )
+
+                # Verify use_cases is a list of strings
+                assert isinstance(tool["use_cases"], list), (
+                    f"Tool {tool['name']} use_cases should be a list"
+                )
+                assert len(tool["use_cases"]) > 0, (
+                    f"Tool {tool['name']} should have at least one use case"
+                )
+                for use_case in tool["use_cases"]:
+                    assert isinstance(use_case, str), (
+                        f"Tool {tool['name']} use_cases should be strings"
+                    )
+
+                # Verify backward compatibility - fields can be None in the model
+                # but we're providing values in this implementation
+                assert tool["tutorial"] is not None
+                assert tool["examples"] is not None
+                assert tool["use_cases"] is not None
+
+
+@pytest.mark.asyncio
 async def test_error_response_status_code_validation():
     """Test that ErrorResponse status_code accepts strings and validates bounds."""
     # Test valid integer status codes

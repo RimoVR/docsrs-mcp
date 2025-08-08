@@ -42,6 +42,21 @@ class MCPTool(BaseModel):
     description: str = Field(..., description="Human-readable tool description")
     input_schema: dict[str, Any] = Field(..., description="JSON Schema for tool inputs")
 
+    # Tutorial fields (optional for backward compatibility)
+    tutorial: str | None = Field(
+        None,
+        description="Concise tutorial with usage examples",
+        json_schema_extra={"maxLength": 1000},  # ~200 tokens
+    )
+    examples: list[str] | None = Field(
+        None, description="Quick example invocations", json_schema_extra={"maxItems": 3}
+    )
+    use_cases: list[str] | None = Field(
+        None,
+        description="Common use cases for this tool",
+        json_schema_extra={"maxItems": 3},
+    )
+
     model_config = ConfigDict(extra="forbid")
 
 

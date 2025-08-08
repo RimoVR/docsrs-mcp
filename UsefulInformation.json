@@ -1278,6 +1278,67 @@
             "statesTesting": "Test both enabled=True and enabled=False configurations",
             "cleanupTesting": "Verify proper task cleanup and reference management"
           }
+        },
+        {
+          "lesson": "Simple direct field extension approach for Pydantic model enhancement",
+          "context": "Adding tutorial fields to existing Pydantic models for enhanced API responses",
+          "details": "When extending Pydantic models with new optional fields, direct field addition is more effective than complex nested model structures. Add Optional[str] fields directly to existing models (SearchResult, DocumentationItem) with appropriate default values (None). This approach maintains backward compatibility while enabling new functionality",
+          "impact": "Enables clean model extensions without breaking existing API consumers or complicating model hierarchy",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "Ruff automatically formats Pydantic field definitions for consistency",
+          "context": "Code formatting and Pydantic model field organization",
+          "details": "Ruff's formatter automatically handles Pydantic field definition formatting, ensuring consistent spacing, alignment, and organization of field declarations. This includes proper handling of Optional types, default values, and field descriptions across model definitions",
+          "impact": "Maintains consistent code style without manual formatting effort, improves code readability and maintainability",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "pyproject.toml"]
+        },
+        {
+          "lesson": "Tutorial content should be concise for token efficiency",
+          "context": "Implementing tutorial fields with content length optimization",
+          "details": "Tutorial content should be kept concise (15-30 tokens) to stay well under the 200 token limit per response. Focus on essential usage patterns, brief code examples, and key concepts rather than comprehensive documentation. This ensures tutorial additions enhance responses without significantly impacting token budgets",
+          "impact": "Provides valuable tutorial information while maintaining efficient token usage and response performance",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "lesson": "Test both presence and content of tutorial fields for comprehensive validation",
+          "context": "Testing strategies for optional Pydantic model fields",
+          "details": "When testing tutorial field implementations, verify both field presence (is not None) and content quality. Test scenarios should include: 1) Fields are populated when tutorial content is available, 2) Content matches expected format and length constraints, 3) Fields remain None when no tutorial content exists, 4) Backward compatibility with clients not expecting tutorial fields",
+          "impact": "Ensures tutorial field implementation works correctly across all use cases while maintaining backward compatibility",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["tests/test_app.py", "tests/test_models.py", "src/docsrs_mcp/models.py"]
+        },
+        {
+          "lesson": "FastAPI/MCP automatically serializes optional None fields maintaining backward compatibility",
+          "context": "API serialization behavior with optional Pydantic fields",
+          "details": "FastAPI and MCP automatically handle serialization of optional fields with None values, maintaining backward compatibility with existing API consumers. Fields with None values are properly serialized in JSON responses, allowing clients to safely ignore fields they don't recognize while new clients can utilize the additional information",
+          "impact": "Enables safe API extension without breaking existing integrations, supports gradual feature rollout",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "src/docsrs_mcp/app.py"],
+          "serializationBehavior": {
+            "noneValues": "Serialized as null in JSON responses",
+            "backwardCompatibility": "Existing clients can safely ignore new fields",
+            "forwardCompatibility": "New clients can utilize additional tutorial information"
+          }
+        },
+        {
+          "lesson": "Pydantic model extension patterns for similar enhancements",
+          "context": "Guidelines for future Pydantic model enhancements based on tutorial field implementation",
+          "details": "Future Pydantic model extensions should follow established patterns: 1) Use Optional[Type] with None defaults for backward compatibility, 2) Add fields directly to existing models rather than creating nested structures, 3) Consider token efficiency for content fields, 4) Test both field presence and content validation, 5) Leverage Ruff for consistent formatting, 6) Verify serialization behavior maintains API compatibility",
+          "impact": "Provides reusable patterns for future model enhancements, ensuring consistency and reliability across API evolution",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/models.py"],
+          "implementationChecklist": [
+            "Use Optional[Type] with None defaults",
+            "Add fields directly to existing models",
+            "Consider content length and token efficiency",
+            "Test field presence and content validation", 
+            "Run Ruff formatting for consistency",
+            "Verify backward/forward compatibility"
+          ]
         }
       ]
     },

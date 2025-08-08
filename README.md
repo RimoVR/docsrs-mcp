@@ -180,6 +180,19 @@ After configuration, restart Claude Desktop or use the `/mcp` command in Claude 
 
 The server exposes the following MCP tools through the `/mcp/tools/{tool_name}` endpoint:
 
+### Enhanced Tool Documentation
+
+All MCP tools now include embedded tutorials to help AI agents use them effectively:
+
+- **tutorial**: Concise usage guide (≤200 tokens per tutorial)
+- **examples**: Sample invocations showing common usage patterns
+- **use_cases**: Common scenarios where the tool is most useful
+
+Access via `GET /mcp/manifest` to see the enhanced tool descriptions. These tutorial fields are:
+- **Backward compatible**: Fields are optional and don't affect existing clients
+- **Token-efficient**: Designed for context-aware AI agents with minimal overhead
+- **Self-documenting**: Each tool provides its own usage instructions
+
 ### `get_crate_summary`
 
 Returns crate metadata including name, version, description, and repository info.

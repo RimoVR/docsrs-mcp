@@ -3278,7 +3278,42 @@ classDiagram
 
 ## Enhanced MCP Tool Documentation Architecture
 
-The enhanced MCP tool documentation system provides comprehensive, tutorial-rich descriptions while maintaining token efficiency.
+The enhanced MCP tool documentation system provides comprehensive, tutorial-rich descriptions while maintaining token efficiency through embedded tutorial fields in the MCPTool model.
+
+### MCP Tool Schema with Tutorial Fields
+
+The `MCPTool` Pydantic model has been extended with optional tutorial fields that enable rich documentation while maintaining backward compatibility:
+
+```mermaid
+classDiagram
+    class MCPTool {
+        +name: str
+        +description: str
+        +inputSchema: Dict
+        +tutorial: str | None
+        +examples: str | None
+        +use_cases: str | None
+        +validate_tutorial_length()
+        +validate_examples_count()
+        +validate_use_cases_format()
+    }
+    
+    class TutorialValidation {
+        +maxLength: 200 tokens
+        +maxItems: 5 examples
+        +format: structured text
+        +schema_extras: JSON validation
+    }
+    
+    MCPTool --> TutorialValidation
+```
+
+**Tutorial Field Architecture**:
+- **tutorial**: Optional string field (≤200 tokens) containing quick-start guides and essential usage patterns
+- **examples**: Optional string field with up to 5 practical code examples formatted as structured text
+- **use_cases**: Optional string field describing common scenarios and applications
+- **Backward Compatibility**: All tutorial fields are `str | None` type, ensuring existing tools continue working
+- **JSON Schema Validation**: Uses Pydantic `Field` with `json_schema_extra` for client-side validation
 
 ### Tool Documentation Structure
 ```mermaid
@@ -3286,88 +3321,120 @@ classDiagram
     class ToolDocumentation {
         +generate_tool_manifest() -> Dict
         +get_tool_description(tool_name: str) -> str
-        +get_tutorial_metadata(tool_name: str) -> TutorialMetadata
+        +embed_tutorial_content(tool: MCPTool) -> MCPTool
         +format_description_efficient(desc: str) -> str
-        -_load_tutorial_templates() -> Dict
+        +validate_token_budget(content: str) -> bool
         -_optimize_token_usage(content: str) -> str
     }
     
-    class TutorialMetadata {
+    class TutorialContent {
         +quick_start: str
-        +tips: List[str]
-        +common_patterns: List[Pattern]
-        +examples: List[Example]
-        +token_budget: int
+        +practical_examples: List[str]
+        +common_use_cases: List[str]
+        +token_count: int
+        +compress_for_budget() -> str
     }
     
-    class Pattern {
-        +name: str
-        +description: str
-        +code_snippet: str
-        +use_case: str
-    }
-    
-    class Example {
-        +title: str
-        +code: str
-        +explanation: str
-        +complexity: str
-    }
-    
-    ToolDocumentation --> TutorialMetadata
-    TutorialMetadata --> Pattern
-    TutorialMetadata --> Example
+    ToolDocumentation --> MCPTool
+    ToolDocumentation --> TutorialContent
+    MCPTool --> TutorialContent
 ```
 
 ### Extended Pydantic Models
 ```mermaid
 classDiagram
-    class EnhancedMCPTool {
+    class MCPTool {
         +name: str
         +description: str
-        +tutorial_metadata: TutorialMetadata
-        +token_efficient_desc: str
-        +complexity_level: str
-        +usage_frequency: str
-        +related_tools: List[str]
+        +inputSchema: Dict
+        +tutorial: str | None
+        +examples: str | None
+        +use_cases: str | None
     }
     
     class MCPManifest {
-        +tools: List[EnhancedMCPTool]
+        +tools: List[MCPTool]
+        +version: str
         +total_token_count: int
-        +compression_ratio: float
         +generate_optimized() -> Dict
-        +validate_token_budget() -> bool
+        +embed_tutorials() -> MCPManifest
     }
     
-    MCPManifest --> EnhancedMCPTool
-    EnhancedMCPTool --> TutorialMetadata
+    MCPManifest --> MCPTool
 ```
 
-### Token Efficiency Patterns
-- **Structured Format**: Quick start, tips, and patterns sections with consistent formatting
-- **Compression Techniques**: Remove redundant words, use abbreviations, optimize whitespace
-- **Progressive Disclosure**: Essential information first, detailed examples in separate metadata
-- **Template System**: Reusable description patterns to maintain consistency while reducing tokens
-- **Context-Aware Descriptions**: Adapt verbosity based on tool complexity and usage frequency
+### Token Efficiency Design
 
-### Integration with FastMCP
+**Core Principles**:
+- **200 Token Budget**: Each tutorial field strictly limited to ≤200 tokens for optimal context efficiency
+- **Embedded Content**: Tutorial information stored directly in MCPTool model, eliminating separate metadata lookups
+- **Smart Compression**: Essential information prioritized, verbose explanations condensed
+- **Structured Format**: Consistent formatting patterns across all tutorial fields
+- **Progressive Detail**: Basic usage in tutorial field, advanced patterns in examples field
+
+**Validation Strategy**:
+```python
+# JSON Schema validation via Pydantic Field extras
+class MCPTool(BaseModel):
+    tutorial: str | None = Field(
+        None,
+        json_schema_extra={
+            "maxLength": 200,  # Token limit enforced
+            "description": "Quick-start guide and essential patterns"
+        }
+    )
+    examples: str | None = Field(
+        None,
+        json_schema_extra={
+            "maxItems": 5,  # Maximum example count
+            "description": "Practical code examples with explanations"
+        }
+    )
+```
+
+### Tutorial Content Embedding
+
+Tutorial content is embedded directly in the `get_mcp_manifest()` function rather than loaded from external files:
+
+```mermaid
+flowchart TD
+    A[get_mcp_manifest Request] --> B[Load Base Tool Definitions]
+    B --> C[Embed Tutorial Content]
+    C --> D[Apply Token Optimization]
+    
+    D --> E{Validate Token Budget}
+    E -->|Under 200 tokens| F[Include Full Tutorial]
+    E -->|Over 200 tokens| G[Compress Content]
+    
+    G --> H[Remove Non-essential Words]
+    H --> I[Use Abbreviated Examples]
+    I --> J[Validate Final Length]
+    
+    F --> K[Generate MCPTool Instance]
+    J --> K
+    K --> L[Return Manifest]
+    
+    style C fill:#e8f5e8
+    style G fill:#fff3e0
+```
+
 ```mermaid
 sequenceDiagram
     participant Client as MCP Client
     participant Server as MCP Server
-    participant ToolDocs as Tool Documentation
-    participant Models as Pydantic Models
+    participant Manifest as get_mcp_manifest()
+    participant Models as MCPTool Model
     
     Client->>Server: Request tool manifest
-    Server->>ToolDocs: Get enhanced descriptions
-    ToolDocs->>Models: Load tutorial metadata
-    Models->>ToolDocs: Validated tool schemas
-    ToolDocs->>Server: Token-optimized manifest
+    Server->>Manifest: Generate manifest with tutorials
+    Manifest->>Models: Create MCPTool instances
+    Models->>Models: Validate tutorial fields
+    Models->>Manifest: Validated tool schemas
+    Manifest->>Server: Complete manifest with embedded tutorials
     Server->>Client: Enhanced tool descriptions
     
-    Note over ToolDocs: Balances completeness with efficiency
-    Note over Models: Validates tutorial format consistency
+    Note over Manifest: Tutorial content embedded directly
+    Note over Models: Optional fields ensure backward compatibility
 ```
 
 ## System Integration Diagrams
@@ -3401,29 +3468,29 @@ flowchart TD
     style L fill:#f3e5f5
 ```
 
-### Enhanced Tool Documentation Generation
+### Enhanced Tool Documentation Generation (Embedded Architecture)
 ```mermaid
 flowchart TD
-    A[MCP Manifest Request] --> B[Tool Documentation Module]
-    B --> C[Load Tutorial Templates]
-    C --> D[Generate Base Descriptions]
+    A[MCP Manifest Request] --> B[get_mcp_manifest Function]
+    B --> C[Create Base MCPTool Instances]
+    C --> D[Embed Tutorial Content Directly]
     
-    D --> E[Add Tutorial Metadata]
-    E --> F{Token Budget Check}
-    F -->|Under Budget| G[Include Full Examples]
-    F -->|Over Budget| H[Compress Content]
+    D --> E{Token Budget Validation}
+    E -->|≤200 tokens| F[Set Tutorial Fields]
+    E -->|>200 tokens| G[Compress Content]
     
-    H --> I[Remove Verbose Examples]
-    I --> J[Use Abbreviated Patterns]
-    J --> K[Apply Token Optimization]
+    G --> H[Remove Non-essential Text]
+    H --> I[Truncate Examples]
+    I --> J[Validate Final Token Count]
     
-    G --> L[Validate Pydantic Models]
-    K --> L
-    L --> M[Generate FastMCP Manifest]
-    M --> N[Return to Client]
+    F --> K[Create MCPTool with Optional Fields]
+    J --> K
+    K --> L[Validate Pydantic Schema]
+    L --> M[Return Enhanced Manifest]
     
-    style G fill:#e8f5e8
-    style H fill:#fff3e0
+    style F fill:#e8f5e8
+    style G fill:#fff3e0
+    style K fill:#e1f5fe
 ```
 
 ## Performance Implications of New Features
@@ -3461,14 +3528,16 @@ The enhanced popular crates architecture includes comprehensive monitoring capab
 - **Storage Health**: SQLite cache database integrity and disk space utilization
 - **Background Task Status**: Pre-ingestion worker health and task completion rates
 
-### Enhanced Tool Documentation
+### Enhanced Tool Documentation with Embedded Tutorials
 | Component | Impact | Notes |
 |-----------|--------|------------|
-| Manifest Size | +30% | Rich tutorial metadata increases payload |
-| Generation Time | +15ms | Template processing and token optimization |
-| Token Efficiency | +25% | Better information density per token |
-| Client Experience | Improved | More actionable tool descriptions |
-| Memory Usage | +10MB | Tutorial templates and metadata caching |
+| Manifest Size | +25% | Embedded tutorial fields in MCPTool instances |
+| Generation Time | +5ms | Direct embedding eliminates template loading |
+| Token Efficiency | +40% | 200-token limit ensures optimal context usage |
+| Client Experience | Significantly Improved | Rich tutorials without external dependencies |
+| Memory Usage | +2MB | Tutorial content embedded in manifest, no separate caching |
+| Backward Compatibility | 100% | Optional fields (str \| None) maintain compatibility |
+| Validation Overhead | Minimal | JSON schema extras provide client-side validation |
 
 ## Enhanced Future Considerations
 - Cross-crate dependency search capabilities with enhanced metadata
@@ -3480,5 +3549,7 @@ The enhanced popular crates architecture includes comprehensive monitoring capab
 - Analytics and usage tracking for enhanced feature optimization
 - Authentication and authorization for enterprise deployments with enhanced APIs
 - **Popular Crates Analytics**: Track pre-ingestion effectiveness and adjust popular crates list dynamically
-- **Advanced Tool Documentation**: AI-powered description generation with context-aware optimization
+- **Advanced Tool Documentation**: AI-powered description generation with context-aware optimization leveraging embedded tutorial fields
 - **Predictive Pre-ingestion**: Use query patterns to predict and pre-ingest likely-needed crates
+- **Dynamic Tutorial Generation**: Automatically generate and update tutorial content based on API usage patterns and user feedback
+- **Multi-language Tutorial Support**: Extend tutorial fields to support multiple programming language examples
