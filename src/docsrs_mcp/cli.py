@@ -19,17 +19,29 @@ def main() -> None:
         default="mcp",
         help="Server mode: 'rest' for HTTP API, 'mcp' for MCP protocol via STDIO (default: mcp)",
     )
+    parser.add_argument(
+        "--pre-ingest",
+        action="store_true",
+        default=False,
+        help="Enable background pre-ingestion of popular crates (default: disabled)",
+    )
     args = parser.parse_args()
 
     if args.mode == "mcp":
         # Run MCP server with STDIO transport
-        run_mcp_server()
+        run_mcp_server(args)
     else:
         # Run REST API server (default behavior)
         port = int(os.getenv("PORT", "8000"))
         host = os.getenv("HOST", "0.0.0.0")
 
+        # Set environment variable for REST mode to use
+        if args.pre_ingest:
+            os.environ["DOCSRS_PRE_INGEST_ENABLED"] = "true"
+
         print(f"Starting docsrs-mcp server in REST mode on {host}:{port}")
+        if args.pre_ingest:
+            print("Pre-ingestion of popular crates enabled")
 
         uvicorn.run(
             "docsrs_mcp.app:app",

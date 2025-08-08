@@ -2169,6 +2169,225 @@
           "prevention": "Include README validation in CI/CD pipeline"
         }
       }
+    },
+    "cratePreIngestion": {
+      "overview": "Research findings on popular crate pre-ingestion strategies and best practices",
+      "reactiveCachingPatterns": {
+        "description": "Caching patterns adopted by major package registries for optimal performance",
+        "patterns": [
+          "Lazy loading with on-demand ingestion for long-tail packages",
+          "Background refresh with TTL expiration for popular packages",
+          "Event-driven invalidation on publish/update events",
+          "Multi-tier caching (L1: memory, L2: disk, L3: distributed)"
+        ],
+        "sources": [
+          "docs.rs CDN implementation analysis",
+          "npm registry architecture documentation",
+          "PyPI caching strategy whitepapers",
+          "Package registry performance benchmarks"
+        ]
+      },
+      "selectivePreLoading": {
+        "optimalRange": "100-500 most popular packages",
+        "rationale": "Balance between coverage and resource utilization",
+        "strategy": "Pre-ingest top packages based on download statistics and dependency graphs",
+        "benefits": [
+          "90%+ cache hit rate for common queries",
+          "Reduced cold start latency for popular crates",
+          "Predictable resource usage patterns"
+        ],
+        "implementation": [
+          "Use crates.io download statistics API for popularity ranking",
+          "Analyze dependency graphs to identify high-impact packages",
+          "Implement rolling updates with download trend analysis"
+        ]
+      },
+      "backgroundIngestion": {
+        "priorityQueues": {
+          "high": "Top 100 crates - immediate ingestion",
+          "medium": "Top 500 crates - within 1 hour",
+          "low": "Long-tail crates - on-demand only"
+        },
+        "workerPatterns": [
+          "Dedicated background worker processes separate from API servers",
+          "Queue-based job distribution with Redis or similar",
+          "Graceful degradation when workers are unavailable",
+          "Progress tracking and retry logic for failed ingestions"
+        ],
+        "scheduling": [
+          "Periodic refresh based on package update frequency",
+          "Event-driven ingestion on new version releases",
+          "Load balancing during peak hours"
+        ]
+      },
+      "nonBlockingStartup": {
+        "principle": "Server should start immediately without waiting for cache warmup",
+        "implementation": [
+          "Start with empty cache and populate asynchronously",
+          "Health check endpoints separate from ingestion status",
+          "Fallback to upstream docs.rs when cache miss occurs",
+          "Progress indicators for cache warmup in admin interfaces"
+        ],
+        "userExperience": [
+          "Immediate API availability even during cold starts",
+          "Graceful degradation with upstream fallback",
+          "Transparent cache population in background"
+        ]
+      },
+      "rateLimitingStrategies": {
+        "upstreamAPIs": {
+          "docsRs": "Respect docs.rs rate limits with exponential backoff",
+          "cratesIo": "Use crates.io API rate limits for metadata fetching",
+          "github": "Implement GitHub API token rotation for repository data"
+        },
+        "backoffPatterns": [
+          "Exponential backoff starting at 1 second",
+          "Jitter to prevent thundering herd",
+          "Circuit breaker pattern for upstream failures",
+          "Dead letter queues for persistent failures"
+        ],
+        "monitoring": [
+          "Rate limit consumption tracking",
+          "Upstream API response time monitoring",
+          "Error rate alerting for ingestion failures"
+        ]
+      },
+      "cdnEdgeCaching": {
+        "globalPerformance": "Edge caching patterns for worldwide content delivery",
+        "strategies": [
+          "Geographic distribution of cached content",
+          "Smart routing based on user location",
+          "Cache warming strategies for new regions",
+          "Invalidation propagation across edge nodes"
+        ],
+        "implementation": [
+          "CloudFlare/AWS CloudFront integration patterns",
+          "Edge-specific cache TTL configuration",
+          "Origin shield patterns for cache efficiency",
+          "Real user monitoring (RUM) for performance tracking"
+        ]
+      },
+      "sources": [
+        "docs.rs CDN implementation architecture",
+        "Package registry best practices documentation",
+        "Real-world MCP server implementations",
+        "Performance benchmarking studies of package registries"
+      ]
+    },
+    "mcpToolDescriptionOptimization": {
+      "overview": "Research findings on optimizing MCP tool descriptions for token efficiency and clarity",
+      "tokenEfficientPatterns": {
+        "principle": "Maximize information density while maintaining clarity",
+        "techniques": [
+          "Action-oriented descriptions focusing on capability rather than implementation",
+          "Structured format with consistent terminology",
+          "Hierarchical information organization (overview → specifics)",
+          "Elimination of redundant words and phrases"
+        ],
+        "examples": {
+          "inefficient": "This tool allows you to search through the documentation of Rust crates and find relevant information",
+          "efficient": "Search Rust crate documentation for relevant information"
+        }
+      },
+      "actionOrientedDescriptions": {
+        "characterLimit": "125 characters optimal for tool descriptions",
+        "structure": "Verb + Object + Context",
+        "patterns": [
+          "Search [what] for [purpose]",
+          "Extract [what] from [source]", 
+          "Generate [what] based on [criteria]",
+          "Validate [what] against [standard]"
+        ],
+        "benefits": [
+          "Clear functional purpose for LLM understanding",
+          "Reduced ambiguity in tool selection",
+          "Improved tool discovery and usage patterns"
+        ]
+      },
+      "jsonSchemaOptimization": {
+        "enums": {
+          "purpose": "Constrain parameter values to valid options",
+          "benefits": [
+            "Reduced hallucination in parameter selection",
+            "Clear validation boundaries",
+            "Self-documenting parameter constraints"
+          ],
+          "implementation": "Use enum arrays for finite value sets"
+        },
+        "constraints": [
+          "Use 'minimum' and 'maximum' for numeric bounds",
+          "Apply 'minLength' and 'maxLength' for string validation",
+          "Implement 'pattern' regex for format validation",
+          "Use 'format' for semantic validation (email, uri, etc.)"
+        ],
+        "optimization": [
+          "Minimize nested object depth",
+          "Use 'additionalProperties': false to prevent parameter drift",
+          "Provide 'default' values for optional parameters",
+          "Use 'examples' for complex parameter structures"
+        ]
+      },
+      "threeTierDocumentation": {
+        "tier1": {
+          "level": "Tool name - 2-4 words maximum",
+          "purpose": "Quick identification and scanning",
+          "examples": ["Search Docs", "Extract Code", "Validate Version"]
+        },
+        "tier2": {
+          "level": "Tool description - 50-125 characters",
+          "purpose": "Functional overview and context",
+          "format": "Action-oriented with clear scope"
+        },
+        "tier3": {
+          "level": "Parameter descriptions - 20-80 characters each", 
+          "purpose": "Specific usage guidance",
+          "format": "Concise explanation of parameter role and constraints"
+        }
+      },
+      "selfDocumentingNaming": {
+        "parameters": [
+          "Use semantic names that explain purpose: 'searchQuery' not 'q'",
+          "Include type hints in naming: 'maxResults' indicates numeric type",
+          "Use consistent naming patterns across tools",
+          "Avoid abbreviations unless universally understood"
+        ],
+        "tools": [
+          "Verb-noun combinations for action clarity",
+          "Namespace prefixes for tool grouping when needed",
+          "Consistent naming patterns across tool families"
+        ]
+      },
+      "tutorialFormat": {
+        "quickStart": {
+          "structure": "Most common use case first",
+          "elements": [
+            "Single sentence purpose statement",
+            "Required parameters only",
+            "Expected output format",
+            "One concrete example"
+          ]
+        },
+        "commonPatterns": {
+          "organization": "Group related usage patterns",
+          "progression": "Simple to advanced examples",
+          "errorHandling": "Common error conditions and solutions",
+          "bestPractices": "Optimal usage recommendations"
+        },
+        "implementation": [
+          "Use 'description' field for quick start info",
+          "Include 'examples' in parameter schemas",
+          "Provide 'errorConditions' in tool metadata",
+          "Link to detailed documentation when needed"
+        ]
+      },
+      "sources": [
+        "MCP specification 2025-06-18",
+        "Real-world MCP server implementations analysis",
+        "Token efficiency studies in LLM tool usage",
+        "JSON Schema optimization best practices",
+        "Claude Desktop tool discovery patterns",
+        "Developer experience research in API documentation"
+      ]
     }
   },
   "recommendations": {

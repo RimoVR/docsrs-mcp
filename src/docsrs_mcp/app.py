@@ -93,6 +93,21 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Handle application startup tasks."""
+    from . import config
+
+    # Start pre-ingestion if enabled via environment variable
+    if config.PRE_INGEST_ENABLED:
+        from .popular_crates import PopularCratesManager, PreIngestionWorker
+
+        logger.info("Starting background pre-ingestion of popular crates")
+        manager = PopularCratesManager()
+        worker = PreIngestionWorker(manager)
+        await worker.start()
+
+
 @app.get(
     "/health",
     tags=["health"],

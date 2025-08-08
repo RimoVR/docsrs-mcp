@@ -82,3 +82,39 @@ DOWNLOAD_CHUNK_SIZE = int(os.getenv("DOCSRS_DOWNLOAD_CHUNK_SIZE", "8192"))
 STDLIB_CRATES = {"std", "core", "alloc", "proc_macro", "test"}
 RUST_CHANNEL_BASE = "https://static.rust-lang.org"
 RUST_VERSION_MANIFEST_URL = f"{RUST_CHANNEL_BASE}/version"
+
+# Pre-ingestion configuration
+PRE_INGEST_ENABLED = os.getenv("DOCSRS_PRE_INGEST_ENABLED", "false").lower() == "true"
+PRE_INGEST_CONCURRENCY = int(os.getenv("DOCSRS_PRE_INGEST_CONCURRENCY", "3"))
+POPULAR_CRATES_COUNT = int(os.getenv("DOCSRS_POPULAR_CRATES_COUNT", "100"))
+POPULAR_CRATES_URL = "https://crates.io/api/v1/crates?sort=downloads&per_page={}"
+POPULAR_CRATES_REFRESH_HOURS = int(
+    os.getenv("DOCSRS_POPULAR_CRATES_REFRESH_HOURS", "24")
+)
+
+# Hardcoded fallback list of essential popular crates
+FALLBACK_POPULAR_CRATES = [
+    "serde",
+    "tokio",
+    "clap",
+    "syn",
+    "anyhow",
+    "thiserror",
+    "rand",
+    "log",
+    "regex",
+    "async-trait",
+    "futures",
+    "bytes",
+    "chrono",
+    "reqwest",
+    "once_cell",
+    "tracing",
+    "serde_json",
+    "quote",
+    "proc-macro2",
+    "itertools",
+]
+
+# Version for User-Agent header
+VERSION = "0.1.0"

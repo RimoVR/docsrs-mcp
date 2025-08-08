@@ -44,6 +44,10 @@ all through the open MCP tool-calling standard, **without** proprietary services
 
 **Out of scope (v1):** cross-crate search, authentication, analytics, popularity ranking, GPU off-load, multi-tenant quotas.
 
+**Planned features (v1.1+):**
+- Optional pre-ingestion of popular Rust crates for improved cold-start performance
+- Enhanced MCP tool descriptions with embedded tutorials for better AI agent usability
+
 ## 3.1 · Critical Bug Fixes Required
 
 **🚨 URGENT - BROKEN FUNCTIONALITY:**
@@ -77,9 +81,14 @@ all through the open MCP tool-calling standard, **without** proprietary services
 
 ## 4 · User stories
 
-1. **AI assistant:** “I know only *serde* – give me a JSON summary of the latest docs so I can explain them.”
-2. **AI assistant:** “Provide rustdoc for `serde::de::Deserialize` in v1.0.197 so I can craft an example.”
-3. **Developer:** “I want to run the server with a single `uvx` command from a GitHub URL.”
+**Current (v1.0):**
+1. **AI assistant:** "I know only *serde* – give me a JSON summary of the latest docs so I can explain them."
+2. **AI assistant:** "Provide rustdoc for `serde::de::Deserialize` in v1.0.197 so I can craft an example."
+3. **Developer:** "I want to run the server with a single `uvx` command from a GitHub URL."
+
+**Planned (v1.1+):**
+4. **Server operator:** "I want the server to pre-ingest the top 100 most-used crates on startup so common queries are instant."
+5. **AI agent:** "I need tutorial-style examples embedded in the MCP tool descriptions to understand how to use each tool effectively."
 
 ---
 
@@ -113,6 +122,67 @@ all through the open MCP tool-calling standard, **without** proprietary services
 ---
 
 ## 6 · Component design (technical)
+
+### 6.0 Planned Feature Specifications (v1.1+)
+
+#### 6.0.1 Optional Pre-ingestion of Popular Crates
+
+**Purpose:** Eliminate cold-start latency for the most commonly queried Rust crates by pre-loading them during server startup.
+
+**Technical Requirements:**
+- **Scope:** Top 100-500 most-used crates based on crates.io download statistics
+- **Implementation:** Background ingestion worker with configurable concurrency (default: 3 parallel downloads)
+- **Performance:** Non-blocking startup - server accepts requests immediately while pre-ingestion runs
+- **Configuration:** CLI flag `--pre-ingest` to enable/disable (default: disabled for lean startup)
+- **Cache Management:** Priority-aware LRU eviction - pre-ingested crates have higher retention priority
+- **Resource Control:** Respects existing memory/disk limits (≤ 1 GiB RAM, ≤ 2 GiB cache)
+- **Monitoring:** Progress logging and `/health` endpoint reports pre-ingestion status
+
+**Value Proposition:**
+- **Performance:** Sub-100ms response times for popular crates (tokio, serde, clap, etc.)
+- **User Experience:** AI agents get instant responses for common documentation queries
+- **Predictable Latency:** Eliminates the 2-3 second cold-start penalty for frequently used crates
+
+**Implementation Strategy:**
+```python
+# CLI integration
+@click.option('--pre-ingest', is_flag=True, help='Pre-ingest popular crates on startup')
+
+# Background worker
+async def pre_ingest_popular_crates(crate_list: List[str], concurrency: int = 3):
+    semaphore = asyncio.Semaphore(concurrency)
+    tasks = [ingest_crate_with_semaphore(semaphore, crate) for crate in crate_list]
+    await asyncio.gather(*tasks, return_exceptions=True)
+```
+
+#### 6.0.2 Enhanced MCP Tool Descriptions with Tutorials
+
+**Purpose:** Provide AI agents with embedded, token-efficient tutorials within MCP tool schemas to improve tool usage accuracy and reduce trial-and-error.
+
+**Technical Requirements:**
+- **Format:** Structured examples embedded in JSON schema descriptions using compact, LLM-optimized format
+- **Content:** Common usage patterns, parameter combinations, and expected response structures
+- **Compatibility:** Backward-compatible with existing MCP clients - tutorials are additive metadata
+- **Size Optimization:** Concise format designed for LLM token efficiency (≤ 200 tokens per tutorial)
+- **Coverage:** All six core tools (get_crate_summary, search_items, get_item_doc, search_examples, get_module_tree, list_versions)
+
+**Value Proposition:**
+- **Accuracy:** Reduces incorrect tool usage by providing clear examples in context
+- **Efficiency:** Eliminates need for separate documentation lookups or trial-and-error
+- **Adoption:** Lowers barrier to entry for new MCP clients and AI agents
+- **Self-Documenting:** Tools become self-explanatory through embedded guidance
+
+**Implementation Strategy:**
+```python
+# Enhanced tool schema example
+{
+  "name": "search_items",
+  "description": "Vector search across crate items with type filtering.\\n\\n📖 Tutorial:\\n• Basic: search_items(crate='tokio', query='spawn task')\\n• Filtered: search_items(crate='serde', query='deserialize', type_filter='trait')\\n• Tuned: search_items(crate='clap', query='argument parsing', k=10)\\n→ Returns: [{score, item_path, item_type, header, snippet}, ...]",
+  "inputSchema": { ... }
+}
+```
+
+---
 
 ### 6.1 FastAPI application (`docsrs_mcp.app`)
 
@@ -226,6 +296,7 @@ LIMIT :k;
 ### 6.6 CLI entry point
 
 ```python
+# Current implementation
 def main() -> None:
     import uvicorn, os
     uvicorn.run(
@@ -235,6 +306,27 @@ def main() -> None:
         loop="uvloop",
         workers=1,
     )
+
+# Planned (v1.1+) with pre-ingestion support
+def main() -> None:
+    import click, uvicorn, os, asyncio
+    
+    @click.command()
+    @click.option('--port', default=8000, help='Server port')
+    @click.option('--pre-ingest', is_flag=True, help='Pre-ingest popular crates')
+    def cli(port: int, pre_ingest: bool):
+        if pre_ingest:
+            asyncio.create_task(pre_ingest_popular_crates())
+        
+        uvicorn.run(
+            "docsrs_mcp.app:app",
+            host="0.0.0.0",
+            port=port,
+            loop="uvloop",
+            workers=1,
+        )
+    
+    cli()
 ```
 
 ### 6.7 Packaging (uv-native)
@@ -291,8 +383,8 @@ uvx docsrs-mcp@latest
 | ----------------- | -------------------------------------------------------------------------------------- |
 | **Portability**   | CPython 3.10+; CI on Ubuntu 22.04, macOS 14, Windows 11 (GitHub Actions).              |
 | **Performance**   | All search operations: ≤ 500 ms P95 (warm) across expanded dataset; ≤ 3 s cold ingest for crates ≤ 10 MiB compressed with full item indexing. |
-| **Memory**        | ≤ 1 GiB RSS incl. ONNX & FAISS under 10 k vectors.                                     |
-| **Disk**          | Cache auto-evicts to ≤ 2 GiB.                                                          |
+| **Memory**        | ≤ 1 GiB RSS incl. ONNX & FAISS under 10 k vectors (with pre-ingestion enabled).       |
+| **Disk**          | Cache auto-evicts to ≤ 2 GiB (priority-aware LRU for pre-ingested crates).            |
 | **Availability**  | Stateless web layer; cache can be rebuilt.                                             |
 | **Observability** | `/health` endpoint; debug logs to stdout.                                              |
 | **Security**      | See §6.5.                                                                              |
@@ -332,6 +424,12 @@ uvx docsrs-mcp@latest
 15. **🚨 CRITICAL**: searchExamples must return complete code blocks, not individual characters - fix ingest.py:761 character iteration bug.
 16. **⚠️ REQUIRED**: MCP parameter validation accepts numeric values like k=2 through proper anyOf schema patterns.
 17. **⚠️ REQUIRED**: Common path aliases (serde::Deserialize → serde::de::Deserialize) resolve automatically without user intervention.
+
+**Planned acceptance criteria (v1.1+):**
+18. **Pre-ingestion**: `docsrs-mcp --pre-ingest` successfully pre-loads top 100 crates within 5 minutes on standard hardware while serving requests.
+19. **Tutorial integration**: All MCP tool descriptions include embedded tutorials accessible via `/mcp/manifest` with ≤ 200 tokens per tool.
+20. **Performance**: Pre-ingested popular crates (tokio, serde, clap) respond in ≤ 100ms for search and summary operations.
+21. **Cache priority**: Pre-ingested crates are retained longer during LRU eviction compared to on-demand crates.
 
 ---
 
