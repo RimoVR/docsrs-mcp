@@ -1,6 +1,7 @@
 """Simple configuration for docsrs-mcp."""
 
 import os
+import warnings
 from pathlib import Path
 
 # Cache configuration
@@ -89,9 +90,24 @@ STDLIB_CRATES = {"std", "core", "alloc", "proc_macro", "test"}
 RUST_CHANNEL_BASE = "https://static.rust-lang.org"
 RUST_VERSION_MANIFEST_URL = f"{RUST_CHANNEL_BASE}/version"
 
+# Server configuration
+PORT = int(os.getenv("DOCSRS_PORT", "8000"))
+if not 1024 <= PORT <= 65535:
+    warnings.warn(f"Port {PORT} out of range (1024-65535), using 8000", stacklevel=2)
+    PORT = 8000
+
 # Pre-ingestion configuration
 PRE_INGEST_ENABLED = os.getenv("DOCSRS_PRE_INGEST_ENABLED", "false").lower() == "true"
-PRE_INGEST_CONCURRENCY = int(os.getenv("DOCSRS_PRE_INGEST_CONCURRENCY", "3"))
+CONCURRENCY = int(
+    os.getenv("DOCSRS_CONCURRENCY", os.getenv("DOCSRS_PRE_INGEST_CONCURRENCY", "3"))
+)
+if not 1 <= CONCURRENCY <= 10:
+    warnings.warn(
+        f"Concurrency {CONCURRENCY} out of range (1-10), using 3", stacklevel=2
+    )
+    CONCURRENCY = 3
+# Keep backward compatibility alias
+PRE_INGEST_CONCURRENCY = CONCURRENCY
 
 # Background scheduler configuration
 SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
