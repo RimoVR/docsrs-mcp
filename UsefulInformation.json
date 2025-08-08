@@ -443,6 +443,23 @@
               "4. Verify <500ms response times"
             ]
           }
+        },
+        {
+          "error": "MCP clients sending numeric/boolean values as strings cause validation failures",
+          "context": "MCP clients (including Claude Code) send parameters like k=2 as string '2' and boolean parameters as 'true'/'false' strings, causing JSON Schema validation errors before Pydantic field validators can perform type coercion",
+          "solution": "Add anyOf patterns to all parameters with type coercion needs in the MCP manifest (app.py's get_mcp_manifest() function): 1) Numeric parameters: 'anyOf': [{'type': 'integer'}, {'type': 'string'}], 2) Boolean parameters: 'anyOf': [{'type': 'boolean'}, {'type': 'string'}], 3) Optional strings: 'anyOf': [{'type': 'string'}, {'type': 'null'}]. Important: anyOf patterns must be added in app.py's get_mcp_manifest() function, not in models.py",
+          "prevention": "Always use anyOf patterns in MCP manifests for parameters that may arrive as different types from various clients. Test with both native types and strings using curl to ensure compatibility. All parameters with field validators in models.py need corresponding anyOf patterns in app.py",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "validationFlow": "MCP manifest anyOf → FastMCP JSON Schema validation → Pydantic field validators → Type coercion",
+          "testingNotes": "Verify with curl using both native types and strings: curl -X POST -H 'Content-Type: application/json' -d '{\"k\": \"5\"}' and curl -X POST -H 'Content-Type: application/json' -d '{\"k\": 5}'",
+          "criticalDetails": {
+            "manifestLocation": "app.py get_mcp_manifest() function around lines 151-297",
+            "doubleValidation": "FastMCP performs JSON Schema validation before Pydantic field validators run",
+            "patternRequired": "anyOf patterns are essential - restrictive schemas block field validator execution",
+            "implementationNote": "Field validators handle conversion, manifest must allow types through"
+          },
+          "resolutionStatus": "FIXED - Applied anyOf patterns for numeric and boolean parameters, tested and verified working with both string and native type inputs"
         }
       ]
     },
@@ -1091,7 +1108,13 @@
       "Decorator ordering: @field_validator must come BEFORE @classmethod for proper wrapping",
       "None preservation: Don't convert None to defaults in validators - handle at application layer",
       "Error messages: Include field name, examples, and received value (truncated to 100 chars) for helpful feedback",
-      "Compatibility testing: Test with both native types and string representations using model_validate()"
+      "Compatibility testing: Test with both native types and string representations using model_validate()",
+      "CRITICAL: All parameters with field validators in models.py need corresponding anyOf patterns in app.py's get_mcp_manifest() function",
+      "anyOf pattern for numeric: {'anyOf': [{'type': 'integer'}, {'type': 'string'}]} in MCP manifest",
+      "anyOf pattern for boolean: {'anyOf': [{'type': 'boolean'}, {'type': 'string'}]} in MCP manifest",
+      "anyOf pattern for optional strings: {'anyOf': [{'type': 'string'}, {'type': 'null'}]} in MCP manifest",
+      "Test MCP parameter validation with curl: both '{\"k\": \"5\"}' (string) and '{\"k\": 5}' (integer) should work",
+      "Validation flow order: MCP manifest anyOf → FastMCP JSON Schema → Pydantic field validators → Type coercion"
     ],
     "queryPreprocessing": [
       "Check for whitespace-only queries before stripping to provide specific error messages",

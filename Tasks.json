@@ -744,18 +744,25 @@
         "id": "fix-mcp-1",
         "title": "Fix MCP parameter type validation",
         "description": "Add anyOf patterns to MCP manifest for all numeric parameters",
-        "status": "pending",
+        "status": "completed",
         "priority": "high",
+        "progress": 100,
         "location": "src/docsrs_mcp/app.py:151-297",
         "dependencies": [],
         "effort": "small",
         "impact": "medium",
         "relatedTasks": ["mcp-2", "param-1"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T16:30:00Z",
+          "implementation": "Added anyOf patterns to all numeric and boolean parameters in MCP manifest to handle mixed parameter types from MCP clients",
+          "notes": "Added anyOf patterns to version parameters in get_crate_summary, search_items, get_item_doc, and search_examples tools. All numeric parameters (k, min_doc_length) already had anyOf patterns. All boolean parameters (has_examples, deprecated) already had anyOf patterns. All tests pass (133 tests), no breaking changes introduced. HTTP server tested with mixed parameter types (strings and native types)."
+        },
         "details": {
           "issueDescription": "MCP manifest needs anyOf patterns for numeric parameters to handle both string and integer inputs from MCP clients",
           "affectedEndpoints": "All MCP tool endpoints with numeric parameters",
-          "fixRequired": "Update MCP manifest generation to include anyOf patterns for numeric parameter validation"
+          "fixRequired": "Update MCP manifest generation to include anyOf patterns for numeric parameter validation",
+          "solution": "Reused existing anyOf patterns consistently across all numeric and boolean parameters"
         }
       }
     ],

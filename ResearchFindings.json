@@ -93,6 +93,37 @@
                     "Behavior may vary by client implementation or parameter context"
                   ],
                   "impact": "Requires defensive programming for parameter handling"
+                },
+                "anyOfPatternSupport": {
+                  "description": "MCP clients have varying support for anyOf patterns in JSON Schema validation",
+                  "clientSupport": {
+                    "claudeDesktop": "Full support for anyOf patterns with complex schemas",
+                    "claudeCode": "Limited support - may have issues with complex anyOf schemas",
+                    "mcpClients": "Ecosystem in transition with varying JSON Schema feature support"
+                  },
+                  "recommendation": "Use simple anyOf patterns for maximum compatibility across MCP client implementations"
+                },
+                "jsonSchemaValidationTiming": {
+                  "description": "FastMCP performs JSON Schema validation before Pydantic field validators",
+                  "validationOrder": [
+                    "1. JSON Schema validation against MCP manifest schema definitions",
+                    "2. Pydantic field validators with mode='before' for type coercion",
+                    "3. Pydantic model field validation"
+                  ],
+                  "implication": "anyOf patterns in manifest are required for JSON Schema validation, even when Pydantic handles coercion",
+                  "requirement": "anyOf patterns mandatory in MCP manifest for flexible parameter types"
+                },
+                "anyOfPerformanceOptimization": {
+                  "description": "anyOf is preferred over oneOf for JSON Schema validation performance",
+                  "reason": "anyOf allows early termination once a single schema match is found",
+                  "bestPractice": "Order anyOf schemas from most specific to least specific for optimal validation performance",
+                  "standard": "JSON Schema Draft 2020-12 is the standard used by MCP specification"
+                },
+                "typeCoercionComplexity": {
+                  "description": "Type coercion behavior can be unexpected when anyOf patterns match multiple schemas",
+                  "issue": "Multiple schema matches in anyOf can lead to ambiguous type coercion",
+                  "solution": "Use Pydantic field validators with mode='before' for explicit type handling",
+                  "importance": "Essential for handling type coercion after JSON Schema validation passes"
                 }
               },
               "bestPractices": {
@@ -121,7 +152,11 @@
                 "FastMCP searchItems k parameter validation fix",
                 "MCP protocol specification analysis",
                 "Claude Code client behavior observation",
-                "FastMCP library source code review"
+                "FastMCP library source code review",
+                "MCP parameter validation research - anyOf pattern support analysis",
+                "JSON Schema Draft 2020-12 specification review",
+                "FastMCP JSON Schema validation timing analysis",
+                "MCP client ecosystem compatibility testing"
               ]
             }
           }

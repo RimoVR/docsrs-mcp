@@ -160,7 +160,7 @@ async def get_mcp_manifest(request: Request):
                             "description": "Name of the crate to query (supports stdlib: std, core, alloc)",
                         },
                         "version": {
-                            "type": "string",
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
                             "description": "Specific version (default: latest)",
                         },
                     },
@@ -179,7 +179,7 @@ async def get_mcp_manifest(request: Request):
                         },
                         "query": {"type": "string", "description": "Search query text"},
                         "version": {
-                            "type": "string",
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
                             "description": "Specific version (default: latest)",
                         },
                         "k": {
@@ -238,7 +238,7 @@ async def get_mcp_manifest(request: Request):
                             "description": "Full path to the item (e.g., 'tokio::spawn')",
                         },
                         "version": {
-                            "type": "string",
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
                             "description": "Specific version (default: latest)",
                         },
                     },
@@ -260,7 +260,7 @@ async def get_mcp_manifest(request: Request):
                             "description": "Search query for finding relevant code examples",
                         },
                         "version": {
-                            "type": "string",
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
                             "description": "Specific version (default: latest)",
                         },
                         "k": {

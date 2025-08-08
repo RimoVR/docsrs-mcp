@@ -1394,9 +1394,14 @@ graph TD
     VALID_ERR --> ERROR_RESP
 ```
 
-### MCP Manifest Schema Updates
+### MCP Parameter Validation Architecture
 
-The MCP manifest schema uses `anyOf` patterns for flexible parameter acceptance while maintaining validation. This architectural decision enables consistent handling of boolean parameters alongside the existing numeric parameter pattern:
+The MCP parameter validation system follows a **double-validation pattern** to ensure robust type handling and client compatibility:
+
+1. **JSON Schema validation** with `anyOf` patterns in the manifest (app.py `get_mcp_manifest` function)
+2. **Pydantic field validators** with `mode='before'` for type coercion (models.py)
+
+This architectural decision enables consistent handling of boolean parameters alongside the existing numeric parameter pattern:
 
 ```mermaid
 graph LR
@@ -1567,13 +1572,20 @@ The MCP manifest schema uses consistent `anyOf` patterns for flexible parameter 
 }
 ```
 
-**Boolean Parameter Handling Architecture**
-- **anyOf Pattern**: Consistent with numeric parameters using `[{"type": "boolean"}, {"type": "string"}]`
-- **JSON Schema Validation**: Allows both native booleans and string representations to pass initial validation
-- **FastMCP Compatibility**: Double validation system properly handles both types in MCP manifest generation
-- **Pydantic Conversion**: Field validators with `mode="before"` handle string-to-boolean conversion
-- **Client Flexibility**: Enables MCP clients to send boolean parameters as either native booleans or strings
-- **Type Safety**: Maintains strict type validation after coercion phase
+**Consistent anyOf Patterns Across All Tools**
+
+The system implements standardized `anyOf` patterns for all parameters requiring type flexibility:
+
+- **Numeric parameters**: `[{"type": "integer"}, {"type": "string"}]`
+- **Boolean parameters**: `[{"type": "boolean"}, {"type": "string"}]`  
+- **Optional strings**: `[{"type": "string"}, {"type": "null"}]`
+
+**Double Validation Architecture Benefits**
+- **MCP Client Compatibility**: FastMCP validates against JSON Schema first, so `anyOf` patterns are critical for flexible type acceptance
+- **Type Coercion**: Pydantic field validators handle conversion after schema validation passes
+- **Client Flexibility**: MCP clients can send parameters as native types or strings regardless of implementation
+- **Type Safety**: Maintains strict type validation after the coercion phase
+- **Schema Consistency**: All parameters with field validators now have corresponding `anyOf` patterns in the manifest
 
 ### Validation Best Practices
 
@@ -1599,13 +1611,17 @@ The MCP manifest schema uses consistent `anyOf` patterns for flexible parameter 
 
 ### Validation Flow Architecture
 
+The **double-validation pattern** ensures MCP client compatibility through this sequential flow:
+
 1. **MCP Client Request** → JSON-RPC serialization (may convert types to strings)
-2. **JSON Schema Validation** → `anyOf` patterns allow multiple input types
-3. **Pydantic Field Validators** → `mode='before'` handles type coercion
+2. **FastMCP JSON Schema Validation** → `anyOf` patterns allow multiple input types to pass through
+3. **Pydantic Field Validators** → `mode='before'` handles type coercion from strings to native types
 4. **Centralized Validation** → Reusable functions with precompiled patterns
 5. **Constraint Checking** → Bounds validation and format verification
 6. **Model Validation** → Cross-field validation and `extra='forbid'` security
 7. **Business Logic** → Receives validated, typed data
+
+**Critical**: FastMCP validates against the JSON Schema first, making `anyOf` patterns essential for accepting both native types and string representations from different MCP client implementations.
 
 ### Extended Numeric Parameter Validation
 
