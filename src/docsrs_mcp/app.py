@@ -29,6 +29,7 @@ from .models import (
     SearchItemsResponse,
     SearchResult,
 )
+from .popular_crates import get_popular_crates_status
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -100,28 +101,34 @@ async def startup_event():
 
     # Start pre-ingestion if enabled via environment variable
     if config.PRE_INGEST_ENABLED:
-        from .popular_crates import PopularCratesManager, PreIngestionWorker
+        from .popular_crates import start_pre_ingestion
 
         logger.info("Starting background pre-ingestion of popular crates")
-        manager = PopularCratesManager()
-        worker = PreIngestionWorker(manager)
-        await worker.start()
+        await start_pre_ingestion()
 
 
 @app.get(
     "/health",
     tags=["health"],
     summary="Health Check",
-    response_description="Service health status",
+    response_description="Service health status with pre-ingestion details",
 )
 async def health_check():
     """
-    Check service health status.
+    Check service health status with enhanced monitoring.
 
-    Returns a simple status object indicating the service is operational.
-    Useful for monitoring and load balancer health checks.
+    Returns detailed status including:
+    - Service operational status
+    - Popular crates cache statistics
+    - Pre-ingestion progress if enabled
     """
-    return {"status": "ok", "service": "docsrs-mcp"}
+    health_status = {
+        "status": "ok",
+        "service": "docsrs-mcp",
+        "popular_crates": get_popular_crates_status(),
+    }
+
+    return health_status
 
 
 @app.get(

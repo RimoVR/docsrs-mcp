@@ -6,9 +6,15 @@ in the background to eliminate cold-start latency for commonly queried Rust crat
 
 import asyncio
 import logging
+import tempfile
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import aiohttp
+import msgpack
+from filelock import FileLock
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -18,6 +24,7 @@ from tenacity import (
 
 from . import config
 from .ingest import fetch_current_stable_version, ingest_crate
+from .models import PopularCrate
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +33,46 @@ class PopularCratesManager:
     """Manages fetching and caching popular crates list from crates.io API."""
 
     def __init__(self):
-        self._cached_list: list[str] | None = None
+        self._cached_list: list[PopularCrate] | None = None
         self._cache_time: datetime | None = None
         self._cache_ttl = timedelta(hours=config.POPULAR_CRATES_REFRESH_HOURS)
         self._session: aiohttp.ClientSession | None = None
+        self._cache_file = config.POPULAR_CRATES_CACHE_FILE
+        self._cache_lock = FileLock(str(self._cache_file) + ".lock")
+
+        # Cache statistics
+        self._stats = {
+            "hits": 0,
+            "misses": 0,
+            "refreshes": 0,
+            "api_failures": 0,
+            "last_refresh": None,
+        }
+
+        # Circuit breaker state
+        self._circuit_breaker = {
+            "failures": 0,
+            "last_failure": None,
+            "cooldown_until": None,
+            "max_failures": 3,
+            "cooldown_duration": 300,  # 5 minutes
+        }
+
+        # Load persistent cache on initialization
+        asyncio.create_task(self._load_cache_from_disk())
 
     async def _ensure_session(self):
-        """Ensure aiohttp session is created."""
+        """Ensure aiohttp session is created with connection pooling."""
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=config.HTTP_TIMEOUT)
-            self._session = aiohttp.ClientSession(timeout=timeout)
+            connector = aiohttp.TCPConnector(
+                limit=100,  # Total connection pool limit
+                limit_per_host=10,  # Per-host connection limit
+            )
+            self._session = aiohttp.ClientSession(
+                timeout=timeout,
+                connector=connector,
+            )
 
     async def close(self):
         """Close the aiohttp session."""
@@ -48,13 +85,118 @@ class PopularCratesManager:
             return False
         return datetime.now() - self._cache_time < self._cache_ttl
 
+    def _should_refresh(self) -> bool:
+        """Check if cache should be refreshed (at 75% of TTL)."""
+        if self._cached_list is None or self._cache_time is None:
+            return True
+        elapsed = datetime.now() - self._cache_time
+        threshold = self._cache_ttl * config.POPULAR_CRATES_REFRESH_THRESHOLD
+        return elapsed >= threshold
+
+    def _is_circuit_open(self) -> bool:
+        """Check if circuit breaker is open (in cooldown)."""
+        if self._circuit_breaker["cooldown_until"] is None:
+            return False
+        return time.time() < self._circuit_breaker["cooldown_until"]
+
+    def _record_api_failure(self):
+        """Record an API failure for circuit breaker."""
+        self._circuit_breaker["failures"] += 1
+        self._circuit_breaker["last_failure"] = time.time()
+        self._stats["api_failures"] += 1
+
+        if self._circuit_breaker["failures"] >= self._circuit_breaker["max_failures"]:
+            self._circuit_breaker["cooldown_until"] = (
+                time.time() + self._circuit_breaker["cooldown_duration"]
+            )
+            logger.warning(
+                f"Circuit breaker opened after {self._circuit_breaker['failures']} failures, "
+                f"cooldown for {self._circuit_breaker['cooldown_duration']}s"
+            )
+
+    def _reset_circuit_breaker(self):
+        """Reset circuit breaker after successful API call."""
+        self._circuit_breaker["failures"] = 0
+        self._circuit_breaker["cooldown_until"] = None
+
+    async def _load_cache_from_disk(self) -> bool:
+        """Load cached data from disk using msgpack."""
+        try:
+            if not self._cache_file.exists():
+                logger.debug("No cache file found, starting fresh")
+                return False
+
+            with self._cache_lock.acquire(timeout=5):
+                with open(self._cache_file, "rb") as f:
+                    data = msgpack.unpackb(f.read(), raw=False)
+
+                # Convert to PopularCrate objects
+                self._cached_list = [
+                    PopularCrate(**crate_data) for crate_data in data["crates"]
+                ]
+                self._cache_time = datetime.fromtimestamp(data["timestamp"])
+
+                # Restore statistics if available
+                if "stats" in data:
+                    self._stats.update(data["stats"])
+
+                logger.info(
+                    f"Loaded {len(self._cached_list)} popular crates from cache "
+                    f"(age: {datetime.now() - self._cache_time})"
+                )
+                return True
+
+        except Exception as e:
+            logger.warning(f"Failed to load cache from disk: {e}")
+            return False
+
+    async def _save_cache_to_disk(self) -> bool:
+        """Save cached data to disk using msgpack with atomic write."""
+        if not self._cached_list:
+            return False
+
+        try:
+            # Prepare data for serialization
+            data = {
+                "crates": [crate.model_dump() for crate in self._cached_list],
+                "timestamp": self._cache_time.timestamp(),
+                "stats": self._stats,
+                "version": config.VERSION,
+            }
+
+            # Atomic write: temp file + rename
+            with self._cache_lock.acquire(timeout=5):
+                # Write to temp file first
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    dir=self._cache_file.parent,
+                    delete=False,
+                ) as tmp_file:
+                    tmp_file.write(msgpack.packb(data, use_bin_type=True))
+                    tmp_path = Path(tmp_file.name)
+
+                # Atomic rename
+                tmp_path.replace(self._cache_file)
+
+            logger.debug(f"Saved {len(self._cached_list)} crates to cache file")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save cache to disk: {e}")
+            return False
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=2, max=30),
         retry=retry_if_exception_type((aiohttp.ClientError, TimeoutError)),
     )
-    async def _fetch_popular_crates(self, count: int) -> list[str]:
-        """Fetch popular crates from crates.io API with retry logic."""
+    async def _fetch_popular_crates(self, count: int) -> list[PopularCrate]:
+        """Fetch popular crates from crates.io API with enhanced metadata."""
+        # Check circuit breaker first
+        if self._is_circuit_open():
+            logger.debug("Circuit breaker is open, skipping API call")
+            raise aiohttp.ClientError("Circuit breaker open")
+
         await self._ensure_session()
 
         url = config.POPULAR_CRATES_URL.format(count)
@@ -67,56 +209,179 @@ class PopularCratesManager:
                 if resp.status == 429:  # Rate limited
                     retry_after = int(resp.headers.get("Retry-After", 60))
                     logger.warning(f"Rate limited by crates.io, waiting {retry_after}s")
+                    self._record_api_failure()
                     await asyncio.sleep(retry_after)
                     raise aiohttp.ClientError("Rate limited")
 
                 if resp.status != 200:
                     logger.warning(f"crates.io API returned status {resp.status}")
+                    self._record_api_failure()
                     raise aiohttp.ClientError(f"API returned {resp.status}")
 
                 data = await resp.json()
-                crates = data.get("crates", [])
+                crates_data = data.get("crates", [])
 
-                # Extract crate names from the response
-                crate_names = [crate["id"] for crate in crates if "id" in crate]
+                if not crates_data:
+                    logger.warning("No crates found in API response")
+                    self._record_api_failure()
+                    return self._get_fallback_crates_as_objects(count)
 
-                if not crate_names:
-                    logger.warning("No crates found in API response, using fallback")
-                    return config.FALLBACK_POPULAR_CRATES[:count]
+                # Validate response structure
+                if not self._validate_api_response(crates_data):
+                    logger.warning("API response validation failed")
+                    self._record_api_failure()
+                    return self._get_fallback_crates_as_objects(count)
 
+                # Extract enhanced metadata
+                popular_crates = []
+                current_time = time.time()
+
+                for crate_data in crates_data[:count]:
+                    try:
+                        popular_crate = PopularCrate(
+                            name=crate_data["id"],
+                            downloads=crate_data.get("downloads", 0),
+                            description=crate_data.get("description"),
+                            version=crate_data.get("max_stable_version", {}).get("num"),
+                            last_updated=current_time,
+                        )
+                        popular_crates.append(popular_crate)
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to parse crate {crate_data.get('id')}: {e}"
+                        )
+                        continue
+
+                if not popular_crates:
+                    logger.warning("Failed to parse any crates from API response")
+                    self._record_api_failure()
+                    return self._get_fallback_crates_as_objects(count)
+
+                # Success - reset circuit breaker
+                self._reset_circuit_breaker()
                 logger.info(
-                    f"Successfully fetched {len(crate_names)} popular crates from crates.io"
+                    f"Successfully fetched {len(popular_crates)} popular crates with metadata"
                 )
-                return crate_names[:count]
+                return popular_crates
 
         except asyncio.TimeoutError:
-            logger.warning("Timeout fetching popular crates, using fallback")
-            return config.FALLBACK_POPULAR_CRATES[:count]
+            logger.warning("Timeout fetching popular crates")
+            self._record_api_failure()
+            raise
         except Exception as e:
-            logger.warning(f"Error fetching popular crates: {e}, using fallback")
-            return config.FALLBACK_POPULAR_CRATES[:count]
+            logger.warning(f"Error fetching popular crates: {e}")
+            self._record_api_failure()
+            raise
+
+    def _validate_api_response(self, crates_data: list[dict]) -> bool:
+        """Validate API response for anomalies."""
+        if not crates_data:
+            return False
+
+        # Check for required fields in first few crates
+        required_fields = ["id", "downloads"]
+        for crate in crates_data[:5]:
+            if not all(field in crate for field in required_fields):
+                return False
+
+            # Check for anomalies (e.g., zero downloads for popular crates)
+            if crate.get("downloads", 0) == 0:
+                logger.warning(
+                    f"Anomaly detected: popular crate {crate.get('id')} has 0 downloads"
+                )
+                return False
+
+        return True
+
+    def _get_fallback_crates_as_objects(self, count: int) -> list[PopularCrate]:
+        """Convert fallback crate names to PopularCrate objects."""
+        current_time = time.time()
+        return [
+            PopularCrate(
+                name=name,
+                downloads=0,  # Unknown downloads for fallback crates
+                description=None,
+                version=None,
+                last_updated=current_time,
+            )
+            for name in config.FALLBACK_POPULAR_CRATES[:count]
+        ]
 
     async def get_popular_crates(self, count: int = None) -> list[str]:
-        """Get list of popular crate names, using cache if valid."""
+        """Get list of popular crate names with multi-tier fallback strategy."""
         if count is None:
             count = config.POPULAR_CRATES_COUNT
 
-        # Check cache first
+        # Check if we should trigger background refresh (at 75% TTL)
+        if self._should_refresh() and self._cached_list:
+            # Trigger background refresh but serve stale data (stale-while-revalidate)
+            asyncio.create_task(self._background_refresh(count))
+            logger.debug("Triggered background refresh, serving cached data")
+
+        # Multi-tier fallback strategy
+        # Tier 1: Valid in-memory cache
         if self._is_cache_valid() and self._cached_list:
+            self._stats["hits"] += 1
             logger.debug(
-                f"Using cached popular crates list ({len(self._cached_list)} crates)"
+                f"Cache hit: serving {len(self._cached_list)} crates from memory"
             )
-            return self._cached_list[:count]
+            return [crate.name for crate in self._cached_list[:count]]
 
-        # Fetch fresh list
-        logger.info(f"Fetching fresh popular crates list (top {count})")
-        crates = await self._fetch_popular_crates(count)
+        self._stats["misses"] += 1
 
-        # Update cache
-        self._cached_list = crates
-        self._cache_time = datetime.now()
+        # Tier 2: Try to fetch fresh data from API
+        try:
+            logger.info(f"Cache miss: fetching fresh list (top {count})")
+            crates = await self._fetch_popular_crates(count)
 
-        return crates[:count]
+            # Update cache
+            self._cached_list = crates
+            self._cache_time = datetime.now()
+            self._stats["refreshes"] += 1
+            self._stats["last_refresh"] = self._cache_time.isoformat()
+
+            # Save to disk asynchronously
+            asyncio.create_task(self._save_cache_to_disk())
+
+            return [crate.name for crate in crates[:count]]
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch from API: {e}")
+
+            # Tier 3: Fall back to disk cache (even if expired)
+            if self._cached_list:
+                logger.info("Using expired cache from memory")
+                return [crate.name for crate in self._cached_list[:count]]
+
+            # Tier 4: Try to load from disk
+            if await self._load_cache_from_disk():
+                logger.info("Loaded cache from disk as fallback")
+                return [crate.name for crate in self._cached_list[:count]]
+
+            # Tier 5: Ultimate fallback to hardcoded list
+            logger.warning("Using hardcoded fallback list")
+            fallback = self._get_fallback_crates_as_objects(count)
+            return [crate.name for crate in fallback]
+
+    async def _background_refresh(self, count: int):
+        """Background task to refresh cache without blocking."""
+        try:
+            logger.debug("Starting background cache refresh")
+            crates = await self._fetch_popular_crates(count)
+
+            # Update cache
+            self._cached_list = crates
+            self._cache_time = datetime.now()
+            self._stats["refreshes"] += 1
+            self._stats["last_refresh"] = self._cache_time.isoformat()
+
+            # Save to disk
+            await self._save_cache_to_disk()
+
+            logger.info("Background cache refresh completed successfully")
+
+        except Exception as e:
+            logger.warning(f"Background refresh failed: {e}")
 
     def get_fallback_crates(self, count: int = None) -> list[str]:
         """Get fallback popular crates list (hardcoded)."""
@@ -124,18 +389,62 @@ class PopularCratesManager:
             count = config.POPULAR_CRATES_COUNT
         return config.FALLBACK_POPULAR_CRATES[:count]
 
+    def get_cache_stats(self) -> dict[str, Any]:
+        """Get cache statistics for monitoring."""
+        stats = self._stats.copy()
+
+        # Add current cache state
+        stats["cache_valid"] = self._is_cache_valid()
+        stats["cache_age_hours"] = None
+        if self._cache_time:
+            age = datetime.now() - self._cache_time
+            stats["cache_age_hours"] = age.total_seconds() / 3600
+
+        stats["cached_crates_count"] = (
+            len(self._cached_list) if self._cached_list else 0
+        )
+        stats["circuit_breaker_open"] = self._is_circuit_open()
+
+        # Calculate hit rate
+        total_requests = stats["hits"] + stats["misses"]
+        stats["hit_rate"] = (
+            (stats["hits"] / total_requests * 100) if total_requests > 0 else 0
+        )
+
+        return stats
+
+    async def get_popular_crates_with_metadata(
+        self, count: int = None
+    ) -> list[PopularCrate]:
+        """Get popular crates with full metadata (for pre-ingestion priority)."""
+        if count is None:
+            count = config.POPULAR_CRATES_COUNT
+
+        # Ensure cache is populated
+        await self.get_popular_crates(count)
+
+        if self._cached_list:
+            return self._cached_list[:count]
+
+        # Fallback
+        return self._get_fallback_crates_as_objects(count)
+
 
 class PreIngestionWorker:
-    """Background worker for pre-ingesting popular crates."""
+    """Background worker for pre-ingesting popular crates with priority processing."""
 
     def __init__(self, manager: PopularCratesManager):
         self.manager = manager
         self.semaphore = asyncio.Semaphore(config.PRE_INGEST_CONCURRENCY)
-        self.queue: asyncio.Queue = asyncio.Queue()
+        # Use PriorityQueue for processing most downloaded crates first
+        self.queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
         self.stats = {"success": 0, "failed": 0, "skipped": 0, "total": 0}
         self._workers: list[asyncio.Task] = []
         self._monitor_task: asyncio.Task | None = None
         self._start_time: datetime | None = None
+        self._processed_crates: set[str] = set()  # For duplicate detection
+        self._memory_monitor_task: asyncio.Task | None = None
+        self._adaptive_concurrency = config.PRE_INGEST_CONCURRENCY
 
     async def start(self):
         """Start pre-ingestion in background (non-blocking)."""
@@ -146,32 +455,47 @@ class PreIngestionWorker:
         asyncio.create_task(self._run())
 
     async def _run(self):
-        """Main runner that coordinates pre-ingestion."""
+        """Main runner that coordinates pre-ingestion with priority processing."""
         try:
-            # Get list of popular crates
-            crates = await self.manager.get_popular_crates()
-            self.stats["total"] = len(crates)
+            # Get list of popular crates with metadata for priority processing
+            crates_with_metadata = await self.manager.get_popular_crates_with_metadata()
+            self.stats["total"] = len(crates_with_metadata)
 
-            logger.info(f"Starting pre-ingestion of {len(crates)} popular crates")
+            logger.info(
+                f"Starting pre-ingestion of {len(crates_with_metadata)} popular crates"
+            )
 
-            # Add all crates to the queue
-            for crate_name in crates:
-                await self.queue.put(crate_name)
+            # Add all crates to priority queue (negative downloads for max-heap behavior)
+            for crate in crates_with_metadata:
+                # Skip if already processed (duplicate detection)
+                if crate.name in self._processed_crates:
+                    logger.debug(f"Skipping duplicate crate: {crate.name}")
+                    self.stats["skipped"] += 1
+                    continue
 
-            # Start worker tasks
-            for i in range(config.PRE_INGEST_CONCURRENCY):
+                # Priority based on downloads (negative for max-heap)
+                priority = -crate.downloads if crate.downloads > 0 else 0
+                await self.queue.put((priority, crate.name))
+
+            # Start worker tasks with adaptive concurrency
+            for i in range(self._adaptive_concurrency):
                 worker = asyncio.create_task(self._ingest_worker(i))
                 self._workers.append(worker)
 
             # Start progress monitor
             self._monitor_task = asyncio.create_task(self._monitor_progress())
 
+            # Start memory monitor
+            self._memory_monitor_task = asyncio.create_task(self._monitor_memory())
+
             # Wait for all crates to be processed
             await self.queue.join()
 
-            # Cancel monitor task
+            # Cancel monitor tasks
             if self._monitor_task:
                 self._monitor_task.cancel()
+            if self._memory_monitor_task:
+                self._memory_monitor_task.cancel()
 
             # Log final statistics
             self._log_final_stats()
@@ -183,19 +507,31 @@ class PreIngestionWorker:
             await self.manager.close()
 
     async def _ingest_worker(self, worker_id: int):
-        """Worker that processes crates from the queue."""
+        """Worker that processes crates from priority queue."""
         logger.debug(f"Pre-ingestion worker {worker_id} started")
 
         while True:
             try:
-                # Get next crate from queue (with timeout to allow graceful shutdown)
+                # Get next crate from priority queue (with timeout for graceful shutdown)
                 try:
-                    crate_name = await asyncio.wait_for(self.queue.get(), timeout=1.0)
+                    priority, crate_name = await asyncio.wait_for(
+                        self.queue.get(), timeout=1.0
+                    )
                 except asyncio.TimeoutError:
                     # Check if queue is empty and we should exit
                     if self.queue.empty():
                         break
                     continue
+
+                # Skip if already processed (double-check for duplicates)
+                if crate_name in self._processed_crates:
+                    logger.debug(f"Worker {worker_id}: skipping duplicate {crate_name}")
+                    self.stats["skipped"] += 1
+                    self.queue.task_done()
+                    continue
+
+                # Mark as processed to prevent duplicates
+                self._processed_crates.add(crate_name)
 
                 # Process the crate with semaphore control
                 async with self.semaphore:
@@ -266,6 +602,89 @@ class PreIngestionWorker:
             except Exception as e:
                 logger.error(f"Error in progress monitor: {e}")
 
+    async def _monitor_memory(self):
+        """Monitor memory usage and adjust concurrency if needed."""
+        try:
+            import psutil
+        except ImportError:
+            logger.debug("psutil not available, skipping memory monitoring")
+            return
+
+        process = psutil.Process()
+
+        while True:
+            try:
+                await asyncio.sleep(5)  # Check every 5 seconds
+
+                # Get memory usage
+                memory_info = process.memory_info()
+                memory_mb = memory_info.rss / (1024 * 1024)
+
+                # Check if approaching 1GB limit
+                if memory_mb > 900:  # 900MB threshold
+                    logger.warning(f"High memory usage: {memory_mb:.1f}MB")
+
+                    # Reduce concurrency if needed
+                    if self._adaptive_concurrency > 1:
+                        self._adaptive_concurrency = max(
+                            1, self._adaptive_concurrency - 1
+                        )
+                        logger.info(
+                            f"Reduced concurrency to {self._adaptive_concurrency}"
+                        )
+
+                        # Update semaphore
+                        self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)
+
+                elif (
+                    memory_mb < 600
+                    and self._adaptive_concurrency < config.PRE_INGEST_CONCURRENCY
+                ):
+                    # Increase concurrency if memory allows
+                    self._adaptive_concurrency = min(
+                        config.PRE_INGEST_CONCURRENCY, self._adaptive_concurrency + 1
+                    )
+                    logger.debug(
+                        f"Increased concurrency to {self._adaptive_concurrency}"
+                    )
+                    self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in memory monitor: {e}")
+                await asyncio.sleep(10)
+
+    def get_ingestion_stats(self) -> dict[str, Any]:
+        """Get pre-ingestion statistics for health endpoint."""
+        stats = self.stats.copy()
+
+        # Add progress information
+        processed = stats["success"] + stats["failed"] + stats["skipped"]
+        stats["processed"] = processed
+        stats["remaining"] = stats["total"] - processed if stats["total"] > 0 else 0
+        stats["progress_percent"] = (
+            (processed / stats["total"] * 100) if stats["total"] > 0 else 0
+        )
+
+        # Add timing information
+        if self._start_time:
+            elapsed = (datetime.now() - self._start_time).total_seconds()
+            stats["elapsed_seconds"] = elapsed
+            stats["rate_per_second"] = processed / elapsed if elapsed > 0 else 0
+
+            # Estimate completion time
+            if stats["remaining"] > 0 and stats["rate_per_second"] > 0:
+                eta_seconds = stats["remaining"] / stats["rate_per_second"]
+                stats["eta_seconds"] = eta_seconds
+
+        stats["adaptive_concurrency"] = self._adaptive_concurrency
+        stats["is_running"] = (
+            self._monitor_task is not None and not self._monitor_task.done()
+        )
+
+        return stats
+
     def _log_final_stats(self):
         """Log final statistics after pre-ingestion completes."""
         elapsed = (datetime.now() - self._start_time).total_seconds()
@@ -286,16 +705,43 @@ class PreIngestionWorker:
             )
 
 
-async def start_pre_ingestion():
-    """Convenience function to start pre-ingestion (called from server startup)."""
+# Global references for monitoring
+_popular_crates_manager: PopularCratesManager | None = None
+_pre_ingestion_worker: PreIngestionWorker | None = None
+
+
+async def start_pre_ingestion() -> tuple[
+    PopularCratesManager | None, PreIngestionWorker | None
+]:
+    """Start pre-ingestion and return manager and worker for monitoring."""
+    global _popular_crates_manager, _pre_ingestion_worker
+
     if not config.PRE_INGEST_ENABLED:
         logger.debug("Pre-ingestion is disabled")
-        return
+        return None, None
 
     try:
-        manager = PopularCratesManager()
-        worker = PreIngestionWorker(manager)
-        await worker.start()
+        _popular_crates_manager = PopularCratesManager()
+        _pre_ingestion_worker = PreIngestionWorker(_popular_crates_manager)
+        await _pre_ingestion_worker.start()
+        return _popular_crates_manager, _pre_ingestion_worker
     except Exception as e:
         # Don't let pre-ingestion errors prevent server startup
         logger.error(f"Failed to start pre-ingestion: {e}")
+        return None, None
+
+
+def get_popular_crates_status() -> dict[str, Any]:
+    """Get combined status for health endpoint."""
+    status = {
+        "cache_stats": {},
+        "ingestion_stats": {},
+    }
+
+    if _popular_crates_manager:
+        status["cache_stats"] = _popular_crates_manager.get_cache_stats()
+
+    if _pre_ingestion_worker:
+        status["ingestion_stats"] = _pre_ingestion_worker.get_ingestion_stats()
+
+    return status

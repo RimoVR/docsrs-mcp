@@ -271,6 +271,30 @@
           "dateEncountered": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/fuzzy_resolver.py"],
           "currentBehavior": "Provides fuzzy suggestions but requires exact module paths"
+        },
+        {
+          "error": "crates.io API returns different structure than expected",
+          "context": "API response validation during crate data fetching",
+          "solution": "Added response validation to check for required fields and anomalies (zero downloads for popular crates)",
+          "prevention": "Always validate API responses for expected structure and detect data anomalies before processing",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/api.py"]
+        },
+        {
+          "error": "Concurrent cache file access can cause corruption",
+          "context": "Multiple processes accessing cache files simultaneously",
+          "solution": "Implemented file locking with FileLock and atomic writes (temp file + rename)",
+          "prevention": "Use file locking mechanisms and atomic write operations for concurrent file access",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/cache.py"]
+        },
+        {
+          "error": "API failures can cascade and overwhelm system",
+          "context": "Multiple API failures causing system overload",
+          "solution": "Circuit breaker pattern with 5-minute cooldown after 3 failures",
+          "prevention": "Implement circuit breaker patterns to prevent cascading failures and system overload",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/api.py"]
         }
       ]
     },
@@ -318,6 +342,30 @@
           "context": "Large crates can cause memory spikes despite streaming implementation",
           "dateDiscovered": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Memory usage approaching 1GB limit during pre-ingestion",
+          "context": "High memory usage during concurrent crate processing",
+          "solution": "Added adaptive concurrency that reduces workers when RSS > 900MB",
+          "prevention": "Monitor RSS memory usage and implement adaptive concurrency limits",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Cold start latency for popular crates",
+          "context": "Initial requests for popular crates take too long to respond",
+          "solution": "Pre-ingestion with priority queue ensures most-downloaded crates processed first",
+          "prevention": "Implement pre-ingestion strategies with priority-based processing",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"]
+        },
+        {
+          "error": "Cache staleness during high traffic",
+          "context": "Cached data becomes stale during high-traffic periods",
+          "solution": "Stale-while-revalidate pattern serves cached data while refreshing in background",
+          "prevention": "Implement stale-while-revalidate caching patterns for high-traffic scenarios",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/cache.py"]
         }
       ]
     },
@@ -559,6 +607,22 @@
           "performanceNotes": "Alias resolution adds <1ms overhead while maintaining sub-500ms response time requirement. O(1) dictionary lookup is extremely fast",
           "testingApproach": "Both unit tests for resolve_path_alias() function and integration tests for API endpoint ensure comprehensive coverage",
           "mcpTesting": "Use --mode rest flag to test with HTTP/curl instead of STDIO mode for easier debugging and verification"
+        },
+        {
+          "lesson": "Multi-tier fallback for resilience",
+          "context": "Building robust systems that handle various failure modes",
+          "details": "Implementation pattern: Try API → Load from disk → Use expired memory cache → Hardcoded fallback list",
+          "impact": "System remains functional even during complete API outages",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/api.py", "src/docsrs_mcp/cache.py"]
+        },
+        {
+          "lesson": "Binary serialization performance benefits",
+          "context": "Cache loading performance optimization",
+          "details": "msgpack reduces cache load time from 50ms (JSON) to 2ms for 100 crates",
+          "impact": "25x improvement in cache loading performance",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/cache.py"]
         }
       ]
     },

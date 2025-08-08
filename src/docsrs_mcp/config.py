@@ -86,11 +86,23 @@ RUST_VERSION_MANIFEST_URL = f"{RUST_CHANNEL_BASE}/version"
 # Pre-ingestion configuration
 PRE_INGEST_ENABLED = os.getenv("DOCSRS_PRE_INGEST_ENABLED", "false").lower() == "true"
 PRE_INGEST_CONCURRENCY = int(os.getenv("DOCSRS_PRE_INGEST_CONCURRENCY", "3"))
-POPULAR_CRATES_COUNT = int(os.getenv("DOCSRS_POPULAR_CRATES_COUNT", "100"))
+
+# Popular crates configuration with validation
+_popular_count = int(os.getenv("DOCSRS_POPULAR_CRATES_COUNT", "100"))
+POPULAR_CRATES_COUNT = max(100, min(500, _popular_count))  # Clamp to 100-500 range
+if _popular_count != POPULAR_CRATES_COUNT:
+    print(
+        f"Warning: POPULAR_CRATES_COUNT clamped from {_popular_count} to {POPULAR_CRATES_COUNT}"
+    )
+
 POPULAR_CRATES_URL = "https://crates.io/api/v1/crates?sort=downloads&per_page={}"
 POPULAR_CRATES_REFRESH_HOURS = int(
     os.getenv("DOCSRS_POPULAR_CRATES_REFRESH_HOURS", "24")
 )
+POPULAR_CRATES_CACHE_FILE = CACHE_DIR / "popular_crates.msgpack"
+POPULAR_CRATES_REFRESH_THRESHOLD = float(
+    os.getenv("DOCSRS_POPULAR_CRATES_REFRESH_THRESHOLD", "0.75")
+)  # Refresh at 75% of TTL
 
 # Hardcoded fallback list of essential popular crates
 FALLBACK_POPULAR_CRATES = [

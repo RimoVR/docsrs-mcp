@@ -916,6 +916,70 @@ class ErrorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class PopularCrate(BaseModel):
+    """
+    Model for a popular crate with metadata from crates.io API.
+
+    Stores essential information about popular crates for pre-ingestion
+    and caching purposes. Includes download statistics and version info
+    to enable priority-based processing and cache management.
+
+    Example:
+        ```python
+        crate = PopularCrate(
+            name="tokio",
+            downloads=150000000,
+            description="An asynchronous runtime for Rust",
+            version="1.35.1",
+            last_updated=1704067200.0
+        )
+        ```
+    """
+
+    name: str = Field(
+        ...,
+        description="Crate name as it appears on crates.io",
+        examples=["tokio", "serde", "clap"],
+    )
+    downloads: int = Field(
+        ...,
+        description="Total download count from crates.io",
+        ge=0,
+        examples=[150000000, 250000000],
+    )
+    description: str | None = Field(
+        None,
+        description="Brief description of the crate's functionality",
+        examples=["An asynchronous runtime for Rust", "Serialization framework"],
+    )
+    version: str | None = Field(
+        None,
+        description="Latest stable version of the crate",
+        examples=["1.35.1", "1.0.195"],
+    )
+    last_updated: float = Field(
+        ...,
+        description="Unix timestamp of when this data was fetched",
+        examples=[1704067200.0],
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate crate name follows crates.io naming rules."""
+        return validate_crate_name(v)
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str | None) -> str | None:
+        """Validate version string if provided."""
+        if v is not None:
+            return validate_version_string(v)
+        return v
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SearchExamplesRequest(BaseModel):
     """Request model for searching code examples."""
 
