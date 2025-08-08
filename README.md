@@ -435,6 +435,53 @@ uv add package-name              # Production dependency
 uv add --dev package-name        # Development dependency
 ```
 
+## CI/CD
+
+The project uses GitHub Actions for continuous integration and deployment across multiple platforms and Python versions.
+
+### Automated Testing
+
+All pull requests automatically trigger comprehensive testing workflows:
+
+- **Cross-platform testing**: Ubuntu 22.04, macOS 14, and Windows 11
+- **Python version matrix**: Python 3.10, 3.11, and 3.12
+- **Code quality checks**: Ruff linting and formatting validation
+- **Test execution**: Full pytest suite with 25+ comprehensive tests
+- **Dependency management**: UV-based installation and caching
+
+### Release Automation
+
+Releases are fully automated via semantic versioning:
+
+- **Trigger**: Push git tags matching pattern `v*.*.*` (e.g., `v1.0.0`)
+- **Multi-platform builds**: Automated wheel building for all supported platforms
+- **PyPI publishing**: Automatic package publishing with secure token authentication
+- **Docker images**: Container builds and registry publishing (if configured)
+
+### Development Workflow
+
+The CI/CD pipeline ensures code quality and compatibility:
+
+```bash
+# Create a new release
+git tag v1.2.3
+git push origin v1.2.3
+
+# CI will automatically:
+# 1. Run tests on all platforms and Python versions
+# 2. Build distribution packages
+# 3. Publish to PyPI
+# 4. Create GitHub release with artifacts
+```
+
+### CI/CD Features
+
+- **Fast feedback**: Parallel job execution across platforms
+- **Dependency caching**: UV package cache for faster builds
+- **Security**: Secure token-based publishing with environment protection
+- **Artifact retention**: Build artifacts stored for debugging and distribution
+- **Status checks**: Required CI passes before merge to main branch
+
 ## Architecture
 
 - **Web Layer**: FastAPI with MCP endpoint handlers

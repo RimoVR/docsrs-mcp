@@ -344,6 +344,54 @@
           "prevention": "Always run servers in background for development, save PID for cleanup",
           "dateEncountered": "2025-08-04",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "Windows executable issues in CI/CD",
+          "context": "Windows builds failing due to executable path resolution",
+          "solution": "Use 'uv run' pattern consistently across all platforms instead of direct executable calls",
+          "prevention": "Standardize on 'uv run' commands in CI workflows to ensure cross-platform compatibility",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": [".github/workflows/", "scripts/"]
+        },
+        {
+          "error": "PyPI authentication token issues",
+          "context": "Publishing to PyPI fails with authentication errors",
+          "solution": "Use UV_PUBLISH_TOKEN environment variable, not UV_PUBLISH_PASSWORD for PyPI authentication",
+          "prevention": "Always use UV_PUBLISH_TOKEN for PyPI publishing in CI/CD pipelines",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": [".github/workflows/publish.yml"]
+        },
+        {
+          "error": "Background server testing hangs CI runners",
+          "context": "CI/CD runners hang when testing servers without proper process management",
+          "solution": "Use nohup with PID capture pattern: 'nohup uv run server > server.log 2>&1 & echo $!' and kill with captured PID",
+          "prevention": "Never use bare background processes in CI, always capture PID for cleanup",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": [".github/workflows/test.yml", "scripts/test_server.sh"]
+        },
+        {
+          "error": "UV cache deserialization errors between versions",
+          "context": "Different UV versions in CI causing cache corruption and build failures",
+          "solution": "Pin UV version in CI workflows or clear cache when UV version changes",
+          "prevention": "Use consistent UV versions across all CI jobs and environments",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": [".github/workflows/", "uv.lock"]
+        },
+        {
+          "error": "PyPI build compatibility issues",
+          "context": "Package builds failing on PyPI due to source file inclusion",
+          "solution": "Use 'uv build --no-sources' for PyPI-compatible builds that exclude source files",
+          "prevention": "Test builds with --no-sources flag before publishing to ensure PyPI compatibility",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": ["pyproject.toml", ".github/workflows/publish.yml"]
+        },
+        {
+          "error": "Self-hosted runner cache inefficiencies",
+          "context": "Self-hosted runners using different cache strategies than GitHub-hosted runners",
+          "solution": "Implement runner-specific cache strategies: local disk cache for self-hosted, GitHub Actions cache for hosted",
+          "prevention": "Configure cache strategies based on runner type to optimize build performance",
+          "dateEncountered": "2025-08-08",
+          "relatedFiles": [".github/workflows/", "scripts/setup_cache.sh"]
         }
       ]
     },
@@ -1070,6 +1118,53 @@
         }
       ]
     },
+    "cicdBestPractices": {
+      "description": "Best practices for CI/CD pipeline implementation and deployment",
+      "entries": [
+        {
+          "practice": "Consistent UV usage across platforms",
+          "description": "Always use 'uv run' pattern instead of direct executable calls to ensure Windows compatibility",
+          "rationale": "Direct executable calls can fail on Windows due to path resolution issues, while 'uv run' provides consistent cross-platform behavior",
+          "implementation": "Replace direct calls like 'docsrs-mcp' with 'uv run docsrs-mcp' in all CI workflows",
+          "dateAdded": "2025-08-08"
+        },
+        {
+          "practice": "Proper PyPI authentication",
+          "description": "Use UV_PUBLISH_TOKEN environment variable for PyPI publishing authentication",
+          "rationale": "UV_PUBLISH_TOKEN is the correct environment variable for PyPI authentication, not UV_PUBLISH_PASSWORD",
+          "implementation": "Set UV_PUBLISH_TOKEN in CI secrets and use in publishing workflows",
+          "dateAdded": "2025-08-08"
+        },
+        {
+          "practice": "Background process management in CI",
+          "description": "Use nohup with PID capture for testing background servers in CI environments",
+          "rationale": "Prevents CI runners from hanging on background processes and enables proper cleanup",
+          "implementation": "Pattern: 'SERVER_PID=$(nohup uv run server > server.log 2>&1 & echo $!)' followed by 'kill $SERVER_PID'",
+          "dateAdded": "2025-08-08"
+        },
+        {
+          "practice": "UV version consistency",
+          "description": "Pin UV versions across all CI jobs to prevent cache deserialization errors",
+          "rationale": "Different UV versions can cause cache corruption and build failures due to incompatible cache formats",
+          "implementation": "Use specific UV version in CI workflows and clear cache when upgrading versions",
+          "dateAdded": "2025-08-08"
+        },
+        {
+          "practice": "PyPI-compatible builds",
+          "description": "Use 'uv build --no-sources' for PyPI publishing to ensure package compatibility",
+          "rationale": "Including source files can cause PyPI build failures and package incompatibility issues",
+          "implementation": "Add --no-sources flag to build commands in publishing workflows",
+          "dateAdded": "2025-08-08"
+        },
+        {
+          "practice": "Runner-specific cache strategies",
+          "description": "Implement different cache strategies for GitHub-hosted vs self-hosted runners",
+          "rationale": "Self-hosted runners have persistent storage and different performance characteristics than GitHub-hosted runners",
+          "implementation": "Use local disk cache for self-hosted runners, GitHub Actions cache for hosted runners",
+          "dateAdded": "2025-08-08"
+        }
+      ]
+    },
     "bestPractices": {
       "description": "Recommended practices and patterns for development",
       "entries": [
@@ -1203,6 +1298,15 @@
       "Test REST endpoints: curl -s http://localhost:8000/endpoint | jq . (server runs on port 8000, not 8080)",
       "Test MCP manifest: Use --mode rest to test MCP manifest endpoints at localhost:8000",
       "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\""
+    ],
+    "cicdQuickReference": [
+      "Windows compatibility: Use 'uv run' instead of direct executable calls in CI workflows",
+      "PyPI publishing: Set UV_PUBLISH_TOKEN (not UV_PUBLISH_PASSWORD) in CI secrets",
+      "Server testing in CI: SERVER_PID=$(nohup uv run server > server.log 2>&1 & echo $!); kill $SERVER_PID",
+      "UV version consistency: Pin UV version in workflows to prevent cache deserialization errors",
+      "PyPI builds: Use 'uv build --no-sources' for PyPI-compatible package builds",
+      "Runner caching: Use local disk cache for self-hosted, GitHub Actions cache for hosted runners",
+      "Cache management: Clear UV cache when upgrading UV versions to prevent corruption"
     ],
     "criticalBugs": [
       "RESOLVED: searchExamples character fragmentation bug - FIXED in ingest.py:758-762 and app.py:614-620",

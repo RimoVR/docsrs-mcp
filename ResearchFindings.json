@@ -1446,7 +1446,46 @@
         "Railway",
         "Render",
         "Generic VPS"
-      ]
+      ],
+      "cicd": {
+        "githubActions": {
+          "uvSetup": {
+            "action": "astral-sh/setup-uv@v6",
+            "status": "Latest stable version with built-in caching support",
+            "benefits": [
+              "Built-in cache management for uv dependencies",
+              "Automatic cache key generation based on uv.lock",
+              "Cross-platform support (Linux, macOS, Windows)",
+              "Zero-configuration caching setup"
+            ]
+          },
+          "performance": {
+            "dependencyResolution": "UV provides 10-100x faster dependency resolution than pip",
+            "cacheOptimization": {
+              "command": "uv cache prune --ci",
+              "purpose": "Optimize CI cache size by removing unnecessary artifacts",
+              "benefit": "Reduces storage costs and improves cache restore times"
+            },
+            "cacheKey": {
+              "format": "uv-{OS}-{hash(uv.lock)}-{calendar-week}",
+              "rationale": "Weekly rotation balances cache hit rates with storage optimization"
+            }
+          },
+          "publishing": {
+            "method": "PyPI trusted publishing with OIDC",
+            "advantage": "Eliminates need for API tokens in CI/CD",
+            "security": "Uses GitHub's identity provider for secure, token-less publishing",
+            "setup": "Configure trusted publisher in PyPI project settings"
+          },
+          "platformSpecific": {
+            "windows": {
+              "issue": "Direct executable calls may fail due to PATH issues",
+              "solution": "Use 'uv run' pattern for all script executions",
+              "example": "uv run docsrs-mcp instead of direct executable call"
+            }
+          }
+        }
+      }
     },
     "pythonTooling": {
       "uv": {
