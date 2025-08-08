@@ -6,6 +6,7 @@ import json
 from docsrs_mcp.ingest import (
     extract_code_examples,
     extract_signature,
+    extract_type_name,
     normalize_item_type,
     parse_rustdoc_items,
     resolve_parent_id,
@@ -35,6 +36,10 @@ def test_normalize_item_type():
     # Test unknown kinds
     assert normalize_item_type("unknown_kind") == "unknown_kind"
     assert normalize_item_type({}) == "unknown"
+
+    # Test impl kind
+    assert normalize_item_type("impl") == "trait_impl"
+    assert normalize_item_type({"impl": {}}) == "trait_impl"
 
 
 def test_extract_signature():
@@ -98,6 +103,51 @@ def test_resolve_parent_id():
     # Test item without parent
     item_no_parent = {"name": "standalone"}
     assert resolve_parent_id(item_no_parent, paths) is None
+
+
+def test_extract_type_name():
+    """Test extraction of type names from rustdoc Type objects."""
+    # Test simple string type
+    assert extract_type_name("String") == "String"
+    assert extract_type_name("i32") == "i32"
+
+    # Test None
+    assert extract_type_name(None) == "Unknown"
+    assert extract_type_name("") == "Unknown"
+
+    # Test resolved_path type
+    resolved_path_type = {
+        "resolved_path": {
+            "name": "Vec",
+            "args": {"angle_bracketed": {"bindings": [], "args": [{"type": "T"}]}},
+        }
+    }
+    assert extract_type_name(resolved_path_type) == "Vec"
+
+    # Test path type
+    path_type = {
+        "path": {
+            "name": "Option",
+            "args": {"angle_bracketed": {"bindings": [], "args": [{"type": "String"}]}},
+        }
+    }
+    assert extract_type_name(path_type) == "Option"
+
+    # Test generic type
+    generic_type = {"generic": "T"}
+    assert extract_type_name(generic_type) == "T"
+
+    # Test primitive type
+    primitive_type = {"primitive": "bool"}
+    assert extract_type_name(primitive_type) == "bool"
+
+    # Test type with direct name field
+    direct_name_type = {"name": "CustomType"}
+    assert extract_type_name(direct_name_type) == "CustomType"
+
+    # Test unknown structure
+    unknown_type = {"unknown_field": "value"}
+    assert extract_type_name(unknown_type) == "Unknown"
 
 
 def test_extract_code_examples():
@@ -183,7 +233,7 @@ def test_extract_code_examples():
 def test_parse_rustdoc_items_with_metadata():
     """Test that parse_rustdoc_items extracts all metadata fields."""
     import json
-    
+
     # Create a minimal rustdoc JSON structure
     rustdoc_json = {
         "paths": {
@@ -225,7 +275,9 @@ def test_parse_rustdoc_items_with_metadata():
     assert func_item["item_type"] == "function"
     # Signature extraction may return None if the inner structure doesn't match expected format
     # The test's inner structure doesn't match the actual rustdoc format, so signature is None
-    assert func_item["signature"] is None or func_item["signature"] == "(x: i32) -> String"
+    assert (
+        func_item["signature"] is None or func_item["signature"] == "(x: i32) -> String"
+    )
     assert func_item["parent_id"] == "0:0:2"
     # Examples should be a JSON string or None
     if func_item["examples"]:

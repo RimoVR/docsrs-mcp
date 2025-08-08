@@ -1188,14 +1188,20 @@
         "id": "trait-search-1",
         "title": "Enhance trait implementation search",
         "description": "Extract and index trait implementations from rustdoc",
-        "status": "pending",
+        "status": "completed",
         "priority": "medium",
+        "progress": 100,
         "location": "src/docsrs_mcp/ingest.py",
         "dependencies": ["fix-examples-1", "enhance-path-1"],
         "effort": "large",
         "impact": "high",
         "relatedTasks": ["idx-1"],
         "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T16:00:00Z",
+          "implementation": "Successfully added 'impl' blocks as new 'trait_impl' item type with comprehensive rustdoc JSON parsing",
+          "notes": "Added 'impl' blocks as a new 'trait_impl' item type. Extended the rustdoc JSON parser to extract trait and type names from impl blocks. Integrated with existing search infrastructure. Added unit tests and test data. All tests are passing. No roadblocks encountered during implementation."
+        },
         "details": {
           "enhancement": "Extract trait implementations from rustdoc JSON and create searchable index for 'impl Trait for Type' relationships",
           "benefit": "Enable users to find trait implementations and understand trait usage patterns across crates",
@@ -1206,22 +1212,22 @@
             "id": "trait-search-1.1",
             "title": "Parse impl blocks from rustdoc JSON",
             "description": "Extract impl block information including trait and type relationships",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "trait-search-1.2",
             "title": "Create trait implementation index",
             "description": "Add database schema and indexing for trait implementations",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           },
           {
             "id": "trait-search-1.3",
             "title": "Add MCP endpoint for trait search",
             "description": "Create search_trait_impls MCP tool endpoint",
-            "status": "pending",
-            "progress": 0
+            "status": "completed",
+            "progress": 100
           }
         ]
       },

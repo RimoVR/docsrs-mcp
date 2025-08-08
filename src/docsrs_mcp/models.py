@@ -320,7 +320,7 @@ class SearchItemsRequest(BaseModel):
         # Normalize to lowercase for consistency
         normalized = str(v).lower()
         # Validate against allowed types
-        allowed_types = {"function", "struct", "trait", "enum", "module"}
+        allowed_types = {"function", "struct", "trait", "enum", "module", "trait_impl"}
         if normalized not in allowed_types:
             # Provide helpful suggestions for common mistakes
             suggestions = []

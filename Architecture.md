@@ -925,6 +925,7 @@ PATH_ALIASES = {
   - Signature extraction with full type information and generics
   - Parent ID resolution for module hierarchy relationships
   - Code example extraction from documentation comments
+  - Trait implementation parsing with extract_type_name() helper for rustdoc Type objects
 - **Memory Management Features**:
   - psutil-based memory monitoring with 80%/90% thresholds
   - Garbage collection triggers at chunk boundaries during high memory usage
@@ -1100,6 +1101,7 @@ graph TB
         FUNC[Functions: 1.2x]
         TRAIT[Traits: 1.15x]
         STRUCT[Structs: 1.1x]
+        TRAIT_IMPL[Trait Impls: 1.1x]
         MODULE[Modules: 0.9x]
     end
     
@@ -1962,7 +1964,8 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
   - **Signature Extraction**: Complete function signatures with generics and return types  
   - **Parent ID Resolution**: Module hierarchy relationships for navigation
   - **Code Example Parsing**: Extracts examples from documentation comments
-- **Type Filtering**: Focuses on functions, structs, traits, modules, enums, constants, macros
+  - **Trait Implementation Parsing**: Processes impl blocks to extract "impl TraitName for TypeName" relationships using extract_type_name() helper
+- **Type Filtering**: Focuses on functions, structs, traits, modules, enums, constants, macros, and trait implementations (trait_impl)
 - **Backward Compatibility**: NULL defaults for all new metadata fields
 - **Memory Efficiency**: Processes items incrementally, not all at once
 - **Performance Impact**: ~10-15% parsing overhead for enhanced metadata
@@ -2072,11 +2075,45 @@ The enhanced rustdoc JSON parsing implementation provides comprehensive metadata
 
 **Key Enhancements:**
 - **Database Schema**: Added metadata columns (item_type, signature, parent_id, examples) with NULL defaults
-- **Parsing Pipeline**: Enhanced with helper functions for type normalization, signature extraction, parent ID resolution, and code example extraction
+- **Parsing Pipeline**: Enhanced with helper functions for type normalization, signature extraction, parent ID resolution, code example extraction, and trait implementation parsing with extract_type_name() helper
 - **Memory Efficiency**: Maintained streaming approach with ijson, minimal performance impact (~10-15% overhead)
 - **Batch Processing**: Continues to use 999-item transactions for optimal performance
 - **Backward Compatibility**: NULL defaults ensure existing data and queries continue to work
 - **Performance**: Memory usage remains under 512 MiB RSS target, search latency unchanged
+
+### Trait Implementation Search Architecture
+
+The system provides comprehensive trait implementation search capabilities by parsing impl blocks from rustdoc JSON and integrating them with the existing search infrastructure:
+
+**New Item Type: trait_impl**
+- Added 'trait_impl' as a distinct item type in the type system alongside existing types (function, struct, trait, module, enum, constant, macro)
+- Available as a filter parameter in search queries to specifically target trait implementation searches
+- Integrated into the multi-factor ranking system with a weight of 1.1x for relevance optimization
+
+**extract_type_name() Helper Function**
+- Extracts readable type names from complex rustdoc Type objects (dict, string, or None input)
+- Handles various rustdoc Type structures including resolved_path, path, generic, primitive, and direct name fields
+- Returns "Unknown" for unrecognized structures, ensuring robust parsing of complex type information
+- Used extensively in impl block parsing to generate clean "impl TraitName for TypeName" headers
+
+**Impl Block Parsing in parse_rustdoc_items_streaming()**
+- Detects impl blocks during rustdoc JSON parsing and processes them as trait_impl items
+- For trait implementations: Extracts trait and type information to generate headers like "impl Display for MyStruct"
+- For inherent implementations: Generates headers like "impl MyStruct" when no trait is present
+- Uses composite naming convention (e.g., "Display_for_MyStruct") to create unique identifiers
+- Leverages existing infrastructure without database schema changes
+
+**Search Integration**
+- Trait implementations participate in standard vector similarity search with enhanced relevance scoring
+- Type-aware ranking applies 1.1x weight boost to trait_impl items for improved search results
+- Compatible with existing filtering, crate selection, and module path constraints
+- No performance impact on existing search functionality - trait implementations processed in same pipeline
+
+**Implementation Benefits**
+- Zero database schema changes required - leveraged existing item_type, header, and signature fields
+- Maintains backward compatibility with all existing functionality and APIs
+- Reuses established parsing, embedding, and search infrastructure
+- Memory efficient - trait implementations processed in same streaming pipeline with identical memory characteristics
 
 ## Memory Management Architecture
 
@@ -2314,7 +2351,7 @@ graph TD
 ## Enhanced Database Schema Details
 
 ### EMBEDDINGS Table Enhancements (Primary Storage)
-- **item_type**: Categorizes documentation items (function, struct, trait, module, enum, constant, macro) - DEFAULT NULL for backward compatibility
+- **item_type**: Categorizes documentation items (function, struct, trait, module, enum, constant, macro, trait_impl) - DEFAULT NULL for backward compatibility
 - **signature**: Complete item signature including generics, bounds, and return types - DEFAULT NULL
 - **parent_id**: Self-referencing foreign key for module hierarchy navigation - DEFAULT NULL
 - **examples**: Extracted code examples from documentation comments - DEFAULT NULL

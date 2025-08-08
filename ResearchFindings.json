@@ -748,6 +748,39 @@
               "benefit": "Enables construction of complete hierarchical documentation structure",
               "implementation": "Use paths section to map item IDs to their parent containers and module hierarchy"
             },
+            "traitImplementations": {
+              "implBlockStructure": {
+                "format": "Rustdoc JSON represents trait implementations in impl blocks with 'trait' and 'for' fields",
+                "traitField": "Contains the trait being implemented (can be None for inherent impls)",
+                "forField": "Contains the type implementing the trait",
+                "purpose": "Enables extraction of trait-implementation relationships from documentation",
+                "implementation": "Parse impl blocks from rustdoc index section to find trait implementations"
+              },
+              "typeObjectFormats": {
+                "resolvedPath": "Format: {'resolved_path': {'name': 'TypeName', 'id': '...', 'args': [...]}}",
+                "path": "Format: {'path': {'name': 'TypeName', 'id': '...', 'args': [...]}}",
+                "generic": "Format: {'generic': 'T'} for generic type parameters",
+                "primitive": "Format: {'primitive': 'str'} for primitive types like str, i32, etc.",
+                "complexity": "Type objects can be nested with complex generic parameter structures",
+                "parsing": "Must handle multiple type representation formats dynamically"
+              },
+              "typeNameExtraction": {
+                "pattern": "Recursive extraction from nested Type objects based on format",
+                "resolvedPathExtraction": "Extract name from type_obj['resolved_path']['name']",
+                "pathExtraction": "Extract name from type_obj['path']['name']",
+                "genericExtraction": "Extract name directly from type_obj['generic']",
+                "primitiveExtraction": "Extract name directly from type_obj['primitive']",
+                "fallback": "Return 'Unknown' for unrecognized type formats",
+                "implementation": "Use recursive helper function to traverse complex type structures"
+              },
+              "schemaCompatibleIntegration": {
+                "approach": "Add new item types without breaking existing schema structure",
+                "benefit": "Allows incremental feature addition without database migrations",
+                "method": "Extend existing item parsing logic with new type handlers",
+                "compatibility": "Maintains backward compatibility with existing parsed data",
+                "implementation": "Add trait implementation parsing alongside existing function/struct/enum parsing"
+              }
+            },
             "codeExampleExtraction": {
               "pattern": "r'```(?:rust)?\\s*\\n(.*?)```'",
               "purpose": "Extract Rust code examples from documentation strings",
@@ -2086,6 +2119,10 @@
       "Use symbol interning for repeated string lookups in rustdoc JSON",
       "Parse rustdoc JSON on-demand rather than loading entire AST",
       "Always validate rustdoc format_version field before parsing",
+      "Parse trait implementations from rustdoc impl blocks using 'trait' and 'for' fields",
+      "Handle multiple type object formats (resolved_path, path, generic, primitive) dynamically",
+      "Use recursive type name extraction for complex rustdoc Type objects",
+      "Extend existing item parsing logic to add new types without schema changes",
       "Use semantic chunking with 50-200 token chunks for optimal search granularity",
       "Leverage sqlite-vec brute-force search for collections up to 1M vectors",
       "Implement binary quantization to reduce storage by 8x with minimal accuracy loss",

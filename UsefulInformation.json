@@ -975,6 +975,27 @@
           "dateLearned": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/fuzzy_resolver.py"],
           "testingStrategy": "Use --mode rest flag for easier HTTP/curl testing instead of STDIO mode during development and verification"
+        },
+        {
+          "lesson": "Rustdoc JSON impl block representation patterns",
+          "context": "Implementing trait implementation search functionality in rustdoc JSON parsing",
+          "details": "Rustdoc JSON represents impl blocks with empty names, requiring extraction from inner.trait and inner.for fields. Composite names like 'TraitName_for_TypeName' work well for impl block identification. Inherent impls (no trait) can be handled by checking for null trait field. The existing streaming parser architecture easily accommodates new item types without structural changes.",
+          "impact": "Enables accurate trait implementation search without requiring database schema changes by leveraging existing item_type field patterns. Provides flexible naming scheme for both trait impls and inherent impls.",
+          "dateLearned": "2025-08-08",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"],
+          "implementationNotes": {
+            "emptyNames": "Impl blocks have empty name field - extract from inner.trait and inner.for instead",
+            "compositeNaming": "Use 'TraitName_for_TypeName' pattern for trait implementations",
+            "inherentImpls": "Check trait field for null to identify inherent implementations vs trait implementations",
+            "streamingCompatible": "Existing streaming parser handles new impl item types without architecture changes",
+            "schemaCompatible": "No database schema changes needed - uses existing item_type field infrastructure"
+          },
+          "parsingPatterns": {
+            "traitImpl": "Extract from inner.trait.name and inner.for to create composite identifier",
+            "inherentImpl": "Use inner.for as identifier when inner.trait is null",
+            "typeExtraction": "Both trait and for fields may contain complex type information requiring careful parsing",
+            "nameGeneration": "Generate meaningful searchable names from otherwise empty name fields in rustdoc JSON"
+          }
         }
       ]
     },
@@ -1070,7 +1091,12 @@
       "Extract item kind from inner field as single-key dictionary in rustdoc JSON parsing",
       "Module names are derived from last element of path arrays, not separate name fields",
       "Preserve full data structures when building hierarchies to maintain context information",
-      "FIXED: Always check if examples_data is string before iteration to prevent character fragmentation - apply type guard: if isinstance(examples_data, str): examples_data = [examples_data]"
+      "FIXED: Always check if examples_data is string before iteration to prevent character fragmentation - apply type guard: if isinstance(examples_data, str): examples_data = [examples_data]",
+      "Impl blocks in rustdoc JSON have empty names - extract from inner.trait and inner.for fields instead",
+      "Use composite naming pattern 'TraitName_for_TypeName' for trait implementations to create meaningful identifiers",
+      "Check inner.trait for null to distinguish between trait implementations and inherent implementations",
+      "Existing streaming parser architecture accommodates new item types without structural changes",
+      "No database schema changes needed for impl blocks - leverage existing item_type field patterns"
     ],
     "rateLimiting": [
       "MUST include Request parameter in endpoint function signatures or rate limiting won't work",
@@ -1173,6 +1199,16 @@
       "Use --mode rest flag for easier HTTP/curl testing during development instead of STDIO mode",
       "Update PATH_ALIASES based on user feedback and common usage patterns to improve coverage",
       "Maintain sub-500ms response time requirement even with alias resolution overhead"
+    ],
+    "rustdocJsonParsing": [
+      "Impl blocks have empty name fields - extract meaningful names from inner.trait and inner.for fields",
+      "Use composite naming pattern: 'TraitName_for_TypeName' for trait implementations",
+      "Check inner.trait field for null to identify inherent vs trait implementations",
+      "Generate searchable identifiers from inner.for field when inner.trait is null (inherent impls)",
+      "Existing streaming parser accommodates new item types without architecture changes",
+      "No database schema modifications needed - use existing item_type field for impl blocks",
+      "Complex type information may be nested in both trait and for fields - parse carefully",
+      "Empty name fields are normal for impl blocks - don't treat as parsing errors"
     ]
   },
   "performanceMetrics": {
@@ -1195,7 +1231,8 @@
       "extensionManagement": "Always load sqlite-vec extension before vector operations, especially in testing environments",
       "codeExampleExtraction": "Language detection adds minimal overhead (~200ms warm queries), deduplication by hash prevents duplicates efficiently, backward compatibility essential for format changes",
       "fuzzyPathResolution": "Use fallback-only approach with RapidFuzz for minimal performance impact, cache paths per crate, implement simple TTL dictionary cache instead of complex caching frameworks",
-      "pathAliasResolution": "Static PATH_ALIASES dictionary with O(1) lookup adds <1ms overhead, maintains sub-500ms response time requirement while significantly improving user experience"
+      "pathAliasResolution": "Static PATH_ALIASES dictionary with O(1) lookup adds <1ms overhead, maintains sub-500ms response time requirement while significantly improving user experience",
+      "implBlockParsing": "Impl block parsing uses existing streaming architecture without performance impact, composite naming creates searchable identifiers efficiently, no schema changes required for trait implementation search"
     }
   },
   "codeQuality": {

@@ -40,6 +40,7 @@ TYPE_WEIGHTS = {
     "module": float(os.getenv("DOCSRS_TYPE_WEIGHT_MODULE", "0.9")),
     "enum": float(os.getenv("DOCSRS_TYPE_WEIGHT_ENUM", "1.0")),
     "type": float(os.getenv("DOCSRS_TYPE_WEIGHT_TYPE", "1.0")),
+    "trait_impl": float(os.getenv("DOCSRS_TYPE_WEIGHT_TRAIT_IMPL", "1.1")),
 }
 
 # Caching configuration

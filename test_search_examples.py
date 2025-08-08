@@ -1,4 +1,4 @@
-#\!/usr/bin/env python3
+# \!/usr/bin/env python3
 import json
 import sys
 
@@ -9,12 +9,8 @@ request = {
     "method": "tools/call",
     "params": {
         "name": "search_examples",
-        "arguments": {
-            "crate_name": "serde",
-            "query": "deserialize json",
-            "k": 3
-        }
-    }
+        "arguments": {"crate_name": "serde", "query": "deserialize json", "k": 3},
+    },
 }
 
 print(json.dumps(request))

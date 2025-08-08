@@ -402,6 +402,7 @@ def normalize_item_type(kind: dict | str) -> str:
         "typedef": "type",
         "const": "const",
         "static": "static",
+        "impl": "trait_impl",
     }
 
     # Find matching type
@@ -577,6 +578,53 @@ def resolve_parent_id(item: dict, paths: dict) -> str | None:
     except Exception as e:
         logger.warning(f"Could not resolve parent ID: {e}")
     return None
+
+
+def extract_type_name(type_info: dict | str | None) -> str:
+    """Extract readable type name from rustdoc Type object.
+
+    Args:
+        type_info: Type info from rustdoc JSON (can be dict, string, or None)
+
+    Returns:
+        str: Extracted type name or "Unknown" if unable to extract
+    """
+    if not type_info:
+        return "Unknown"
+
+    if isinstance(type_info, str):
+        return type_info
+
+    if isinstance(type_info, dict):
+        # Handle resolved_path type
+        if "resolved_path" in type_info:
+            resolved = type_info["resolved_path"]
+            if isinstance(resolved, dict):
+                name = resolved.get("name", "")
+                if name:
+                    return name
+
+        # Handle path type
+        if "path" in type_info:
+            path = type_info["path"]
+            if isinstance(path, dict):
+                name = path.get("name", "")
+                if name:
+                    return name
+
+        # Handle generic type
+        if "generic" in type_info:
+            return type_info["generic"]
+
+        # Handle primitive type
+        if "primitive" in type_info:
+            return type_info["primitive"]
+
+        # Try to get name directly
+        if "name" in type_info:
+            return type_info["name"]
+
+    return "Unknown"
 
 
 def extract_code_examples(docstring: str) -> str | None:
@@ -1057,6 +1105,7 @@ async def parse_rustdoc_items_streaming(json_content: str):
                     "const",
                     "static",
                     "method",
+                    "impl",
                 ]
 
                 if any(k in kind_lower for k in indexable_kinds):
@@ -1067,6 +1116,28 @@ async def parse_rustdoc_items_streaming(json_content: str):
                         header = f"struct {name}"
                     elif "trait" in kind_lower:
                         header = f"trait {name}"
+                    elif "impl" in kind_lower:
+                        # Handle impl blocks - extract trait and type names
+                        if inner:
+                            trait_info = inner.get("trait")
+                            type_info = inner.get("for")
+
+                            if trait_info and type_info:
+                                trait_name = extract_type_name(trait_info)
+                                type_name = extract_type_name(type_info)
+                                header = f"impl {trait_name} for {type_name}"
+                                # For impl blocks, use a composite name
+                                name = f"{trait_name}_for_{type_name}"
+                            elif type_info:
+                                # Inherent impl (no trait)
+                                type_name = extract_type_name(type_info)
+                                header = f"impl {type_name}"
+                                name = f"impl_{type_name}"
+                            else:
+                                # Fallback
+                                header = f"impl {name}"
+                        else:
+                            header = f"impl {name}"
                     elif "mod" in kind_lower:
                         header = f"mod {name}"
                     elif "enum" in kind_lower:

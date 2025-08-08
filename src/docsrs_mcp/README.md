@@ -42,6 +42,30 @@ Ranking weights can be customized via environment variables:
 - `DOCSRS_CACHE_SIZE`: Max cache entries (default: 1000)
 - `DOCSRS_CACHE_TTL`: Cache TTL in seconds (default: 900)
 
+## Trait Implementation Search
+
+The docsrs-mcp server includes comprehensive trait implementation indexing and search capabilities, allowing users to discover how traits are implemented across different types in Rust documentation.
+
+### Features
+- **Trait Implementation Indexing**: Automatically extracts trait implementations (`impl Trait for Type`) from rustdoc JSON during ingestion
+- **Dedicated Item Type**: New `trait_impl` item type available in search filters alongside existing types (function, struct, trait, etc.)
+- **Trait-Type Relationships**: Captures and indexes the relationship between traits and the types that implement them
+- **Integrated Search**: Trait implementations are included in the standard search and ranking system with appropriate relevance scoring
+
+### Search Integration
+- **Filter Support**: Use `item_type: "trait_impl"` to search specifically for trait implementations
+- **Text Search**: Query trait implementations by trait name, implementing type, or documentation content
+- **Combined Queries**: Mix trait implementation searches with other filters for precise results
+- **Ranking Integration**: Trait implementations participate in the multi-factor scoring system with appropriate type-specific weights
+
+### Use Cases
+- Find all implementations of a specific trait (e.g., "Display implementations")
+- Discover what traits a particular type implements
+- Search for trait implementations with specific documentation or examples
+- Explore trait usage patterns across different crates
+
+The trait implementation search feature seamlessly integrates with the existing search infrastructure, providing developers with powerful tools to understand trait relationships and implementations in Rust documentation.
+
 ## Path Alias Resolution
 
 The docsrs-mcp server includes intelligent path alias resolution to improve user experience when querying common Rust documentation paths. This feature automatically resolves commonly used but incorrect paths to their actual rustdoc locations.

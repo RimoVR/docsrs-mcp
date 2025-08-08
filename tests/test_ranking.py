@@ -159,7 +159,9 @@ class TestScoringFormula:
 
         # Verify individual components
         vector_component = config.RANKING_VECTOR_WEIGHT * base_score
-        assert vector_component == config.RANKING_VECTOR_WEIGHT * 0.8  # 0.6 * 0.8 = 0.48
+        assert (
+            vector_component == config.RANKING_VECTOR_WEIGHT * 0.8
+        )  # 0.6 * 0.8 = 0.48
 
         type_component = config.RANKING_TYPE_WEIGHT * (base_score * type_weight)
         assert type_component == 0.15 * (0.8 * 1.2)  # 0.144
@@ -168,7 +170,9 @@ class TestScoringFormula:
         assert quality_component == 0.1 * 0.5  # 0.05
 
         examples_component = config.RANKING_EXAMPLES_WEIGHT * has_examples
-        assert examples_component == config.RANKING_EXAMPLES_WEIGHT * 1.2  # 0.15 * 1.2 = 0.18
+        assert (
+            examples_component == config.RANKING_EXAMPLES_WEIGHT * 1.2
+        )  # 0.15 * 1.2 = 0.18
 
     def test_score_range_clamping(self):
         """Test that scores are clamped to [0, 1] range."""

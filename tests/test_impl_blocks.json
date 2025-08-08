@@ -1,0 +1,118 @@
+{
+  "root": "0:0:0",
+  "crate_version": "1.0.0",
+  "includes_private": false,
+  "format_version": 27,
+  "index": {
+    "0:0:0": {
+      "name": "test_crate",
+      "kind": "module",
+      "inner": {
+        "module": {
+          "is_crate": true,
+          "items": ["0:0:1", "0:0:2", "0:0:3", "0:0:4"]
+        }
+      },
+      "docs": "Test crate for impl blocks"
+    },
+    "0:0:1": {
+      "name": "MyStruct",
+      "kind": "struct",
+      "inner": {
+        "struct": {
+          "kind": "unit"
+        }
+      },
+      "docs": "A simple struct"
+    },
+    "0:0:2": {
+      "name": "MyTrait",
+      "kind": "trait",
+      "inner": {
+        "trait": {
+          "is_auto": false,
+          "is_unsafe": false,
+          "items": [],
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          },
+          "bounds": [],
+          "implementations": ["0:0:3"]
+        }
+      },
+      "docs": "A simple trait"
+    },
+    "0:0:3": {
+      "name": "",
+      "kind": "impl",
+      "inner": {
+        "impl": {
+          "is_unsafe": false,
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          },
+          "trait": {
+            "resolved_path": {
+              "name": "MyTrait",
+              "id": "0:0:2"
+            }
+          },
+          "for": {
+            "resolved_path": {
+              "name": "MyStruct",
+              "id": "0:0:1"
+            }
+          },
+          "items": [],
+          "negative": false,
+          "synthetic": false
+        }
+      },
+      "docs": "Implementation of MyTrait for MyStruct"
+    },
+    "0:0:4": {
+      "name": "",
+      "kind": "impl",
+      "inner": {
+        "impl": {
+          "is_unsafe": false,
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          },
+          "trait": null,
+          "for": {
+            "resolved_path": {
+              "name": "MyStruct",
+              "id": "0:0:1"
+            }
+          },
+          "items": [],
+          "negative": false,
+          "synthetic": false
+        }
+      },
+      "docs": "Inherent implementation for MyStruct"
+    }
+  },
+  "paths": {
+    "0:0:0": {
+      "crate_id": 0,
+      "path": [],
+      "kind": "module"
+    },
+    "0:0:1": {
+      "crate_id": 0,
+      "path": ["test_crate"],
+      "kind": "struct"
+    },
+    "0:0:2": {
+      "crate_id": 0,
+      "path": ["test_crate"],
+      "kind": "trait"
+    }
+  },
+  "external_crates": {}
+}
