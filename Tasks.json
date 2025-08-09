@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-09T00:00:00Z",
+    "lastUpdated": "2025-08-09T12:00:00Z",
     "priorities": ["critical", "high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked", "failed"]
   },
@@ -988,6 +988,98 @@
               "completedDate": "2025-08-08T22:00:00Z",
               "implementation": "Added isinstance() checks and defensive programming patterns for searchExamples",
               "notes": "searchExamples now has proper defensive checks preventing character fragmentation with isinstance() validation"
+            }
+          }
+        ]
+      },
+      {
+        "id": "debug-not-null-1",
+        "title": "Fix NOT NULL constraint violations in database storage",
+        "description": "Fix database storage failures caused by empty paths violating NOT NULL constraints",
+        "status": "completed",
+        "priority": "high",
+        "progress": 100,
+        "location": "src/docsrs_mcp/ingest.py, src/docsrs_mcp/database.py",
+        "dependencies": ["core-4"],
+        "effort": "medium",
+        "impact": "high",
+        "relatedTasks": ["core-4"],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-09",
+          "implementation": "Fixed by adding validate_item_path_with_fallback function that generates fallback paths when empty paths are encountered. Added validation at parse time (ingest.py:1199) and defensive validation at storage time (_store_batch). Tested successfully with REST API mode.",
+          "notes": "Fixed by adding validate_item_path_with_fallback function that generates fallback paths when empty paths are encountered. Added validation at parse time (ingest.py:1199) and defensive validation at storage time (_store_batch). Tested successfully with REST API mode."
+        },
+        "details": {
+          "bugDescription": "Database storage was failing with NOT NULL constraint violations when rustdoc parsing encountered items with empty or null paths",
+          "affectedFunctionality": "Crate ingestion and database storage operations",
+          "fixesImplemented": [
+            "Added validate_item_path_with_fallback function to generate fallback paths for empty paths",
+            "Added validation at parse time in ingest.py line 1199",
+            "Added defensive validation at storage time in _store_batch function",
+            "Ensured all database inserts have valid non-null path values"
+          ],
+          "solution": "Comprehensive validation approach with both early detection and defensive programming at storage time"
+        },
+        "subtasks": [
+          {
+            "id": "debug-not-null-1.1",
+            "title": "Identify NOT NULL constraint violation sources",
+            "description": "Analyze database storage code to find where empty paths are being inserted",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-09",
+              "implementation": "Identified that rustdoc parsing can produce items with empty paths that violate NOT NULL constraints",
+              "notes": "Found that empty paths from rustdoc JSON were causing constraint violations during batch storage operations"
+            }
+          },
+          {
+            "id": "debug-not-null-1.2", 
+            "title": "Implement validate_item_path_with_fallback function",
+            "description": "Create validation function that generates fallback paths for empty values",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-09",
+              "implementation": "Created function that generates meaningful fallback paths when encountering empty or null values",
+              "notes": "Function generates appropriate fallback paths based on item type and context to ensure database constraints are satisfied"
+            }
+          },
+          {
+            "id": "debug-not-null-1.3",
+            "title": "Add validation at parse time",
+            "description": "Insert path validation during rustdoc JSON parsing in ingest.py",
+            "status": "completed", 
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-09",
+              "implementation": "Added validation call at line 1199 in ingest.py during rustdoc parsing",
+              "notes": "Early validation prevents empty paths from reaching the database storage layer"
+            }
+          },
+          {
+            "id": "debug-not-null-1.4",
+            "title": "Add defensive validation at storage time",
+            "description": "Add final validation layer in _store_batch function as defensive programming",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-09",
+              "implementation": "Added defensive validation in _store_batch to catch any remaining empty path issues",
+              "notes": "Provides safety net in case any empty paths bypass earlier validation layers"
+            }
+          },
+          {
+            "id": "debug-not-null-1.5",
+            "title": "Test with REST API mode",
+            "description": "Verify the fix works correctly with REST API ingestion mode",
+            "status": "completed",
+            "progress": 100,
+            "completionDetails": {
+              "completedDate": "2025-08-09", 
+              "implementation": "Successfully tested ingestion with REST API mode, confirmed no NOT NULL constraint violations",
+              "notes": "All ingestion operations now complete successfully without database constraint errors"
             }
           }
         ]

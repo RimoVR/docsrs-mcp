@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-08",
+  "lastUpdated": "2025-08-09",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -45,6 +45,28 @@
           "dateEncountered": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/app.py"],
           "codeExample": "if isinstance(examples, str): examples = [examples]  # Wrap single string in list"
+        },
+        {
+          "error": "NOT NULL constraint failed: embeddings.item_path",
+          "context": "Ingestion pipeline crashes during rustdoc JSON parsing when items have empty paths",
+          "rootCause": "The parsing logic in parse_rustdoc_items_streaming() uses 'path or name' which results in empty string when both are empty, violating the NOT NULL constraint",
+          "solution": [
+            "Added validate_item_path_with_fallback() function in validation.py that generates fallback paths",
+            "Validation at parse time (ingest.py:1199) generates fallback paths like 'kind::item_id' when paths are empty",
+            "Defensive validation in _store_batch() skips any chunks that still have invalid paths",
+            "Fallback path patterns: 'item_kind::item_id' for items with IDs, 'item_kind::unknown_hash' for items without IDs"
+          ],
+          "prevention": "Always validate database fields that have NOT NULL constraints before insertion",
+          "dateEncountered": "2025-08-09",
+          "affectedVersions": "All versions prior to fix",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/validation.py"],
+          "codeExample": "def validate_item_path_with_fallback(path: str, name: str, item_kind: str, item_id: str) -> str:\n    if path:\n        return path\n    if name:\n        return name\n    # Generate fallback path\n    if item_id:\n        return f'{item_kind}::{item_id}'\n    return f'{item_kind}::unknown_{hash(str(item_kind))}'",
+          "researchFindings": [
+            "NOT NULL constraint failures are sqlite3.IntegrityError exceptions",
+            "Use INSERT OR IGNORE to skip constraint violations gracefully", 
+            "Validate data before database insertion to prevent constraint errors",
+            "Fallback path generation ensures all items have valid identifiers"
+          ]
         }
       ]
     },

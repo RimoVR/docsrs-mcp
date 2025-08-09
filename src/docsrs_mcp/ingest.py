@@ -1107,7 +1107,7 @@ async def parse_rustdoc_items_streaming(json_content: str):
                             # Extract source path and check for glob
                             source = use_info.get("source")
                             is_glob = use_info.get("is_glob", False)
-                            
+
                             # For re-exports, the name might be in use_info instead of item_info
                             use_name = use_info.get("name") or name
 
@@ -1197,6 +1197,22 @@ async def parse_rustdoc_items_streaming(json_content: str):
                         full_path = f"{path}::{name}"
                     else:
                         full_path = path or name
+
+                    # Validate and potentially generate fallback path
+                    from .validation import validate_item_path_with_fallback
+
+                    validated_path, used_fallback = validate_item_path_with_fallback(
+                        full_path, item_id, kind_lower
+                    )
+
+                    if used_fallback:
+                        logger.debug(
+                            f"Generated fallback path for item: "
+                            f"original_path='{path}', original_name='{name}', "
+                            f"fallback='{validated_path}', kind='{kind_lower}'"
+                        )
+
+                    full_path = validated_path
 
                     # Extract additional metadata using helper functions
                     item_type = normalize_item_type(kind_lower)
@@ -1324,7 +1340,7 @@ async def evict_cache_if_needed() -> None:
             try:
                 # Get popular crates data for priority scoring
                 from .popular_crates import get_popular_manager
-                
+
                 manager = get_popular_manager()
                 popular_crates = await manager.get_popular_crates_with_metadata()
 
@@ -1544,6 +1560,32 @@ async def _store_batch(
         # Begin transaction for this batch
         await db.execute("BEGIN TRANSACTION")
 
+        # Defensive validation - filter out any chunks with invalid item_paths
+        valid_chunks = []
+        valid_embeddings = []
+        skipped_count = 0
+
+        for chunk, embedding in zip(chunks, embeddings, strict=False):
+            # Defensive validation - should never fail after parse-time validation
+            if not chunk.get("item_path") or not chunk["item_path"].strip():
+                logger.error(
+                    f"Invalid item_path in batch: {chunk.get('item_path')!r}, "
+                    f"header={chunk.get('header')}, skipping chunk"
+                )
+                skipped_count += 1
+                continue
+
+            valid_chunks.append(chunk)
+            valid_embeddings.append(embedding)
+
+        if skipped_count > 0:
+            logger.warning(f"Skipped {skipped_count} chunks with invalid item_paths")
+
+        if not valid_chunks:
+            logger.warning("No valid chunks to store in this batch")
+            await db.execute("ROLLBACK")
+            return
+
         # Prepare batch data for embeddings table
         embeddings_data = [
             (
@@ -1560,7 +1602,7 @@ async def _store_batch(
                 chunk.get("visibility", "public"),
                 chunk.get("deprecated", False),
             )
-            for chunk, embedding in zip(chunks, embeddings, strict=False)
+            for chunk, embedding in zip(valid_chunks, valid_embeddings, strict=False)
         ]
 
         # Batch insert into embeddings table
@@ -1575,14 +1617,14 @@ async def _store_batch(
         # Get the rowids for the inserted records
         cursor = await db.execute("SELECT last_insert_rowid()")
         last_rowid = (await cursor.fetchone())[0]
-        first_rowid = last_rowid - len(chunks) + 1
+        first_rowid = last_rowid - len(valid_chunks) + 1
 
         # Prepare batch data for vec_embeddings table
         vec_data = [
             (rowid, embedding)
             for rowid, embedding in zip(
                 range(first_rowid, last_rowid + 1),
-                embeddings,
+                valid_embeddings,
                 strict=False,
             )
         ]

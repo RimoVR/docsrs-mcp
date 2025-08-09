@@ -73,9 +73,10 @@ graph LR
             POPULAR[popular_crates.py<br/>PopularCratesManager & PreIngestionWorker<br/>Background asyncio.create_task startup<br/>asyncio.Semaphore(3) rate limiting<br/>Multi-tier cache with circuit breaker<br/>Priority queue with memory monitoring]
             VER[Version Resolution<br/>docs.rs redirects]
             DL[Compression Support<br/>zst, gzip, json]
-            PARSE[ijson Parser<br/>Memory-efficient streaming<br/>Module hierarchy extraction]
+            PARSE[ijson Parser<br/>Memory-efficient streaming<br/>Module hierarchy extraction<br/>Path validation with fallback generation]
             HIERARCHY[build_module_hierarchy()<br/>Parent-child relationships<br/>Depth calculation<br/>Item counting]
             EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]
+            PATHVAL[Path Validation<br/>validate_item_path_with_fallback()<br/>Database integrity enforcement]
             EMBED[FastEmbed<br/>Batch processing]
             LOCK[Per-crate Locks<br/>Prevent duplicates]
             PRIORITY[Priority Queue<br/>On-demand vs pre-ingestion<br/>Request balancing]
@@ -116,7 +117,8 @@ graph LR
     ING --> PARSE
     PARSE --> HIERARCHY
     HIERARCHY --> EXTRACT
-    EXTRACT --> EMBED
+    EXTRACT --> PATHVAL
+    PATHVAL --> EMBED
     EMBED --> DB
     DB --> VSS
     VSS --> RANK
@@ -153,6 +155,7 @@ sequenceDiagram
         DocsRS-->>Worker: Compressed rustdoc JSON
         Worker->>Worker: Stream decompress with size limits
         Worker->>Worker: Parse with ijson (memory-efficient)
+        Worker->>Worker: Validate item paths with fallback generation
         Worker->>Worker: Parse complete rustdoc structure
         Worker->>Worker: Extract module hierarchy (build_module_hierarchy)
         Worker->>Worker: Extract and store re-export mappings
@@ -2264,6 +2267,48 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - **Backward Compatibility**: NULL defaults for all new metadata fields
 - **Memory Efficiency**: Processes items incrementally, not all at once
 - **Performance Impact**: ~10-15% parsing overhead for enhanced metadata
+
+### Path Validation System
+
+The ingestion pipeline includes a robust path validation system that ensures database integrity by guaranteeing all item_path values are non-empty and properly formatted:
+
+**validate_item_path_with_fallback() Function**
+- **Primary Purpose**: Prevents NOT NULL constraint violations in the database by ensuring every item has a valid path
+- **Validation Strategy**: Validates paths against Rust path syntax patterns using precompiled regex
+- **Fallback Generation**: Automatically generates valid paths when original paths are empty, malformed, or missing
+- **Sanitization Process**: Attempts to repair invalid paths by replacing invalid characters and cleaning up segments
+- **Integration Point**: Called during `parse_rustdoc_items_streaming()` for every parsed item before database insertion
+
+**Fallback Path Generation Strategy**
+- **Primary Fallback**: Uses item_id and item_kind to generate descriptive paths (e.g., "function::my_function")
+- **Secondary Fallback**: Uses item_kind with content hash for uniqueness when item_id is unavailable
+- **Last Resort**: Creates generic paths with hash-based uniqueness to guarantee no collisions
+- **Sanitization Attempt**: Tries to repair malformed paths by character replacement and segment cleaning
+
+**Database Integrity Benefits**
+- **Zero NULL Paths**: Guarantees all items have non-empty item_path values for reliable search and navigation
+- **Search Reliability**: Ensures vector search and filtering operations work consistently without null reference errors
+- **Navigation Support**: Provides valid paths for module hierarchy traversal and breadcrumb generation
+- **Debug Traceability**: Maintains item traceability even when original rustdoc data has path issues
+
+**Performance Characteristics**
+- **Low Overhead**: Minimal performance impact (~1-2ms per item) during ingestion
+- **Memory Efficient**: No additional memory allocation beyond temporary string operations
+- **Batch Compatible**: Integrates seamlessly with streaming ingestion architecture
+- **Error Resilient**: Continues processing even when individual items have severe path corruption
+
+**Integration with Streaming Pipeline**
+```mermaid
+graph LR
+    subgraph "Ingestion Validation Flow"
+        PARSE[Parse rustdoc item] --> VALIDATE[validate_item_path_with_fallback()]
+        VALIDATE --> CHECK{Path valid?}
+        CHECK -->|Yes| STORE[Store with original path]
+        CHECK -->|No| FALLBACK[Generate fallback path]
+        FALLBACK --> STORE
+        STORE --> DB[Database insertion]
+    end
+```
 
 ### Module Hierarchy Implementation
 

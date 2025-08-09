@@ -205,6 +205,98 @@ def coerce_to_int_with_bounds(
     return value
 
 
+def validate_item_path_with_fallback(
+    path: str | None, item_id: str | None, item_kind: str | None
+) -> tuple[str, bool]:
+    """
+    Validate item_path and generate fallback if needed.
+
+    This function ensures we always have a valid non-empty path for database
+    insertion, preventing NOT NULL constraint violations.
+
+    Args:
+        path: The original path (may be None or empty)
+        item_id: The item's ID for fallback generation
+        item_kind: The item's kind/type for fallback generation
+
+    Returns:
+        tuple: (validated_path, used_fallback)
+            - validated_path: A non-empty, valid path string
+            - used_fallback: True if a fallback was generated
+    """
+    # Check for empty or whitespace-only path
+    if not path or not path.strip():
+        # Generate fallback path using item metadata
+        if item_id and item_id.strip():
+            # Use item_id as base for fallback
+            if item_kind and item_kind.strip():
+                fallback = f"{item_kind}::{item_id}"
+            else:
+                fallback = f"item::{item_id}"
+        elif item_kind and item_kind.strip():
+            # Use kind with hash for uniqueness
+            fallback = f"{item_kind}::unknown_{abs(hash(str(path)))}"
+        else:
+            # Last resort: generic fallback
+            fallback = f"unknown::item_{abs(hash(str((path, item_id, item_kind))))}"
+
+        return fallback, True
+
+    # Check if path is valid according to Rust path pattern
+    path_stripped = path.strip()
+
+    # Special case for crate root
+    if path_stripped == "crate":
+        return path_stripped, False
+
+    # Truncate if too long
+    if len(path_stripped) > 256:
+        path_stripped = path_stripped[:256]
+        # Ensure we don't cut in the middle of ::
+        if path_stripped.endswith(":"):
+            path_stripped = path_stripped[:-1]
+        elif path_stripped.endswith("::"):
+            path_stripped = path_stripped[:-2]
+
+    # If it matches the pattern, return as-is
+    if RUST_PATH_PATTERN.match(path_stripped):
+        return path_stripped, False
+
+    # Try to sanitize the path
+    # Replace common invalid characters with underscores
+    sanitized = path_stripped
+    for char in [" ", "-", ".", "/", "\\", "(", ")", "[", "]", "{", "}", "<", ">", ","]:
+        sanitized = sanitized.replace(char, "_")
+
+    # Remove consecutive underscores
+    while "__" in sanitized:
+        sanitized = sanitized.replace("__", "_")
+
+    # Remove leading/trailing underscores from segments
+    segments = sanitized.split("::")
+    segments = [seg.strip("_") for seg in segments if seg.strip("_")]
+
+    if segments:
+        sanitized = "::".join(segments)
+        # Ensure it starts with a valid identifier character
+        if sanitized and not sanitized[0].isalpha() and sanitized[0] != "_":
+            sanitized = "_" + sanitized
+
+        # Check if sanitized version is valid
+        if RUST_PATH_PATTERN.match(sanitized):
+            return sanitized, True
+
+    # If sanitization failed, generate a fallback
+    if item_id and item_id.strip():
+        fallback = f"sanitized::{item_id}"
+    elif item_kind and item_kind.strip():
+        fallback = f"{item_kind}::path_{abs(hash(path_stripped))}"
+    else:
+        fallback = f"invalid::path_{abs(hash(path_stripped))}"
+
+    return fallback, True
+
+
 def validate_optional_path(value: Any, field_name: str = "path") -> str | None:
     """
     Validate an optional module path.
