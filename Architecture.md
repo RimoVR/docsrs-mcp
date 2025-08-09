@@ -13,7 +13,8 @@ graph TB
     end
     
     subgraph "Dual-Mode Server"
-        CLI[CLI Entry Point<br/>--mode flag]
+        CLI[CLI Entry Point<br/>--mode, --port, --concurrency flags<br/>Environment variable conversion]
+        CONFIG[Config Module<br/>Environment variable loading<br/>Unified configuration source]
         API[FastAPI Application<br/>startup: asyncio.create_task]
         MCP[MCP Server Module<br/>FastMCP wrapper<br/>startup: PreIngestionWorker]
         RL[Rate Limiter<br/>30 req/s per IP]
@@ -37,8 +38,9 @@ graph TB
     end
     
     AI -->|MCP STDIO/REST POST| CLI
-    CLI -->|--mode rest| RL
-    CLI -->|MCP mode (default)| MCP
+    CLI -->|env vars| CONFIG
+    CONFIG -->|--mode rest| RL
+    CONFIG -->|MCP mode (default)| MCP
     MCP --> API
     MCP -->|startup| PCM
     RL --> API
@@ -135,6 +137,126 @@ graph LR
     CLI --> MCP_SERVER
     MCP_SERVER --> APP
 ```
+
+## Configuration Flow
+
+The docsrs-mcp server implements a unified configuration architecture where CLI arguments are converted to environment variables before module imports, ensuring both REST and MCP modes use identical configuration patterns.
+
+### Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "CLI Entry Point (cli.py)"
+        CLI_ARGS[CLI Arguments<br/>--port, --concurrency, --pre-ingest]
+        ENV_CONV[Environment Variable Conversion<br/>DOCSRS_PORT, DOCSRS_CONCURRENCY<br/>DOCSRS_PRE_INGEST_ENABLED]
+        MODULE_IMPORT[Module Imports<br/>config.py, mcp_server.py]
+    end
+    
+    subgraph "Configuration Module (config.py)"
+        ENV_READ[Environment Variable Reading<br/>os.getenv() with defaults]
+        CONFIG_VARS[Configuration Variables<br/>PORT, CONCURRENCY, PRE_INGEST_ENABLED]
+        VALIDATION[Value Validation & Clamping<br/>Port: 1024-65535<br/>Concurrency: 1-10]
+    end
+    
+    subgraph "Runtime Modes"
+        REST_MODE[REST Mode<br/>FastAPI + uvicorn]
+        MCP_MODE[MCP Mode<br/>FastMCP + STDIO]
+    end
+    
+    subgraph "Background Services"
+        PRE_INGEST[Pre-ingestion Worker<br/>Separate event loop thread]
+        SCHEDULER[Background Scheduler<br/>Popular crates refresh]
+    end
+    
+    CLI_ARGS --> ENV_CONV
+    ENV_CONV --> MODULE_IMPORT
+    MODULE_IMPORT --> ENV_READ
+    ENV_READ --> CONFIG_VARS
+    CONFIG_VARS --> VALIDATION
+    VALIDATION --> REST_MODE
+    VALIDATION --> MCP_MODE
+    REST_MODE --> PRE_INGEST
+    MCP_MODE --> PRE_INGEST
+    PRE_INGEST --> SCHEDULER
+```
+
+### Configuration Synchronization Process
+
+**1. CLI Argument Processing (cli.py:45-63)**
+```python
+# Convert CLI arguments to environment variables
+if args.port is not None:
+    if 1024 <= args.port <= 65535:
+        os.environ["DOCSRS_PORT"] = str(args.port)
+
+if args.concurrency is not None:
+    if 1 <= args.concurrency <= 10:
+        os.environ["DOCSRS_CONCURRENCY"] = str(args.concurrency)
+
+if args.pre_ingest:
+    os.environ["DOCSRS_PRE_INGEST_ENABLED"] = "true"
+```
+
+**2. Module Import Timing (cli.py:64-66)**
+- Environment variables are set **before** importing modules
+- Ensures `config.py` reads the CLI-provided values during import
+- Both REST and MCP mode imports see identical configuration state
+
+**3. Configuration Loading (config.py)**
+- All configuration flows through `os.getenv()` calls with sensible defaults
+- Validation and clamping applied at module level
+- Single source of truth for all configuration values
+
+### Unified Startup Patterns
+
+Both REST and MCP modes use identical background service initialization:
+
+```mermaid
+sequenceDiagram
+    participant CLI as cli.py
+    participant Config as config.py
+    participant App as app.py/mcp_server.py
+    participant PreIngest as PreIngestionWorker
+    participant EventLoop as Background Thread
+    
+    CLI->>CLI: Parse arguments
+    CLI->>CLI: Set environment variables
+    CLI->>Config: Import config module
+    Config->>Config: Load environment variables
+    Config->>Config: Apply validation
+    CLI->>App: Import application module
+    
+    alt REST Mode
+        App->>App: FastAPI startup event
+        App->>PreIngest: asyncio.create_task(start_pre_ingestion())
+    else MCP Mode
+        App->>PreIngest: PreIngestionWorker initialization
+        PreIngest->>PreIngest: asyncio.create_task(self._run())
+    end
+    
+    PreIngest->>EventLoop: Create separate event loop
+    EventLoop->>EventLoop: Background ingestion tasks
+```
+
+### Key Design Principles
+
+**Parameter Synchronization**: CLI arguments are converted to environment variables before any module imports, ensuring consistent configuration state across both server modes.
+
+**Single Configuration Source**: The `config.py` module serves as the single source of truth, with all components reading from environment variables rather than passing parameters directly.
+
+**Validation Consistency**: Configuration validation (port ranges, concurrency limits) is applied once in `config.py` and used by both REST and MCP modes.
+
+**Background Service Isolation**: Pre-ingestion starts in a separate background thread with its own event loop, preventing blocking of the main server initialization in both modes.
+
+### Configuration Variables
+
+| Variable | CLI Argument | Default | Validation | Purpose |
+|----------|--------------|---------|------------|---------|
+| `DOCSRS_PORT` | `--port` | `8000` | 1024-65535 | REST server port |
+| `DOCSRS_CONCURRENCY` | `--concurrency` | `3` | 1-10 | Pre-ingestion workers |
+| `DOCSRS_PRE_INGEST_ENABLED` | `--pre-ingest` | `false` | boolean | Enable background pre-ingestion |
+
+**Note**: All configuration variables support environment variable overrides, allowing deployment flexibility without CLI modifications.
 
 ## Data Flow
 

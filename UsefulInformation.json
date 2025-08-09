@@ -7,11 +7,15 @@
       "description": "Solutions to specific errors encountered during development",
       "entries": [
         {
-          "error": "Pre-ingestion fails in MCP mode with parameter validation errors",
-          "solution": "CLI arguments not properly synchronized with MCP mode configuration. Fix by ensuring environment variables are set correctly in mcp_server.py before invoking pre-ingestion.",
+          "error": "CLI/MCP parameter synchronization issue - MCP mode checking args.pre_ingest directly instead of environment variables",
+          "rootCause": "Inconsistent parameter handling between REST and MCP modes. MCP mode was checking args.pre_ingest directly instead of using environment variables",
+          "solution": "Unified both modes to use config.PRE_INGEST_ENABLED environment variable. Set environment variables before module imports to ensure configuration visibility across different server modes.",
           "context": "MCP mode requires different parameter handling than CLI mode",
+          "lesson": "Always use environment variables for configuration consistency across different server modes",
+          "pattern": "Set environment variables before module imports to ensure configuration visibility",
           "dateEncountered": "2025-08-09",
-          "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/app.py"]
+          "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/app.py"],
+          "codeExample": "os.environ['PRE_INGEST_ENABLED'] = str(args.pre_ingest).lower() # Set before imports"
         },
         {
           "error": "Cold start latency of 1.4s on first embedding generation",

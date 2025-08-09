@@ -1176,13 +1176,21 @@
         "id": "fix-cli-mcp-1",
         "title": "Fix Pre-Ingestion CLI/MCP Mode Synchronization",
         "description": "Diagnose and fix parameter handling issue where CLI arguments aren't properly synchronized with MCP mode configuration in mcp_server.py",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": [],
         "effort": "medium",
         "priority": 1,
         "relatedTasks": [],
-        "roadblocks": []
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-09T12:00:00Z",
+          "implementation": "Removed custom parameter checking in mcp_server.py and aligned MCP mode with REST mode startup pattern using config.PRE_INGEST_ENABLED environment variable consistently",
+          "notes": "Issue was resolved by removing custom parameter validation logic from MCP server initialization and using the standard configuration approach. This ensures CLI arguments and MCP mode are properly synchronized through the shared configuration system.",
+          "technicalDetails": "Eliminated duplicate parameter checking logic, standardized on config.PRE_INGEST_ENABLED environment variable usage across both REST and MCP modes",
+          "bugFix": "Fixed CLI/MCP parameter synchronization by removing custom validation and using consistent config pattern",
+          "impact": "CLI arguments and MCP mode now properly synchronized, eliminating configuration inconsistencies"
+        }
       },
       {
         "id": "warmup-1",

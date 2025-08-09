@@ -80,7 +80,7 @@ def main() -> None:
         if args.port is not None:
             logger.warning("--port flag is ignored in MCP mode")
         # Run MCP server with STDIO transport
-        run_mcp_server(args)
+        run_mcp_server()
     else:
         # Run REST API server
         host = os.getenv("HOST", "0.0.0.0")

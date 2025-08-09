@@ -3,10 +3,13 @@
 import asyncio
 import logging
 import sys
+import threading
 
 from fastmcp import FastMCP
 
+from . import config
 from .app import app
+from .popular_crates import start_pre_ingestion
 
 # Configure logging to stderr to avoid STDIO corruption
 # This is critical for STDIO transport to work properly
@@ -22,38 +25,26 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP.from_fastapi(app)
 
 
-async def start_pre_ingestion_if_enabled(args):
-    """Start pre-ingestion if enabled via CLI flag."""
-    if hasattr(args, "pre_ingest") and args.pre_ingest:
-        from .popular_crates import PopularCratesManager, PreIngestionWorker
-
-        logger.info("Starting background pre-ingestion of popular crates")
-        manager = PopularCratesManager()
-        worker = PreIngestionWorker(manager)
-        await worker.start()
-
-
-def run_mcp_server(args: object | None = None):
+def run_mcp_server():
     """Run the MCP server with STDIO transport."""
     try:
         logger.info("Starting docsrs-mcp server in MCP mode with STDIO transport")
 
-        # Start pre-ingestion in background if enabled
-        if args and hasattr(args, "pre_ingest") and args.pre_ingest:
-            # Create a new event loop for the pre-ingestion task
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # Start pre-ingestion in background if enabled (matching app.py pattern)
+        if config.PRE_INGEST_ENABLED:
+            logger.info("Starting background pre-ingestion of popular crates")
 
-            # Start the pre-ingestion task
-            loop.run_until_complete(start_pre_ingestion_if_enabled(args))
+            # Create separate event loop for pre-ingestion (maintaining existing pattern)
+            def run_pre_ingestion():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(start_pre_ingestion())
+                finally:
+                    loop.close()
 
-            # Keep the loop running in a separate thread while MCP runs
-            import threading
-
-            def run_loop():
-                loop.run_forever()
-
-            thread = threading.Thread(target=run_loop, daemon=True)
+            # Start in background thread (non-blocking)
+            thread = threading.Thread(target=run_pre_ingestion, daemon=True)
             thread.start()
 
         # Run with default STDIO transport for Claude Desktop
