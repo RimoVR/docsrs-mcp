@@ -100,6 +100,149 @@ async def get_db_path(crate_name: str, version: str) -> Path:
     return db_dir / f"{safe_version}.db"
 
 
+async def migrate_database_duplicates(db_path: Path) -> None:
+    """Clean duplicate embeddings and add UNIQUE constraint if needed."""
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Check if UNIQUE constraint already exists
+        cursor = await db.execute("""
+            SELECT sql FROM sqlite_master 
+            WHERE type='table' AND name='embeddings' AND sql LIKE '%UNIQUE%'
+        """)
+        if await cursor.fetchone():
+            # Already has UNIQUE constraint
+            return
+
+        logger.info("Migrating database to add UNIQUE constraint on embeddings")
+
+        # Step 1: Clean existing duplicates (keep the one with highest rowid)
+        await db.execute("""
+            DELETE FROM embeddings 
+            WHERE rowid NOT IN (
+                SELECT MAX(rowid) 
+                FROM embeddings 
+                GROUP BY item_path
+            )
+        """)
+
+        duplicates_removed = db.total_changes
+        if duplicates_removed > 0:
+            logger.info(f"Removed {duplicates_removed} duplicate embeddings")
+
+        # Step 2: We'll rebuild vec_embeddings after migration
+
+        # Step 3: Create new table with UNIQUE constraint and AUTOINCREMENT
+        await db.execute("""
+            CREATE TABLE embeddings_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_path TEXT NOT NULL,
+                header TEXT NOT NULL,
+                content TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                item_type TEXT,
+                signature TEXT,
+                parent_id TEXT,
+                examples TEXT,
+                visibility TEXT DEFAULT 'public',
+                deprecated BOOLEAN DEFAULT 0,
+                UNIQUE(item_path)
+            )
+        """)
+
+        # Step 4: Copy data to new table
+        await db.execute("""
+            INSERT INTO embeddings_new 
+            SELECT * FROM embeddings
+        """)
+
+        # Step 5: Drop old table and rename new one
+        await db.execute("DROP TABLE embeddings")
+        await db.execute("ALTER TABLE embeddings_new RENAME TO embeddings")
+
+        # Step 6: Recreate indexes
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_filter_composite
+            ON embeddings(item_type, item_path)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_filter_combo
+            ON embeddings(item_type, visibility, deprecated)
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_non_deprecated
+            ON embeddings(item_type, item_path)
+            WHERE deprecated = 0
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_public_functions
+            ON embeddings(item_path, content)
+            WHERE visibility = 'public' AND item_type = 'function'
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_has_examples
+            ON embeddings(item_type, item_path)
+            WHERE examples IS NOT NULL
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crate_prefix
+            ON embeddings(item_path, item_type)
+            WHERE item_path GLOB '*::*'
+        """)
+
+        # Step 7: Rebuild vec_embeddings table to sync with cleaned embeddings
+        logger.info("Rebuilding vec_embeddings table to sync with cleaned data")
+
+        # Load sqlite-vec extension
+        await db.enable_load_extension(True)
+        await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
+        await db.enable_load_extension(False)
+
+        # Drop and recreate vec_embeddings table
+        await db.execute("DROP TABLE IF EXISTS vec_embeddings")
+        await db.execute(f"""
+            CREATE VIRTUAL TABLE vec_embeddings USING vec0(
+                embedding float[{EMBEDDING_DIM}]
+            )
+        """)
+
+        # Re-populate vec_embeddings with cleaned data
+        cursor = await db.execute("""
+            SELECT id, embedding FROM embeddings ORDER BY id
+        """)
+
+        vec_data = []
+        async for row in cursor:
+            rowid, embedding_blob = row
+            vec_data.append((rowid, embedding_blob))
+
+            # Process in batches of 100 for efficiency
+            if len(vec_data) >= 100:
+                await db.executemany(
+                    "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
+                    vec_data,
+                )
+                vec_data = []
+
+        # Insert remaining data
+        if vec_data:
+            await db.executemany(
+                "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)", vec_data
+            )
+
+        vec_count = await db.execute("SELECT COUNT(*) FROM vec_embeddings")
+        vec_total = (await vec_count.fetchone())[0]
+        logger.info(f"Rebuilt vec_embeddings with {vec_total} entries")
+
+        await db.commit()
+        logger.info(
+            "Successfully migrated database with UNIQUE constraint and synced vector index"
+        )
+
+
 async def init_database(db_path: Path) -> None:
     """Initialize database with required tables and extensions."""
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
@@ -153,7 +296,7 @@ async def init_database(db_path: Path) -> None:
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS embeddings (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 item_path TEXT NOT NULL,
                 header TEXT NOT NULL,
                 content TEXT NOT NULL,
@@ -163,16 +306,21 @@ async def init_database(db_path: Path) -> None:
                 parent_id TEXT,
                 examples TEXT,
                 visibility TEXT DEFAULT 'public',
-                deprecated BOOLEAN DEFAULT 0
+                deprecated BOOLEAN DEFAULT 0,
+                UNIQUE(item_path)
             )
         """)
 
-        # Create vector index
+        # Create vector index if it doesn't exist
         await db.execute(f"""
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
                 embedding float[{EMBEDDING_DIM}]
             )
         """)
+
+        # Note: Triggers cannot be used with vec0 virtual tables because the sqlite-vec
+        # extension is not available in the trigger execution context. We use manual
+        # synchronization in _store_batch instead.
 
         # Create indexes for module hierarchy
         await db.execute("""
@@ -255,9 +403,10 @@ async def init_database(db_path: Path) -> None:
             )
         """)
 
-        # Create virtual table for example vector search
+        # Create virtual table for example vector search - always recreate for fresh database
+        await db.execute("DROP TABLE IF EXISTS vec_example_embeddings")
         await db.execute(f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS vec_example_embeddings USING vec0(
+            CREATE VIRTUAL TABLE vec_example_embeddings USING vec0(
                 example_embedding float[{EMBEDDING_DIM}]
             )
         """)

@@ -123,7 +123,18 @@
                     "claudeCode": "Limited support - may have issues with complex anyOf schemas",
                     "mcpClients": "Ecosystem in transition with varying JSON Schema feature support"
                   },
-                  "recommendation": "Use simple anyOf patterns for maximum compatibility across MCP client implementations"
+                  "recommendation": "Use simple anyOf patterns for maximum compatibility across MCP client implementations",
+                  "criticalRequirement": {
+                    "finding": "MCP servers MUST use anyOf patterns for all numeric and boolean parameters",
+                    "reason": "MCP clients perform string conversion during protocol communication",
+                    "implementation": "Use Union[str, int] and Union[str, bool] in Pydantic models",
+                    "consequence": "Parameters without anyOf patterns fail validation in MCP clients",
+                    "sources": [
+                      "MCP protocol specification",
+                      "Claude Code MCP client behavior analysis",
+                      "FastMCP anyOf generation patterns"
+                    ]
+                  }
                 },
                 "jsonSchemaValidationTiming": {
                   "description": "FastMCP performs JSON Schema validation before Pydantic field validators",
@@ -350,6 +361,31 @@
         "versionConstraint": "Version 0.7.1 provides significant performance improvements",
         "model": "BAAI/bge-small-en-v1.5",
         "dimensions": 384,
+        "modelComparison": {
+          "allMiniLML6v2": {
+            "model": "all-MiniLM-L6-v2",
+            "dimensions": 384,
+            "memoryEfficiency": "~85% less memory usage than larger models",
+            "performance": "Maintains good semantic similarity performance",
+            "tradeoff": "Slight accuracy reduction for significant memory savings",
+            "recommendation": "Ideal for memory-constrained environments",
+            "useCase": "Production deployments with limited memory resources",
+            "sources": [
+              "HuggingFace model card",
+              "Sentence-transformers benchmarks",
+              "Production memory profiling comparison"
+            ]
+          },
+          "bgeSmallEnV15": {
+            "model": "BAAI/bge-small-en-v1.5",
+            "dimensions": 384,
+            "mtebScore": "62.17 MTEB score",
+            "memoryUsage": "Higher memory usage than all-MiniLM-L6-v2",
+            "performance": "Better retrieval quality",
+            "tradeoff": "Better accuracy at cost of higher memory usage",
+            "recommendation": "Use when memory is not constrained and quality is priority"
+          }
+        },
         "optimization": "ONNX for CPU inference",
         "performance": "3-4x faster than PyTorch",
         "modelCharacteristics": {
@@ -383,10 +419,136 @@
           "solution": "Pin onnxruntime <1.20 OR use FastEmbed <0.7.0",
           "recommendation": "Use FastEmbed <0.7.0 for better stability"
         },
+        "memoryLeaks": {
+          "version": "FastEmbed v0.7.1",
+          "issue": "Documented memory leaks in FastEmbed v0.7.1",
+          "severity": "Memory usage grows from 1.5GB to 16GB during long-running processes",
+          "impact": "Causes out-of-memory conditions in production environments",
+          "workaround": "Process in smaller batches with periodic restart or use earlier versions",
+          "monitoring": "Monitor RSS memory growth during embedding operations",
+          "sources": [
+            "FastEmbed GitHub issues",
+            "Production deployment observations"
+          ]
+        },
+        "onnxRuntimeMemoryControl": {
+          "purpose": "Control ONNX Runtime memory allocation behavior",
+          "environmentVariables": {
+            "ORT_DISABLE_CPU_ARENA_ALLOCATOR": {
+              "value": "1",
+              "effect": "Disables CPU arena allocator to reduce memory pooling",
+              "benefit": "Prevents memory accumulation in long-running processes"
+            },
+            "ORT_DISABLE_MEMORY_PATTERN": {
+              "value": "1",
+              "effect": "Disables memory pattern optimization",
+              "benefit": "Reduces memory footprint at slight performance cost"
+            }
+          },
+          "usage": "Set environment variables before importing ONNX Runtime or FastEmbed",
+          "tradeoff": "Memory efficiency vs slight performance reduction",
+          "recommendation": "Use in production to prevent memory leaks",
+          "sources": [
+            "ONNX Runtime documentation",
+            "FastEmbed memory optimization guides",
+            "Production memory profiling results"
+          ]
+        },
         "requirements": [
           "libgomp1",
           "libatlas-base-dev",
           "liblapack-dev"
+        ]
+      },
+      "sqliteVectorSynchronization": {
+        "overview": "Research findings on synchronizing SQLite vec0 virtual tables with regular tables",
+        "librariesDependencies": {
+          "sqliteVec": {
+            "name": "sqlite-vec",
+            "status": "Pre-v1 vector extension for SQLite",
+            "description": "SQLite extension providing vector search capabilities via virtual tables",
+            "limitation": "Pre-v1 status means API may change"
+          },
+          "aiosqlite": {
+            "name": "aiosqlite", 
+            "description": "Async SQLite interface for Python",
+            "usage": "Enables async database operations with SQLite"
+          },
+          "embeddingModel": {
+            "model": "BAAI/bge-small-en-v1.5",
+            "dimensions": 384,
+            "description": "Embedding model used for vector generation"
+          }
+        },
+        "keyFindings": {
+          "triggerLimitations": {
+            "issue": "SQLite triggers fundamentally cannot work with vec0 virtual tables",
+            "cause": "sqlite-vec extension isn't loaded in trigger execution context",
+            "impact": "Automatic synchronization via triggers is impossible",
+            "solution": "Must use manual synchronization patterns"
+          },
+          "virtualTableConstraints": {
+            "rowidManagement": "vec0 virtual tables require explicit rowid management",
+            "updateLimitation": "vec0 tables don't support UPDATE operations",
+            "insertBehavior": "Only INSERT and DELETE operations are supported"
+          },
+          "insertOrReplaceIssues": {
+            "problem": "INSERT OR REPLACE causes DELETE + INSERT internally",
+            "consequence": "Breaks rowid synchronization between tables",
+            "manifestation": "Can cause rowid conflicts and data inconsistencies"
+          },
+          "autoincrementSolution": {
+            "technique": "AUTOINCREMENT prevents rowid reuse",
+            "benefit": "Solves synchronization conflicts by ensuring unique rowids",
+            "implementation": "Add AUTOINCREMENT to primary key definitions when synchronizing with virtual tables"
+          }
+        },
+        "bestPractices": {
+          "synchronizationPattern": {
+            "approach": "Use manual synchronization instead of triggers",
+            "implementation": "Implement DELETE + INSERT pattern instead of INSERT OR REPLACE",
+            "rationale": "Provides explicit control over synchronization process"
+          },
+          "deduplicationStrategy": {
+            "technique": "Hash-based deduplication before insertion",
+            "purpose": "Handle duplicate data from source systems",
+            "pattern": "Production sqlite-vec implementations use this approach",
+            "benefit": "Prevents duplicate entries and synchronization conflicts"
+          },
+          "batchProcessing": {
+            "parameterLimit": "Limit batch operations to <999 parameters",
+            "reason": "SQLite parameter limits prevent larger batches",
+            "recommendation": "Process in sub-batches to avoid parameter limit issues",
+            "implementation": "Split large operations into multiple smaller transactions"
+          },
+          "primaryKeyDesign": {
+            "recommendation": "Use AUTOINCREMENT on primary keys when synchronizing with virtual tables",
+            "benefit": "Prevents rowid reuse conflicts during synchronization",
+            "criticality": "Essential for maintaining data integrity across table types"
+          }
+        },
+        "implementationPatterns": {
+          "manualSynchronization": {
+            "description": "Explicit synchronization logic in application code",
+            "advantage": "Full control over synchronization process",
+            "requirement": "Must handle all edge cases programmatically"
+          },
+          "deleteInsertPattern": {
+            "description": "Use DELETE followed by INSERT instead of INSERT OR REPLACE",
+            "benefit": "Avoids internal SQLite rowid conflicts",
+            "implementation": "Explicitly delete existing records before inserting new ones"
+          },
+          "hashBasedDeduplication": {
+            "description": "Pre-process data to remove duplicates before database insertion",
+            "technique": "Hash content to identify duplicates before database operations",
+            "performance": "More efficient than database-level deduplication"
+          }
+        },
+        "sources": [
+          "sqlite-vec documentation and GitHub issues",
+          "SQLite virtual table internals documentation", 
+          "Production sqlite-vec implementation analysis",
+          "SQLite trigger execution context limitations research"
         ]
       },
       "implementation": {
@@ -2397,6 +2559,33 @@
         "sqliteLimit": "SQLite limit 999 params, batch accordingly",
         "strategy": "Split large operations into batches under parameter limit"
       },
+      "sqliteConstraints": {
+        "uniqueConstraintAddition": {
+          "limitation": "SQLite cannot add UNIQUE constraints to existing tables with ALTER TABLE",
+          "solution": "Requires complete table rebuild using 12-step procedure",
+          "procedure": [
+            "1. Create new table with desired schema including UNIQUE constraints",
+            "2. Copy data from old table to new table",
+            "3. Drop old table",
+            "4. Rename new table to original name",
+            "5. Recreate indexes",
+            "6. Recreate triggers",
+            "7. Update foreign key references",
+            "8. Update views",
+            "9. Vacuum database",
+            "10. Analyze statistics",
+            "11. Test data integrity",
+            "12. Update application schema version"
+          ],
+          "complexity": "High - requires careful planning and testing",
+          "risk": "Data loss if procedure fails midway",
+          "recommendation": "Design schema with all constraints from the beginning",
+          "sources": [
+            "SQLite ALTER TABLE documentation",
+            "SQLite schema modification best practices"
+          ]
+        }
+      },
       "monitoring": {
         "tool": "psutil for memory monitoring",
         "thresholds": {
@@ -2944,11 +3133,15 @@
       "Use Pydantic field validators with mode='before' to handle FastMCP string-to-numeric type coercion issues",
       "Design MCP manifests with anyOf patterns for flexible parameter types to accommodate client inconsistencies",
       "Use Union types in Pydantic models (e.g., Union[str, int]) to support flexible parameter acceptance",
+      "MANDATORY: MCP servers MUST use anyOf patterns for all numeric and boolean parameters due to string conversion",
       "Implement defensive parameter validation that handles both string and native type inputs",
       "MANDATORY: Use sqlite-vec v0.1.0+ (sqlite-vss is deprecated and unmaintained)",
       "CRITICAL: sqlite-vec handles 1M+ vectors efficiently with <100ms queries",
       "CRITICAL: Pin aiohttp to 3.9.5 to avoid memory leaks",
+      "CRITICAL: FastEmbed v0.7.1 has documented memory leaks growing from 1.5GB to 16GB - monitor RSS memory",
+      "Use ORT_DISABLE_CPU_ARENA_ALLOCATOR=1 and ORT_DISABLE_MEMORY_PATTERN=1 to control ONNX Runtime memory",
       "Use FastEmbed with ONNX Runtime - 2-10x faster than HuggingFace",
+      "Consider all-MiniLM-L6-v2 model for ~85% memory reduction vs larger models while maintaining good performance",
       "CRITICAL: RapidFuzz 10-50x faster than FuzzyWuzzy - use for all fuzzy matching",
       "Implement aiosqlite for async database operations",
       "Use MATCH operator syntax for sqlite-vec queries",
@@ -2992,6 +3185,7 @@
       "Enable mask_error_details=True in production for security",
       "Maintain allowlist of vetted tool schemas for production security",
       "Use ijson for memory-efficient parsing of large JSON files",
+      "CRITICAL: Adding UNIQUE constraints to existing SQLite tables requires 12-step rebuild procedure - design schema correctly from start",
       "Implement per-crate locking to prevent duplicate ingestion",
       "Use tenacity for robust HTTP request retry mechanisms",
       "Set reasonable size limits for downloads and decompression",

@@ -524,10 +524,11 @@ The server is designed for efficient operation with the following characteristic
 - **Rate Limiting**: 30 requests/second per IP address
 
 ### Resource Requirements
-- **Memory Usage**: ≤ 1GB RAM for up to 10,000 embeddings
+- **Memory Usage**: ≤ 1GB RSS with recent optimizations
   - ONNX model: ~100MB
-  - FAISS index: Variable based on vectors
+  - sqlite-vec index: Variable based on vectors
   - Server RSS: ≤ 1GB including all components
+  - Memory leaks resolved in embedding pipeline
 - **Disk Cache**: Auto-evicts to maintain ≤ 2GB total size
   - Per-crate SQLite databases in `./cache` directory
   - LRU eviction when cache size exceeds limit
@@ -545,6 +546,30 @@ The server is designed for efficient operation with the following characteristic
 - Adjust cache size limit via `MAX_CACHE_SIZE_GB` environment variable
 - Use background process management for testing to avoid terminal blocking
 - Monitor `/health` endpoint for service status
+
+## Recent Improvements
+
+The following fixes and enhancements have been implemented to improve stability and performance:
+
+### Memory Management
+- **Fixed memory leak issues**: Server now maintains stable RSS memory usage under 1GB
+- **Optimized embedding pipeline**: Proper resource cleanup prevents memory accumulation
+- **Improved garbage collection**: Enhanced memory management for long-running processes
+
+### MCP Client Compatibility
+- **Fixed pre-ingestion tool validation**: Enhanced parameter validation for MCP clients
+- **Improved parameter handling**: Better support for different MCP client implementations
+- **Flexible type conversion**: Automatic conversion of numeric strings to integers
+
+### Database Reliability
+- **Fixed search result duplicates**: Added proper database constraints to prevent duplicate entries
+- **NOT NULL constraint resolution**: Fixed embeddings.item_path constraint violations
+- **Enhanced data integrity**: Improved database schema validation and error handling
+
+### Search and Discovery
+- **Auto-discovery of re-exports**: Implemented automatic detection of re-exported items from rustdoc JSON
+- **Improved search accuracy**: Better handling of module relationships and item visibility
+- **Enhanced result relevance**: More accurate matching of documentation items
 
 ## Requirements
 

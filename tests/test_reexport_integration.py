@@ -83,7 +83,7 @@ async def test_tokio_reexport_discovery():
 
 @pytest.mark.asyncio
 async def test_small_crate_with_reexports():
-    """Integration test with a smaller crate that might have simpler re-exports."""""
+    """Integration test with a smaller crate that might have simpler re-exports.""" ""
     crate_name = "log"
     version = "0.4.20"
 

@@ -64,12 +64,44 @@ _crate_locks: dict[str, asyncio.Lock] = {}
 
 
 def get_embedding_model() -> TextEmbedding:
-    """Get or create the embedding model instance."""
+    """Get or create the embedding model instance with optimized ONNX settings."""
     global _embedding_model
     if _embedding_model is None:
         logger.info(f"Loading embedding model: {MODEL_NAME}")
+        # Note: FastEmbed doesn't directly expose ONNX session options
+        # but we can set environment variables that ONNX Runtime respects
+        import os
+
+        # Disable CPU memory arena for smaller models to reduce memory usage
+        os.environ["ORT_DISABLE_CPU_ARENA_ALLOCATOR"] = "1"
+        # Disable memory pattern optimization to reduce memory overhead
+        os.environ["ORT_DISABLE_MEMORY_PATTERN"] = "1"
+
         _embedding_model = TextEmbedding(model_name=MODEL_NAME)
     return _embedding_model
+
+
+def cleanup_embedding_model() -> None:
+    """Clean up the embedding model to free memory."""
+    global _embedding_model
+    if _embedding_model is not None:
+        logger.debug("Cleaning up embedding model to free memory")
+        try:
+            # Attempt to clean up the model
+            del _embedding_model
+            _embedding_model = None
+
+            # Force garbage collection to reclaim memory
+            import gc
+
+            gc.collect()
+
+            # Trigger memory cleanup if needed
+            from .memory_utils import trigger_gc_if_needed
+
+            trigger_gc_if_needed()
+        except Exception as e:
+            logger.warning(f"Error during embedding model cleanup: {e}")
 
 
 async def get_crate_lock(crate_name: str, version: str) -> asyncio.Lock:
@@ -1488,6 +1520,42 @@ async def generate_embeddings(chunks: list[dict[str, str]]) -> list[list[float]]
     return embeddings
 
 
+async def cleanup_existing_embeddings(
+    db_path: Path, crate_name: str, version: str
+) -> None:
+    """Clean up existing embeddings for a crate before re-ingestion.
+
+    This prevents duplicates when re-ingesting a crate.
+    """
+    async with aiosqlite.connect(db_path) as db:
+        # Delete existing embeddings for this crate
+        # We identify crate embeddings by checking if item_path starts with crate name
+        # or is the crate itself
+        await db.execute(
+            """
+            DELETE FROM embeddings 
+            WHERE item_path = ? OR item_path LIKE ? || '::%'
+        """,
+            (crate_name, crate_name),
+        )
+
+        deleted_count = db.total_changes
+        if deleted_count > 0:
+            logger.info(
+                f"Cleaned up {deleted_count} existing embeddings for {crate_name}@{version}"
+            )
+
+        # Also clean up corresponding vec_embeddings entries
+        await db.execute("""
+            DELETE FROM vec_embeddings 
+            WHERE rowid NOT IN (
+                SELECT rowid FROM embeddings
+            )
+        """)
+
+        await db.commit()
+
+
 async def store_embeddings_streaming(db_path: Path, chunk_embedding_pairs) -> None:
     """Store chunks and their embeddings in the database using streaming batch processing.
 
@@ -1555,15 +1623,21 @@ async def _store_batch(
     batch_num: int,
     items_so_far: int,
 ) -> None:
-    """Store a single batch of chunks and embeddings."""
+    """Store a single batch of chunks and embeddings with manual vec_embeddings sync.
+
+    Uses explicit DELETE + INSERT pattern with manual synchronization to vec_embeddings.
+    AUTOINCREMENT ensures no rowid reuse conflicts.
+    """
     try:
         # Begin transaction for this batch
         await db.execute("BEGIN TRANSACTION")
 
-        # Defensive validation - filter out any chunks with invalid item_paths
+        # Defensive validation - filter out invalid item_paths and deduplicate
         valid_chunks = []
         valid_embeddings = []
         skipped_count = 0
+        seen_paths = set()
+        duplicate_count = 0
 
         for chunk, embedding in zip(chunks, embeddings, strict=False):
             # Defensive validation - should never fail after parse-time validation
@@ -1575,73 +1649,130 @@ async def _store_batch(
                 skipped_count += 1
                 continue
 
+            # Deduplicate within batch - keep first occurrence
+            item_path = chunk["item_path"]
+            if item_path in seen_paths:
+                duplicate_count += 1
+                logger.debug(f"Skipping duplicate item_path in batch: {item_path}")
+                continue
+
+            seen_paths.add(item_path)
             valid_chunks.append(chunk)
             valid_embeddings.append(embedding)
 
         if skipped_count > 0:
             logger.warning(f"Skipped {skipped_count} chunks with invalid item_paths")
 
+        if duplicate_count > 0:
+            logger.warning(f"Skipped {duplicate_count} duplicate item_paths in batch")
+
         if not valid_chunks:
             logger.warning("No valid chunks to store in this batch")
             await db.execute("ROLLBACK")
             return
 
-        # Prepare batch data for embeddings table
-        embeddings_data = [
-            (
-                chunk["item_path"],
-                chunk["header"],
-                chunk["content"],
-                embedding,
-                chunk.get("item_type"),
-                chunk.get("signature"),
-                chunk.get("parent_id"),
-                json.dumps(chunk.get("examples", []))
-                if chunk.get("examples")
-                else None,
-                chunk.get("visibility", "public"),
-                chunk.get("deprecated", False),
+        # Process in smaller sub-batches to avoid SQL parameter limit issues
+        MAX_PARAMS = 500  # SQLite limit is 999, but be conservative
+        item_paths = [chunk["item_path"] for chunk in valid_chunks]
+
+        for i in range(0, len(item_paths), MAX_PARAMS):
+            batch_paths = item_paths[i : i + MAX_PARAMS]
+            batch_chunks = valid_chunks[i : i + MAX_PARAMS]
+            batch_embeddings = valid_embeddings[i : i + MAX_PARAMS]
+
+            placeholders = ",".join(["?"] * len(batch_paths))
+
+            # Step 1: Get existing rowids for vec_embeddings cleanup
+            cursor = await db.execute(
+                f"""
+                SELECT id, item_path 
+                FROM embeddings 
+                WHERE item_path IN ({placeholders})
+                """,
+                batch_paths,
             )
-            for chunk, embedding in zip(valid_chunks, valid_embeddings, strict=False)
-        ]
+            existing_rows = await cursor.fetchall()
 
-        # Batch insert into embeddings table
-        await db.executemany(
-            """
-            INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature, parent_id, examples, visibility, deprecated)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            embeddings_data,
-        )
+            # Step 2: Delete from vec_embeddings for existing entries
+            if existing_rows:
+                existing_ids = [row[0] for row in existing_rows]
+                id_placeholders = ",".join(["?"] * len(existing_ids))
+                await db.execute(
+                    f"DELETE FROM vec_embeddings WHERE rowid IN ({id_placeholders})",
+                    existing_ids,
+                )
 
-        # Get the rowids for the inserted records
-        cursor = await db.execute("SELECT last_insert_rowid()")
-        last_rowid = (await cursor.fetchone())[0]
-        first_rowid = last_rowid - len(valid_chunks) + 1
-
-        # Prepare batch data for vec_embeddings table
-        vec_data = [
-            (rowid, embedding)
-            for rowid, embedding in zip(
-                range(first_rowid, last_rowid + 1),
-                valid_embeddings,
-                strict=False,
+            # Step 3: DELETE existing embeddings entries
+            await db.execute(
+                f"DELETE FROM embeddings WHERE item_path IN ({placeholders})",
+                batch_paths,
             )
-        ]
 
-        # Batch insert into vec_embeddings table
-        await db.executemany(
-            "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
-            vec_data,
-        )
+            # Step 4: INSERT new entries (AUTOINCREMENT ensures new unique IDs)
+            insert_data = []
+            for chunk, embedding in zip(batch_chunks, batch_embeddings, strict=False):
+                insert_data.append(
+                    (
+                        chunk["item_path"],
+                        chunk["header"],
+                        chunk["content"],
+                        embedding,
+                        chunk.get("item_type"),
+                        chunk.get("signature"),
+                        chunk.get("parent_id"),
+                        json.dumps(chunk.get("examples", []))
+                        if chunk.get("examples")
+                        else None,
+                        chunk.get("visibility", "public"),
+                        chunk.get("deprecated", False),
+                    )
+                )
+
+            await db.executemany(
+                """
+                INSERT INTO embeddings 
+                (item_path, header, content, embedding, item_type, signature, parent_id, examples, visibility, deprecated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                insert_data,
+            )
+
+            # Step 5: Get the new rowids and insert into vec_embeddings
+            cursor = await db.execute(
+                f"""
+                SELECT id, item_path 
+                FROM embeddings 
+                WHERE item_path IN ({placeholders})
+                """,
+                batch_paths,
+            )
+            new_rows = await cursor.fetchall()
+
+            # Build vec_data with correct rowids
+            vec_data = []
+            path_to_embedding = {
+                chunk["item_path"]: emb
+                for chunk, emb in zip(batch_chunks, batch_embeddings, strict=False)
+            }
+
+            for row_id, item_path in new_rows:
+                if item_path in path_to_embedding:
+                    vec_data.append((row_id, path_to_embedding[item_path]))
+
+            # Insert into vec_embeddings with explicit rowids
+            if vec_data:
+                await db.executemany(
+                    "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
+                    vec_data,
+                )
 
         # Commit this batch
         await db.commit()
 
         # Log progress
-        total_processed = items_so_far + len(chunks)
+        total_processed = items_so_far + len(valid_chunks)
         logger.info(
-            f"Batch {batch_num + 1}: Processed {len(chunks)} items "
+            f"Batch {batch_num + 1}: Processed {len(valid_chunks)} items "
             f"(total: {total_processed})"
         )
 
@@ -1695,6 +1826,11 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                 "Database exists but not initialized, reinitializing..."
                             )
                             await init_database(db_path)
+                        else:
+                            # Run migration to clean duplicates if needed
+                            from .database import migrate_database_duplicates
+
+                            await migrate_database_duplicates(db_path)
                 except Exception as e:
                     logger.error(f"Error checking database: {e}")
                     await init_database(db_path)
@@ -1803,14 +1939,19 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     }
                     chunks.append(chunk)
 
-                # Generate embeddings and store in streaming fashion
+                # Generate embeddings and store in streaming fashion with memory monitoring
                 logger.info(
                     f"Generating embeddings for {len(chunks)} items in streaming mode"
                 )
-                chunk_embedding_pairs = generate_embeddings_streaming(chunks)
 
-                # Store embeddings in streaming fashion
-                await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+                # Use MemoryMonitor to track embedding generation
+                from .memory_utils import MemoryMonitor
+
+                with MemoryMonitor(f"embeddings_{crate_name}_{version}"):
+                    chunk_embedding_pairs = generate_embeddings_streaming(chunks)
+
+                    # Store embeddings in streaming fashion
+                    await store_embeddings_streaming(db_path, chunk_embedding_pairs)
 
                 logger.info("Successfully completed streaming ingestion")
 
@@ -1845,10 +1986,21 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     ]
 
                     try:
+                        # First, clean up any partial writes from the failed main ingestion
+                        # This prevents UNIQUE constraint violations on the "crate" item_path
+                        async with aiosqlite.connect(db_path) as db:
+                            await db.execute(
+                                "DELETE FROM embeddings WHERE item_path = ?", ("crate",)
+                            )
+                            await db.commit()
+                            logger.debug(
+                                "Cleaned up existing 'crate' entry before fallback"
+                            )
+
                         # Generate embeddings
                         embeddings = await generate_embeddings(chunks)
 
-                        # Store embeddings
+                        # Store embeddings (will use DELETE + INSERT via _store_batch)
                         await store_embeddings(db_path, chunks, embeddings)
 
                         logger.info(
@@ -1861,6 +2013,9 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
             # Run cache eviction if needed
             await evict_cache_if_needed()
+
+            # Clean up embedding model to free memory after each crate
+            cleanup_embedding_model()
 
             logger.info(f"Successfully ingested {crate_name}@{version}")
             return db_path

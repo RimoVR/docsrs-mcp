@@ -67,6 +67,69 @@
             "Validate data before database insertion to prevent constraint errors",
             "Fallback path generation ensures all items have valid identifiers"
           ]
+        },
+        {
+          "error": "FastEmbed TextEmbedding global singleton memory leak",
+          "solution": "Configure ONNX Runtime with sess_options.enable_cpu_mem_arena = False and implement explicit model lifecycle management. Use del session, gc.collect() for cleanup. Consider switching to lighter models like all-MiniLM-L6-v2.",
+          "context": "Memory grows from 176MB to 1661MB after processing 3 crates due to ONNX Runtime sessions being retained indefinitely in global singleton",
+          "rootCause": "FastEmbed v0.7.1 TextEmbedding global singleton retains ONNX Runtime sessions indefinitely without proper cleanup",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/ingest.py"],
+          "codeExample": "# Configure ONNX Runtime environment variables:\nos.environ['ONNXRUNTIME_ENABLE_CPU_MEM_ARENA'] = '0'\nos.environ['ORT_DISABLE_ALL_OPTIMIZATION'] = '1'\n\n# Add cleanup function:\ndef cleanup_embedding_model():\n    global _embedding_model\n    if _embedding_model is not None:\n        del _embedding_model\n        _embedding_model = None\n        import gc\n        gc.collect()",
+          "prevention": "Implement proper model lifecycle management and configure ONNX Runtime memory settings"
+        },
+        {
+          "error": "MCP tool parameter validation failure - Input validation error: '50' is not valid under any of the given schemas",
+          "solution": "Add anyOf patterns to MCP manifest schema like all other tools. Use anyOf: [{'type': 'integer'}, {'type': 'string'}] for numeric parameters and anyOf: [{'type': 'boolean'}, {'type': 'string'}] for boolean parameters to handle string parameters from MCP clients.",
+          "context": "MCP clients often send numeric and boolean parameters as strings, causing validation failures when schemas are too restrictive. All MCP tools need anyOf patterns for parameter flexibility.",
+          "rootCause": "Missing anyOf schema patterns in MCP manifest prevents JSON Schema validation from passing when MCP clients send string parameters",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "# In get_mcp_manifest() for all numeric/boolean parameters:\n'k': {\n    'type': 'integer',\n    'description': 'Number of results to return',\n    'anyOf': [{'type': 'integer'}, {'type': 'string'}]\n},\n'enabled': {\n    'type': 'boolean',\n    'description': 'Enable feature flag',\n    'anyOf': [{'type': 'boolean'}, {'type': 'string'}]\n}",
+          "prevention": "Ensure all MCP tools with numeric or boolean parameters have anyOf patterns in manifest schema to handle string conversion"
+        },
+        {
+          "error": "Search result duplicates from re-ingestion - Multiple entries with same item_path in results",
+          "solution": "Add UNIQUE constraint/index on item_path column in embeddings table and use INSERT OR REPLACE pattern to handle duplicates gracefully.",
+          "context": "embeddings table lacks UNIQUE constraint on item_path, causing duplicate entries when crates are re-ingested",
+          "rootCause": "Database schema allows duplicate item_path entries without constraints",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"],
+          "codeExample": "# Add UNIQUE constraint:\nCREATE UNIQUE INDEX idx_embeddings_item_path ON embeddings(item_path);\n\n# Use INSERT OR REPLACE pattern:\nINSERT OR REPLACE INTO embeddings (item_path, content, embeddings_vec, ...)\nVALUES (?, ?, ?, ...);\n\n# Alternative UPSERT pattern:\nINSERT INTO embeddings (item_path, content, embeddings_vec, ...)\nVALUES (?, ?, ?, ...)\nON CONFLICT(item_path) DO UPDATE SET\n    content = excluded.content,\n    embeddings_vec = excluded.embeddings_vec;",
+          "prevention": "Design database schema with appropriate UNIQUE constraints from the beginning and use INSERT OR REPLACE for idempotent operations"
+        },
+        {
+          "error": "UNIQUE constraint failed: embeddings.item_path",
+          "solution": "Added in-batch deduplication using a seen_paths set to skip duplicates during ingestion before database insertion",
+          "context": "Duplicate item_paths in rustdoc JSON data (up to 50% duplicates) caused constraint violations during batch insertion",
+          "rootCause": "rustdoc JSON contains duplicate items with identical paths, causing UNIQUE constraint failures when inserting into embeddings table",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"],
+          "codeExample": "seen_paths = set()\nfor item in items:\n    if item['path'] in seen_paths:\n        continue  # Skip duplicate\n    seen_paths.add(item['path'])\n    # Process item",
+          "prevention": "Always deduplicate data before database insertion when UNIQUE constraints exist",
+          "performanceImpact": "Deduplication reduces ingestion from 2806 to 1231 unique items for serde (~50% reduction)"
+        },
+        {
+          "error": "no such module: vec0",
+          "solution": "Removed triggers, implemented manual synchronization in _store_batch function instead of relying on SQLite triggers",
+          "context": "SQLite triggers execute in a context where sqlite-vec extension isn't loaded, causing 'no such module: vec0' errors",
+          "rootCause": "SQLite triggers execute in a limited context where extensions like sqlite-vec aren't available, preventing vec0 module access",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/ingest.py"],
+          "codeExample": "# Instead of triggers, use manual sync:\nasync def _store_batch(self, items):\n    # Insert into embeddings\n    await cursor.executemany('INSERT INTO embeddings ...', items)\n    # Manual sync to vec_embeddings\n    await cursor.execute('INSERT INTO vec_embeddings SELECT rowid, embeddings_vec FROM embeddings WHERE rowid NOT IN (SELECT rowid FROM vec_embeddings)')",
+          "prevention": "Avoid using database triggers with extension-dependent operations; implement synchronization in application code instead",
+          "lessonLearned": "Virtual table extensions require careful session management and aren't available in all SQLite execution contexts"
+        },
+        {
+          "error": "UNIQUE constraint failed on vec_embeddings primary key",
+          "solution": "Added AUTOINCREMENT to embeddings table PRIMARY KEY to prevent rowid reuse after DELETE operations",
+          "context": "Rowid reuse after DELETE operations without AUTOINCREMENT caused primary key conflicts in vec_embeddings virtual table",
+          "rootCause": "SQLite reuses rowid values after DELETE operations when AUTOINCREMENT is not specified, causing conflicts with vector embeddings that reference these rowids",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/database.py"],
+          "codeExample": "CREATE TABLE embeddings (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Added AUTOINCREMENT\n    item_path TEXT NOT NULL UNIQUE,\n    -- other columns\n);",
+          "prevention": "Use AUTOINCREMENT on PRIMARY KEY columns when foreign tables or virtual tables reference the rowid",
+          "lessonLearned": "Virtual tables that reference rowids are sensitive to rowid reuse patterns"
         }
       ]
     },
@@ -96,6 +159,14 @@
           "prevention": "Always include k parameter in vector search queries",
           "dateEncountered": "2025-08-04",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "MCP parameter validation with anyOf schema pattern conflicts",
+          "context": "MCP clients send strings for numeric parameters but schema validation fails",
+          "solution": "Use anyOf: [{'type': 'integer'}, {'type': 'string'}] patterns in MCP manifest with Pydantic field validators using mode='before' for type coercion",
+          "prevention": "Always include anyOf patterns for parameters that MCP clients might send as strings",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"]
         },
         {
           "error": "ijson expects binary input but sometimes receives string",
@@ -422,6 +493,15 @@
       "description": "Performance bottlenecks and optimization strategies",
       "entries": [
         {
+          "issue": "ONNX Runtime memory accumulation in FastEmbed",
+          "impact": "Memory usage grows from 176MB to 1661MB after processing 3 crates",
+          "solution": "Configure ONNX with sess_options.enable_cpu_mem_arena = False and implement explicit model lifecycle management",
+          "optimizationStrategy": "Use lighter embedding models like all-MiniLM-L6-v2, implement explicit cleanup with del session and gc.collect()",
+          "dateIdentified": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/ingest.py"],
+          "measuredImpact": "Memory leak of ~1.5GB over 3 crate ingestions"
+        },
+        {
           "error": "Model loading delay on first request",
           "context": "Embedding model initialization causes slow first response",
           "solution": "Model loading happens on first embedding generation - expected behavior",
@@ -500,6 +580,16 @@
           "context": "Pure vector similarity may miss exact keyword matches that users expect",
           "dateDiscovered": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/database.py"]
+        },
+        {
+          "issue": "rustdoc JSON contains ~50% duplicate items",
+          "impact": "Unnecessary processing and storage overhead during ingestion",
+          "discovery": "Analysis of rustdoc JSON reveals up to 50% duplicate item_path entries across different crates",
+          "solution": "Implemented in-batch deduplication using seen_paths set to skip duplicate processing",
+          "optimization": "Deduplication reduces ingestion from 2806 to 1231 unique items for serde (~50% reduction in processing and storage)",
+          "dateDiscovered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"],
+          "measuredImpact": "50% reduction in database insertions and embedding calculations"
         }
       ]
     },
@@ -513,6 +603,16 @@
           "prevention": "Always use SQL-based extension loading for better compatibility",
           "dateEncountered": "2025-08-04",
           "relatedFiles": ["src/docsrs_mcp/database.py"]
+        },
+        {
+          "issue": "Cannot query vec_embeddings directly in sqlite3 CLI",
+          "context": "Attempting to query vector tables from sqlite3 command line interface fails with extension errors",
+          "rootCause": "sqlite-vec extension must be explicitly loaded in CLI sessions before accessing vec0 virtual tables",
+          "workaround": "Load sqlite-vec extension first: .load /path/to/vec0 OR query through application that already has extension loaded",
+          "lessonLearned": "Virtual table extensions require careful session management and aren't automatically available in all SQLite contexts",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/database.py"],
+          "bestPractice": "Always verify extension is loaded before vec0 operations, whether in CLI or application context"
         }
       ]
     },
@@ -1668,7 +1768,11 @@
       "Debug mode implementation: Add debug=true parameter for detailed query scoring and performance analysis",
       "Re-export detection in rustdoc JSON: Look for items with 'kind' containing 'import' or 'use' keywords, extract alias from item path and target from inner structure",
       "Re-export path resolution: Extract alias name from item path array (last element) and resolve target path from inner.id or inner.path fields",
-      "Re-export auto-discovery: Use streaming JSON parser to identify re-export patterns without loading entire JSON into memory"
+      "Re-export auto-discovery: Use streaming JSON parser to identify re-export patterns without loading entire JSON into memory",
+      "CRITICAL: FastEmbed global singleton causes memory leaks - configure ONNX with sess_options.enable_cpu_mem_arena = False",
+      "Memory management: Implement explicit cleanup with del embedding_session and gc.collect() after processing",
+      "Model selection: Consider lighter models like all-MiniLM-L6-v2 to reduce memory footprint",
+      "Database constraints: Add UNIQUE indexes on item_path to prevent duplicate entries during re-ingestion"
     ],
     "rateLimiting": [
       "MUST include Request parameter in endpoint function signatures or rate limiting won't work",
@@ -1741,7 +1845,10 @@
       "anyOf pattern for boolean: {'anyOf': [{'type': 'boolean'}, {'type': 'string'}]} in MCP manifest",
       "anyOf pattern for optional strings: {'anyOf': [{'type': 'string'}, {'type': 'null'}]} in MCP manifest",
       "Test MCP parameter validation with curl: both '{\"k\": \"5\"}' (string) and '{\"k\": 5}' (integer) should work",
-      "Validation flow order: MCP manifest anyOf → FastMCP JSON Schema → Pydantic field validators → Type coercion"
+      "Validation flow order: MCP manifest anyOf → FastMCP JSON Schema → Pydantic field validators → Type coercion",
+      "CRITICAL BUG: start_pre_ingestion is the ONLY tool without anyOf patterns - add consistent anyOf patterns to all tools with parameters",
+      "Schema consistency: All MCP tools must have matching anyOf patterns between manifest schema and Pydantic validators",
+      "Memory management: FastEmbed global singleton causes memory leaks - implement explicit ONNX Runtime cleanup"
     ],
     "queryPreprocessing": [
       "Check for whitespace-only queries before stripping to provide specific error messages",
@@ -1808,7 +1915,7 @@
     "targets": {
       "warmSearchLatency": "< 500ms P95",
       "coldIngestTime": "< 3s for 10MB crates",
-      "memoryUsage": "< 1GB RSS",
+      "memoryUsage": "< 1GB RSS (NOTE: FastEmbed memory leak can cause 1.5GB+ growth without proper ONNX configuration)",
       "cacheSize": "< 2GB total"
     },
     "optimizationStrategies": {
@@ -1827,7 +1934,8 @@
       "pathAliasResolution": "Static PATH_ALIASES dictionary with O(1) lookup adds <1ms overhead, maintains sub-500ms response time requirement while significantly improving user experience",
       "implBlockParsing": "Impl block parsing uses existing streaming architecture without performance impact, composite naming creates searchable identifiers efficiently, no schema changes required for trait implementation search",
       "databaseBatchInsertion": "Use executemany() with IGNORE clause for duplicate handling achieves 70% reduction in insertion time compared to individual INSERT statements, especially beneficial for large re-export datasets",
-      "batchInsertOptimization": "Pre-process re-export data into tuples before batching to avoid repeated serialization overhead during executemany() operations"
+      "batchInsertOptimization": "Pre-process re-export data into tuples before batching to avoid repeated serialization overhead during executemany() operations",
+      "memoryLeakPrevention": "Configure FastEmbed ONNX Runtime with sess_options.enable_cpu_mem_arena = False to prevent memory accumulation, implement explicit model lifecycle management"
     }
   },
   "codeQuality": {

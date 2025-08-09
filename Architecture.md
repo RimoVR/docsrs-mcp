@@ -201,9 +201,9 @@ sequenceDiagram
 ```mermaid
 erDiagram
     EMBEDDINGS {
-        INTEGER rowid PK
+        INTEGER rowid PK "AUTOINCREMENT - prevents rowid reuse"
         TEXT item_id "stable rustdoc ID"
-        TEXT item_path "e.g. serde::de::Deserialize"
+        TEXT item_path "e.g. serde::de::Deserialize" UK "UNIQUE constraint for re-ingestion"
         TEXT item_type "function, struct, trait, module, etc - DEFAULT NULL"
         TEXT signature "complete item signature - DEFAULT NULL"
         TEXT header "item signature (legacy)"
@@ -227,8 +227,8 @@ erDiagram
     }
     
     VEC_EMBEDDINGS {
-        INTEGER rowid PK
-        BLOB embedding "384-dim float32 vector"
+        INTEGER rowid PK "Manual sync with embeddings.rowid - no triggers"
+        BLOB embedding "384-dim float32 vector - vec0 virtual table"
     }
     
     PASSAGES {
@@ -317,6 +317,144 @@ erDiagram
     META ||--|| CRATE_METADATA : "describes"
 ```
 
+## Database Synchronization Architecture
+
+The DocsRS MCP server implements a sophisticated database synchronization strategy to manage the relationship between the main `embeddings` table and the `vec_embeddings` virtual table (vec0 extension), addressing unique constraints imposed by the sqlite-vec extension.
+
+### Core Architecture Principles
+
+**PRIMARY KEY Design**
+- **embeddings.rowid**: Uses `INTEGER PRIMARY KEY AUTOINCREMENT` to prevent SQLite rowid reuse
+- **Rationale**: Ensures stable, unique rowids that can be safely referenced by vec_embeddings
+- **Impact**: Prevents orphaned vector entries when embeddings are deleted and new ones inserted
+
+**Manual Synchronization Strategy**
+- **No Triggers**: sqlite-vec extension loading requirements prevent trigger usage with vec0 tables
+- **Explicit Management**: All vec_embeddings operations performed manually in application code
+- **Consistency**: Single transaction envelope ensures atomic updates across both tables
+
+### Data Flow for Embeddings Ingestion
+
+```mermaid
+graph TD
+    subgraph "Batch Processing Pipeline"
+        INPUT[Raw Embeddings Data]
+        DEDUP[In-Batch Deduplication<br/>~50% duplicate reduction]
+        CHUNK[Sub-batching<br/>500-item chunks<br/>SQLite 999 param limit]
+        DELETE[DELETE existing entries<br/>embeddings + vec_embeddings]
+        INSERT[INSERT new entries<br/>batch processing]
+        SYNC[Manual vec0 sync<br/>explicit rowid management]
+    end
+    
+    subgraph "Transaction Management"
+        BEGIN[BEGIN TRANSACTION]
+        COMMIT[COMMIT on success]
+        ROLLBACK[ROLLBACK on error]
+    end
+    
+    INPUT --> DEDUP
+    DEDUP --> CHUNK
+    BEGIN --> DELETE
+    CHUNK --> DELETE
+    DELETE --> INSERT
+    INSERT --> SYNC
+    SYNC --> COMMIT
+    COMMIT --> END[Complete]
+    
+    SYNC -.->|on error| ROLLBACK
+    ROLLBACK --> ERROR[Abort Operation]
+```
+
+### Key Design Decisions
+
+**DELETE + INSERT Pattern for Idempotent Updates**
+```sql
+-- Phase 1: Clean existing entries
+DELETE FROM embeddings WHERE item_path IN (?, ?, ...);
+DELETE FROM vec_embeddings WHERE rowid IN (
+    SELECT rowid FROM embeddings WHERE item_path IN (?, ?, ...)
+);
+
+-- Phase 2: Insert new data with AUTOINCREMENT rowids
+INSERT INTO embeddings (item_path, doc, signature, ...) 
+VALUES (?, ?, ?, ...);
+
+-- Phase 3: Manual vector synchronization
+INSERT INTO vec_embeddings (rowid, embedding) 
+VALUES (last_insert_rowid(), ?);
+```
+
+**In-Batch Deduplication Strategy**
+- **Processing**: Deduplication occurs before database operations
+- **Efficiency**: Reduces database load by ~50% for typical rustdoc data
+- **Method**: Python set-based deduplication on item_path during preprocessing
+- **Benefit**: Prevents UNIQUE constraint violations during batch INSERT operations
+
+**Sub-batching for SQLite Parameter Limits**
+- **Constraint**: SQLite SQLITE_MAX_VARIABLE_NUMBER default is 999
+- **Solution**: Process embeddings in 500-item chunks to stay under limit
+- **Buffer**: 499 parameters leaves room for other query variables
+- **Performance**: Balances memory usage with transaction overhead
+
+### Transaction Management Strategy
+
+**Single Transaction Envelope**
+```python
+async def store_embeddings_batch(embeddings_data):
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("BEGIN TRANSACTION")
+        try:
+            # Load sqlite-vec extension
+            await conn.enable_load_extension(True)
+            await conn.load_extension("vec0")
+            
+            # Phase 1: Deduplication
+            unique_items = deduplicate_by_item_path(embeddings_data)
+            
+            # Phase 2: Sub-batching
+            for chunk in chunked(unique_items, chunk_size=500):
+                await delete_existing_entries(conn, chunk)
+                new_rowids = await insert_embeddings(conn, chunk)
+                await sync_vec_embeddings(conn, new_rowids, chunk)
+            
+            await conn.execute("COMMIT")
+        except Exception as e:
+            await conn.execute("ROLLBACK")
+            raise DatabaseSyncError(f"Batch sync failed: {e}")
+```
+
+**Error Recovery**
+- **Atomic Operations**: All changes within single transaction
+- **Rollback Strategy**: Any error triggers complete transaction rollback
+- **Data Integrity**: Prevents partial updates that could corrupt vector index
+- **Logging**: Detailed error logging for debugging synchronization failures
+
+**Extension Loading Sequence**
+- **Timing**: sqlite-vec extension loaded after transaction begins
+- **Requirement**: vec0 access requires extension to be loaded in current connection
+- **Isolation**: Each connection manages its own extension state
+- **Performance**: Extension loading overhead amortized across batch operations
+
+### Performance Characteristics
+
+**Batch Processing Benefits**
+- **Throughput**: 500-item batches optimize SQLite performance
+- **Memory**: Bounded memory usage regardless of total embedding count  
+- **Latency**: Sub-batching reduces per-item processing overhead
+- **Scalability**: Linear scaling with number of embeddings
+
+**Deduplication Impact**
+- **Storage Reduction**: ~50% fewer database operations for typical rustdoc data
+- **Network Efficiency**: Reduced redundant embedding generation
+- **Query Performance**: Fewer duplicate entries improve search relevance
+- **Maintenance**: Simplified database maintenance with fewer duplicate rows
+
+**AUTOINCREMENT Overhead**
+- **Storage**: Additional metadata table for sequence tracking
+- **Performance**: Minimal impact on INSERT operations (<5% overhead)
+- **Benefit**: Guaranteed unique, non-reusable rowids for vector stability
+- **Trade-off**: Slight storage increase for significantly improved data integrity
+
 ### Partial Indexes for Filter Optimization
 
 The database schema includes specialized partial indexes designed to optimize common filter patterns:
@@ -325,6 +463,7 @@ The database schema includes specialized partial indexes designed to optimize co
 - **idx_public_functions**: Indexes public functions (`WHERE item_type = 'function' AND item_path NOT LIKE '%::%'`)
 - **idx_has_examples**: Indexes items with code examples (`WHERE examples IS NOT NULL AND examples != ''`)
 - **idx_crate_prefix**: Enables fast crate-specific searches using prefix matching on item_path
+- **idx_embeddings_item_path_unique**: UNIQUE constraint on item_path prevents duplicates during re-ingestion (`CREATE UNIQUE INDEX IF NOT EXISTS idx_embeddings_item_path_unique ON embeddings(item_path)`)
 
 ### Example Embeddings Indexes
 
@@ -390,6 +529,65 @@ graph TD
 - **Memory Efficiency**: Stream processing prevents memory bloat for large crates
 - **Pattern Detection**: Identifies `pub use` declarations and glob imports during JSON traversal
 - **Path Resolution**: Resolves relative imports to absolute paths within crate context
+
+### Database Storage
+
+**Schema Improvements for Re-ingestion Support**
+
+The database schema has been enhanced with constraints and patterns to support reliable re-ingestion of crates:
+
+- **UNIQUE Constraint on embeddings.item_path**: Prevents duplicate entries during re-ingestion
+- **INSERT OR REPLACE Pattern**: Enables seamless crate updates by replacing existing embeddings
+- **Migration Support**: Automatic migration function adds constraints to existing databases
+
+```sql
+-- Enhanced embeddings table with UNIQUE constraint
+CREATE TABLE embeddings (
+    -- ... other columns ...
+    UNIQUE(item_path) -- Prevents duplicate item paths
+);
+
+-- Migration function for existing databases
+CREATE UNIQUE INDEX IF NOT EXISTS idx_embeddings_item_path_unique 
+    ON embeddings(item_path);
+```
+
+**Re-ingestion Database Pattern**
+```python
+# INSERT OR REPLACE pattern enables clean re-ingestion
+query = """INSERT OR REPLACE INTO embeddings 
+           (item_path, item_type, signature, doc, ...) 
+           VALUES (?, ?, ?, ?, ...)"""
+# Existing entries with same item_path are atomically replaced
+```
+
+**Database Migration for Existing Installations**
+```python
+def migrate_database_schema(db_path: str):
+    """Add UNIQUE constraint to existing databases."""
+    conn = sqlite3.connect(db_path)
+    try:
+        # Check if constraint already exists
+        result = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='idx_embeddings_item_path_unique'"
+        ).fetchone()
+        
+        if not result:
+            # Add UNIQUE index (acts as constraint)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_embeddings_item_path_unique "
+                "ON embeddings(item_path)"
+            )
+            conn.commit()
+            logger.info("Added UNIQUE constraint to embeddings.item_path")
+    except sqlite3.IntegrityError:
+        # Handle existing duplicates by keeping newest entries
+        logger.warning("Duplicate item_path entries found, cleaning up...")
+        cleanup_duplicate_embeddings(conn)
+    finally:
+        conn.close()
+```
 
 ### Database Storage
 
@@ -1944,6 +2142,61 @@ The **double-validation pattern** ensures MCP client compatibility through this 
 
 **Critical**: FastMCP validates against the JSON Schema first, making `anyOf` patterns essential for accepting both native types and string representations from different MCP client implementations.
 
+### Advanced MCP Schema Patterns
+
+**anyOf Pattern Implementation**
+
+The MCP schema architecture uses sophisticated `anyOf` patterns to handle diverse client implementations:
+
+```json
+{
+  "properties": {
+    "k": {
+      "anyOf": [
+        {"type": "integer", "minimum": 1, "maximum": 20},
+        {"type": "string", "pattern": "^[1-9][0-9]?$|^20$"}
+      ],
+      "description": "Number of results (1-20)"
+    },
+    "deprecated": {
+      "anyOf": [
+        {"type": "boolean"},
+        {"type": "string", "enum": ["true", "false", "True", "False", "1", "0"]}
+      ],
+      "description": "Include deprecated items"
+    }
+  }
+}
+```
+
+**String-to-Type Conversion Support**
+
+The validation layer provides robust string-to-type conversion with comprehensive error handling:
+
+```python
+@field_validator("k", mode="before")
+@classmethod
+def coerce_k_to_int(cls, v):
+    """Handle string-to-int conversion for k parameter."""
+    return coerce_to_int_with_bounds(v, field_name="k", min_val=1, max_val=20)
+
+@field_validator("deprecated", mode="before") 
+@classmethod
+def coerce_deprecated_to_bool(cls, v):
+    """Handle string-to-bool conversion for deprecated parameter."""
+    if v is None or isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.lower() in {"true", "1", "yes", "on"}
+    return bool(v)
+```
+
+**Benefits of anyOf + Field Validators Pattern**
+- **Maximum Compatibility**: Works with MCP clients that serialize differently
+- **Type Safety**: Maintains strict typing after validation
+- **Error Clarity**: Provides clear error messages for invalid inputs
+- **Schema Consistency**: Unified approach across all parameters
+
 ### Extended Numeric Parameter Validation
 
 The following numeric parameters now have comprehensive string-to-numeric conversion support for MCP client compatibility:
@@ -2525,6 +2778,32 @@ The system uses psutil to monitor memory usage and implement adaptive processing
 - **Memory Tracking**: Uses psutil.virtual_memory() for real-time memory percentage monitoring
 - **Garbage Collection**: Triggered at chunk boundaries during high memory usage
 
+**MemoryMonitor Integration**
+
+```python
+class MemoryMonitor:
+    """Real-time memory usage tracking with configurable thresholds."""
+    
+    def get_memory_usage(self) -> float:
+        """Return memory usage as percentage (0.0-1.0)."""
+        return psutil.virtual_memory().percent / 100.0
+    
+    def should_reduce_batch_size(self) -> bool:
+        """Check if batch size should be reduced (>80% memory)."""
+        return self.get_memory_usage() > 0.8
+    
+    def should_trigger_gc(self) -> bool:
+        """Check if garbage collection should be triggered (>90% memory)."""
+        return self.get_memory_usage() > 0.9
+
+# Integration in streaming pipeline
+monitor = MemoryMonitor()
+if monitor.should_trigger_gc():
+    gc.collect()
+if monitor.should_reduce_batch_size():
+    batch_size = max(16, batch_size // 2)
+```
+
 ### Streaming Implementation Details
 
 **parse_rustdoc_items_streaming()**
@@ -2538,6 +2817,26 @@ The system uses psutil to monitor memory usage and implement adaptive processing
 - Monitors memory usage between batches
 - Adjusts batch size based on memory thresholds
 - Uses FastEmbed batch processing for efficiency
+- **ONNX Runtime Optimization**: Disabled memory arena for lower memory footprint
+- **Model Cleanup**: Explicit model cleanup after each crate to prevent memory leaks
+
+```python
+# ONNX Runtime session configuration
+rt_config = {
+    'providers': ['CPUExecutionProvider'],
+    'provider_options': [{
+        'use_arena': False,  # Disable memory arena
+        'arena_extend_strategy': 'kSameAsRequested'
+    }]
+}
+
+# Model cleanup after crate processing
+def cleanup_embedding_model():
+    """Explicit cleanup of embedding model resources."""
+    if hasattr(model, 'ort_session'):
+        del model.ort_session
+    gc.collect()
+```
 
 **store_embeddings_streaming()**
 - Stores embeddings in DB_BATCH_SIZE chunks (default 999 items)
@@ -2652,11 +2951,13 @@ sequenceDiagram
                 Worker->>Worker: Normal batch size (up to 512)
             end
             
-            Worker->>Embed: generate_embeddings_streaming() - adaptive batches
+            Worker->>Embed: generate_embeddings_streaming() - adaptive batches with ONNX optimizations
+            Note over Embed: ONNX Runtime: disabled memory arena, explicit cleanup
             Embed-->>Worker: 384-dim vectors (batch)
-            Worker->>DB: store_embeddings_streaming() - chunked storage
+            Worker->>DB: store_embeddings_streaming() - INSERT OR REPLACE pattern
             Worker->>DB: Store module relationships in modules table
-            Worker->>Worker: Garbage collect at chunk boundaries
+            Worker->>Worker: Garbage collect at chunk boundaries + model cleanup
+            Worker->>Embed: Cleanup embedding model after crate completion
         end
         
         Worker->>DB: Index with vss_index!

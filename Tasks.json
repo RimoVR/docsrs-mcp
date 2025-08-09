@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-09T12:00:00Z",
+    "lastUpdated": "2025-08-09T14:00:00Z",
     "priorities": ["critical", "high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked", "failed"]
   },
@@ -1083,6 +1083,94 @@
             }
           }
         ]
+      },
+      {
+        "id": "memory-leak-fix-1",
+        "title": "Fix FastEmbed memory leak with ONNX Runtime configuration",
+        "description": "Resolve memory leak in FastEmbed v0.7.1 by configuring ONNX Runtime settings",
+        "status": "completed",
+        "priority": "critical",
+        "progress": 100,
+        "location": "src/docsrs_mcp/ingest.py",
+        "dependencies": [],
+        "effort": "medium",
+        "impact": "high",
+        "relatedTasks": [],
+        "roadblocks": [
+          {
+            "description": "FastEmbed v0.7.1 memory leak required ONNX Runtime configuration",
+            "resolution": "Configured ONNX Runtime memory settings to prevent accumulation",
+            "resolvedDate": "2025-08-09T12:00:00Z"
+          }
+        ],
+        "completionDetails": {
+          "completedDate": "2025-08-09T12:00:00Z",
+          "implementation": "Applied ONNX Runtime memory management configuration to resolve FastEmbed memory leak",
+          "notes": "FastEmbed v0.7.1 had memory leak issues that were resolved by configuring ONNX Runtime memory settings. This prevents memory accumulation during embedding generation and maintains stable memory usage during pre-ingestion operations.",
+          "bugFix": "Configured ONNX Runtime memory settings to prevent FastEmbed memory accumulation",
+          "impact": "Eliminated memory leak during embedding generation, ensuring stable long-running operations"
+        }
+      },
+      {
+        "id": "pre-ingestion-validation-fix-1",
+        "title": "Fix pre-ingestion validation with MCP schema patterns",
+        "description": "Resolve MCP schema validation issues by implementing anyOf patterns for string parameters",
+        "status": "completed",
+        "priority": "critical",
+        "progress": 100,
+        "location": "src/docsrs_mcp/app.py, src/docsrs_mcp/models.py",
+        "dependencies": [],
+        "effort": "medium",
+        "impact": "high",
+        "relatedTasks": ["fix-mcp-1"],
+        "roadblocks": [
+          {
+            "description": "MCP schema validation required anyOf patterns for string parameters",
+            "resolution": "Implemented comprehensive anyOf validation patterns for all parameter types",
+            "resolvedDate": "2025-08-09T12:00:00Z"
+          }
+        ],
+        "completionDetails": {
+          "completedDate": "2025-08-09T12:00:00Z",
+          "implementation": "Enhanced MCP schema validation with comprehensive anyOf patterns for parameter type flexibility",
+          "notes": "MCP schema validation was failing for pre-ingestion parameters due to strict type checking. Implemented anyOf patterns to accept both string and native types for all parameters, ensuring compatibility with various MCP clients while maintaining proper validation.",
+          "bugFix": "Added anyOf validation patterns to handle mixed parameter types from MCP clients",
+          "impact": "Pre-ingestion and all MCP tools now work reliably with different client implementations"
+        }
+      },
+      {
+        "id": "database-duplicate-fix-1",
+        "title": "Fix SQLite vec0 synchronization issues",
+        "description": "Resolve UNIQUE constraint violations and synchronization issues between embeddings and vec_embeddings tables in SQLite vec0 implementation",
+        "status": "completed",
+        "priority": "critical", 
+        "progress": 100,
+        "location": "src/docsrs_mcp/database.py, migrations/",
+        "dependencies": [],
+        "effort": "medium",
+        "impact": "high",
+        "relatedTasks": [],
+        "roadblocks": [
+          {
+            "description": "UNIQUE constraint violations during embeddings/vec_embeddings synchronization",
+            "resolution": "Implemented manual synchronization with AUTOINCREMENT and deduplication. Triggers cannot work with vec0 virtual tables due to extension loading context.",
+            "resolvedDate": "2025-08-09T12:00:00Z"
+          },
+          {
+            "description": "Rowid synchronization issues between tables",
+            "resolution": "Added AUTOINCREMENT to embeddings table to prevent rowid reuse and ensure proper synchronization",
+            "resolvedDate": "2025-08-09T12:00:00Z"
+          }
+        ],
+        "completionDetails": {
+          "completedDate": "2025-08-09T12:00:00Z",
+          "implementation": "Implemented manual synchronization with AUTOINCREMENT and deduplication. Triggers cannot work with vec0 virtual tables due to extension loading context.",
+          "notes": "Fixed UNIQUE constraint violations in the embeddings/vec_embeddings synchronization, removed triggers that couldn't work with vec0 virtual tables, added AUTOINCREMENT to prevent rowid reuse, implemented deduplication for duplicate item_paths, and used manual synchronization with proper DELETE + INSERT patterns.",
+          "technicalDetails": "Added AUTOINCREMENT to embeddings table, implemented batch deduplication, reverted to manual vec_embeddings synchronization",
+          "solution": "The solution successfully resolved: UNIQUE constraint violations during ingestion, duplicate search results, and rowid synchronization issues between tables",
+          "bugFix": "Fixed SQLite vec0 synchronization with manual sync patterns and AUTOINCREMENT",
+          "impact": "Eliminated UNIQUE constraint violations, duplicate search results, and synchronization issues across all operations"
+        }
       }
     ],
     "medium": [

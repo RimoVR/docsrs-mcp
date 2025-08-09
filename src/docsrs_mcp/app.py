@@ -500,18 +500,18 @@ async def get_mcp_manifest(request: Request):
                     "type": "object",
                     "properties": {
                         "force": {
-                            "type": "boolean",
+                            "anyOf": [{"type": "boolean"}, {"type": "string"}],
                             "default": False,
                             "description": "Force restart if pre-ingestion is already running",
                         },
                         "concurrency": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "minimum": 1,
                             "maximum": 10,
                             "description": "Number of parallel download workers (1-10, default: 3)",
                         },
                         "count": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "minimum": 10,
                             "maximum": 500,
                             "description": "Number of crates to pre-ingest (10-500, default: 100)",
