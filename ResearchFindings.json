@@ -44,7 +44,7 @@
         "sqlitevec": "0.1.0+",
         "aiohttp": "3.9.5",
         "fastembed": "0.7.1",
-        "rapidfuzz": "3.6.2",
+        "rapidfuzz": "3.13.0",
         "pydantic": "2.11.7",
         "uvicorn": "0.27.1",
         "ijson": "3.4.0",
@@ -53,7 +53,7 @@
       },
       "perf_metrics": {
         "sqlite_vec_query": "<100ms for 1M+ vectors",
-        "rapidfuzz_speedup": "10-50x vs FuzzyWuzzy", 
+        "rapidfuzz_speedup": "16x vs FuzzyWuzzy alternatives", 
         "fastembed_speedup": "2-10x vs HuggingFace",
         "ijson_speedup": "656x with yajl2_c backend",
         "treesitter_speedup": "36x vs regex",
@@ -506,12 +506,24 @@
         "perf": "#{rapidfuzz_speedup}",
         "breaking": "v3.0 API changes",
         "fuzzy_thresh": "60% optimal threshold",
+        "algorithms": {
+          "token_set_ratio": "Best for handling subsets in path matching",
+          "token_sort_ratio": "Handles word order variations effectively", 
+          "partial_ratio": "Excellent for substring matching"
+        },
+        "v3_requirements": {
+          "preprocessing": "Explicit preprocessing with utils.default_process required",
+          "unicode_norm": "No built-in Unicode normalization - must use unicodedata.normalize('NFC')"
+        },
         "best_practices": {
           "thresh_select": "Dataset-specific optimization",
           "suggestion_count": "3-5 cognitive limit",
           "edit_distance": "Levenshtein + variants",
           "scoring": "Normalized 0-100 scale",
-          "caching": "TTL-based for performance"
+          "caching": "TTL-based for performance",
+          "composite_scoring": "Multiple algorithms improve accuracy",
+          "position_aware": "Word boundary bonuses enhance relevance",
+          "adaptive_thresholds": "Query length-based reduces false positives"
         },
         "insights": {
           "multiproc": "Avoid - overhead outweighs benefits",
@@ -677,7 +689,7 @@
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",
-      "#{rapidfuzz_speedup} with RapidFuzz over FuzzyWuzzy", 
+      "#{rapidfuzz_speedup} with RapidFuzz over FuzzyWuzzy alternatives", 
       "#{memory_efficiency} with generator patterns",
       "Semantic chunking 50-200 tokens",
       "FastEmbed batch sizes: CPU=16, GPU=256, general=32",

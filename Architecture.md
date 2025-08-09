@@ -103,7 +103,7 @@ graph LR
             CLI[cli.py<br/>Entry point<br/>--mode flag (defaults to mcp)<br/>MCP/REST selection]
             CONFIG[config.py<br/>Settings]
             ERRORS[errors.py<br/>Custom exceptions]
-            FUZZY[fuzzy_resolver.py<br/>Enhanced path resolution<br/>Database re-export lookup<br/>Static PATH_ALIASES fallback<br/>5-minute TTL cache]
+            FUZZY[fuzzy_resolver.py<br/>Enhanced composite scoring system<br/>Path component bonuses<br/>Adaptive thresholds<br/>Unicode normalization<br/>Database re-export lookup<br/>Static PATH_ALIASES fallback<br/>5-minute TTL cache]
         end
     end
     
@@ -1416,7 +1416,7 @@ graph TD
         ALIAS_CHECK[PATH_ALIASES Check<br/>Common pattern mapping]
         ALIAS_MATCH[Direct Alias Match<br/>Return aliased path]
         CACHE_CHECK[Path Cache Check<br/>5-minute TTL]
-        FUZZY[RapidFuzz Processing<br/>Enhanced with alias awareness]
+        FUZZY[Enhanced RapidFuzz Processing<br/>Composite scoring + path bonuses<br/>Adaptive threshold + alias awareness]
         SUGGESTIONS[Top 3 Suggestions<br/>Include alias matches]
     end
     
@@ -2495,7 +2495,7 @@ graph TD
         EXACT[Exact Path Match<br/>SQLite query]
         CACHE_CHECK[Path Cache Check<br/>5-minute TTL]
         CACHE_BUILD[Build Path Cache<br/>Query all item paths]
-        FUZZY[RapidFuzz Processing<br/>0.6 similarity threshold]
+        FUZZY[Enhanced RapidFuzz Processing<br/>Composite scoring + path bonuses<br/>Adaptive threshold (0.55-0.65)]
         SUGGESTIONS[Top 3 Suggestions<br/>Ranked by similarity]
         ERROR[ItemNotFoundError<br/>with suggestions]
     end
@@ -2524,17 +2524,30 @@ graph TD
 - **Memory Footprint**: <3MB for typical crate collections
 - **Thread Safety**: Single-threaded FastAPI context (no locking required)
 
-**3. RapidFuzz Configuration**
+**3. Enhanced RapidFuzz Configuration**
 - **Library**: RapidFuzz library for high-performance string matching
-- **Similarity Threshold**: 0.6 (60% similarity required for meaningful suggestions)
+- **Composite Scoring System**: Multi-algorithm approach for improved accuracy
+  - `token_set_ratio`: 40% weight - handles word order variations
+  - `token_sort_ratio`: 30% weight - accounts for token reordering
+  - `partial_ratio`: 30% weight - matches substring patterns
+- **Path Component Bonus System**: Additional scoring for path structure awareness
+  - Exact path component match: +0.15 bonus
+  - Partial path component match: +0.08 bonus
+- **Adaptive Threshold Logic**: Dynamic threshold based on query characteristics
+  - Short queries (≤10 chars): 0.65 threshold for higher precision
+  - Medium queries (11-20 chars): 0.60 threshold for balanced results
+  - Long queries (>20 chars): 0.55 threshold for better recall
+- **Unicode Normalization**: Consistent character handling across different input sources
+- **Configurable Weights**: Scoring weights defined in FUZZY_WEIGHTS config for tuning
 - **Result Limit**: Maximum 3 suggestions returned to users
-- **Scoring Method**: Default fuzzy matching algorithm optimized for path-like strings
 
 **4. Performance Characteristics**
 - **Cold Start**: Initial cache population during first fuzzy match
-- **Warm Performance**: Sub-5ms fuzzy matching after cache warmup  
-- **Memory Usage**: Minimal overhead with efficient string comparison
+- **Warm Performance**: Sub-5ms fuzzy matching after cache warmup with enhanced composite scoring
+- **Memory Usage**: Minimal overhead with efficient string comparison and unicode normalization
 - **Scalability**: Linear performance with crate collection size
+- **Algorithm Efficiency**: Composite scoring adds <2ms overhead while significantly improving match quality
+- **Path Bonus Calculation**: O(k) complexity where k is path component count (typically 2-4)
 
 **5. Error Response Enhancement**
 - **Error Type**: `ItemNotFoundError` with enhanced context

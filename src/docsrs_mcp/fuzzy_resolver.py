@@ -1,12 +1,27 @@
-"""Fuzzy path resolution for improved UX when exact paths aren't found."""
+"""Fuzzy path resolution for improved UX when exact paths aren't found.
+
+This module provides enhanced fuzzy matching for Rust documentation paths with:
+- Composite scoring using multiple RapidFuzz algorithms (token_set, token_sort, partial)
+- Path component bonus system for exact and partial matches
+- Adaptive thresholds based on query length
+- Unicode normalization for consistent matching
+- Configurable weights via FUZZY_WEIGHTS in config.py
+
+The fuzzy matching system uses a three-tier approach:
+1. Re-export discovery from database
+2. Static PATH_ALIASES dictionary
+3. Enhanced fuzzy matching with composite scoring
+"""
 
 import logging
 import time
+import unicodedata
 
 import aiosqlite
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 from rapidfuzz.utils import default_process
 
+from .config import FUZZY_WEIGHTS
 from .database import get_discovered_reexports
 
 logger = logging.getLogger(__name__)
@@ -128,6 +143,129 @@ _reexport_cache: dict[str, tuple[float, dict[str, str]]] = {}
 REEXPORT_CACHE_TTL = 300  # 5 minutes
 
 
+def normalize_query(query: str) -> str:
+    """
+    Normalize Unicode characters in query for consistent matching.
+
+    Args:
+        query: The input query string
+
+    Returns:
+        Normalized query string
+    """
+    # Normalize to NFC (composed form) for consistency
+    normalized = unicodedata.normalize("NFC", query)
+    # Also handle common preprocessing
+    return default_process(normalized) if normalized else ""
+
+
+def composite_path_score(query: str, candidate: str) -> float:
+    """
+    Calculate a composite similarity score using multiple RapidFuzz algorithms.
+
+    This combines token_set_ratio (handles subsets), token_sort_ratio (handles order),
+    and partial_ratio (substring matching) for more accurate path matching.
+
+    Args:
+        query: The user's search query
+        candidate: The candidate path to compare against
+
+    Returns:
+        Normalized similarity score between 0.0 and 1.0
+    """
+    # Normalize both strings for consistent comparison
+    query_norm = normalize_query(query)
+    candidate_norm = normalize_query(candidate)
+
+    # Calculate individual scores (RapidFuzz returns 0-100)
+    token_set = fuzz.token_set_ratio(query_norm, candidate_norm) / 100.0
+    token_sort = fuzz.token_sort_ratio(query_norm, candidate_norm) / 100.0
+    partial = fuzz.partial_ratio(query_norm, candidate_norm) / 100.0
+
+    # Weighted combination using configurable weights
+    score = (
+        FUZZY_WEIGHTS["token_set_ratio"] * token_set
+        + FUZZY_WEIGHTS["token_sort_ratio"] * token_sort
+        + FUZZY_WEIGHTS["partial_ratio"] * partial
+    )
+
+    # Normalize to ensure score is within bounds
+    return max(0.0, min(1.0, score))
+
+
+def calculate_path_bonus(query: str, candidate: str) -> float:
+    """
+    Calculate bonus score for exact path component matches.
+
+    This rewards candidates where the final component (most important part)
+    matches exactly or partially with the query.
+
+    Args:
+        query: The user's search query
+        candidate: The candidate path to compare against
+
+    Returns:
+        Bonus score between 0.0 and 0.15
+    """
+    # Split paths into components
+    query_parts = query.split("::")
+    candidate_parts = candidate.split("::")
+
+    # Remove empty parts
+    query_parts = [p for p in query_parts if p]
+    candidate_parts = [p for p in candidate_parts if p]
+
+    if not query_parts or not candidate_parts:
+        return 0.0
+
+    # Get the final components (most important)
+    query_final = query_parts[-1].lower()
+    candidate_final = candidate_parts[-1].lower()
+
+    # Exact match of final component gets highest bonus
+    if query_final == candidate_final:
+        return FUZZY_WEIGHTS["path_component_bonus"]
+    # Partial match (query is substring of candidate) gets moderate bonus
+    elif query_final in candidate_final:
+        return FUZZY_WEIGHTS["partial_component_bonus"]
+    # Check if candidate final is in query (reverse partial match)
+    elif candidate_final in query_final:
+        return (
+            FUZZY_WEIGHTS["partial_component_bonus"] * 0.6
+        )  # Slightly lower for reverse match
+
+    return 0.0
+
+
+def get_adaptive_threshold(query: str) -> float:
+    """
+    Calculate an adaptive similarity threshold based on query characteristics.
+
+    Shorter queries are more forgiving (lower threshold) while longer queries
+    should be more specific (higher threshold).
+
+    Args:
+        query: The user's search query
+
+    Returns:
+        Adaptive threshold between 0.55 and 0.65
+    """
+    query_length = len(query.strip())
+
+    if query_length <= 5:
+        # Very short queries need lower threshold (more forgiving)
+        return 0.55
+    elif query_length <= 10:
+        # Default threshold for medium queries
+        return 0.60
+    elif query_length <= 20:
+        # Slightly higher for longer queries
+        return 0.63
+    else:
+        # Long queries should be more specific
+        return 0.65
+
+
 async def resolve_path_alias(
     crate_name: str, item_path: str, db_path: str | None = None
 ) -> str:
@@ -222,13 +360,15 @@ async def get_fuzzy_suggestions(
     """
     Get fuzzy path suggestions when exact match fails.
 
+    Uses enhanced composite scoring with multiple algorithms for better accuracy.
+
     Args:
         query: The user's query path that wasn't found
         db_path: Path to the SQLite database
         crate_name: Name of the crate being searched
         version: Version of the crate
         limit: Maximum number of suggestions to return (default: 3)
-        threshold: Minimum similarity score threshold (default: 0.6)
+        threshold: Minimum similarity score threshold (default: 0.6, but adaptive)
 
     Returns:
         List of suggested paths that are similar to the query
@@ -266,27 +406,38 @@ async def get_fuzzy_suggestions(
     if not cached_paths:
         return []
 
-    # Use RapidFuzz to find similar paths
-    # Use explicit processor for consistent behavior with v3.x
-    matches = process.extract(
-        query,
-        cached_paths,
-        scorer=fuzz.ratio,
-        processor=default_process,
-        limit=limit * 2,  # Get more candidates for filtering
+    # Normalize the query once
+    normalized_query = normalize_query(query)
+
+    # Use adaptive threshold based on query characteristics
+    adaptive_threshold = get_adaptive_threshold(query)
+    # Use the minimum of provided threshold and adaptive threshold
+    effective_threshold = min(threshold, adaptive_threshold)
+
+    # Calculate scores for all candidates with enhanced scoring
+    scored_candidates = []
+    for candidate in cached_paths:
+        # Calculate composite similarity score
+        base_score = composite_path_score(normalized_query, candidate)
+
+        # Add path component bonus for better Rust path matching
+        path_bonus = calculate_path_bonus(query, candidate)
+
+        # Combined score with bonus (capped at 1.0)
+        final_score = min(1.0, base_score + path_bonus)
+
+        # Only keep candidates above threshold
+        if final_score >= effective_threshold:
+            scored_candidates.append((candidate, final_score))
+
+    # Sort by score (descending) and take top matches
+    scored_candidates.sort(key=lambda x: x[1], reverse=True)
+    suggestions = [candidate for candidate, _ in scored_candidates[:limit]]
+
+    logger.info(
+        f"Found {len(suggestions)} fuzzy suggestions for '{query}' "
+        f"(threshold: {effective_threshold:.2f}, candidates evaluated: {len(cached_paths)})"
     )
-
-    # Filter by threshold and limit results
-    suggestions = []
-    for match_text, score, _ in matches:
-        # Convert score from 0-100 to 0-1 range and check threshold
-        normalized_score = score / 100.0
-        if normalized_score >= threshold:
-            suggestions.append(match_text)
-            if len(suggestions) >= limit:
-                break
-
-    logger.info(f"Found {len(suggestions)} fuzzy suggestions for '{query}'")
     return suggestions
 
 

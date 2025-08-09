@@ -44,6 +44,15 @@ TYPE_WEIGHTS = {
     "trait_impl": float(os.getenv("DOCSRS_TYPE_WEIGHT_TRAIT_IMPL", "1.1")),
 }
 
+# Fuzzy matching configuration
+FUZZY_WEIGHTS = {
+    "token_set_ratio": float(os.getenv("DOCSRS_FUZZY_TOKEN_SET_WEIGHT", "0.4")),
+    "token_sort_ratio": float(os.getenv("DOCSRS_FUZZY_TOKEN_SORT_WEIGHT", "0.3")),
+    "partial_ratio": float(os.getenv("DOCSRS_FUZZY_PARTIAL_WEIGHT", "0.3")),
+    "path_component_bonus": float(os.getenv("DOCSRS_FUZZY_PATH_BONUS", "0.15")),
+    "partial_component_bonus": float(os.getenv("DOCSRS_FUZZY_PARTIAL_BONUS", "0.08")),
+}
+
 # Caching configuration
 CACHE_SIZE = int(os.getenv("DOCSRS_CACHE_SIZE", "1000"))
 CACHE_TTL = int(os.getenv("DOCSRS_CACHE_TTL", "900"))  # 15 minutes in seconds

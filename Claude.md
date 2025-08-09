@@ -156,3 +156,4 @@ kill $SERVER_PID
 ```
 
 **Important**: Never use bare `uv run docsrs-mcp &` as it requires manual interruption which can crash the terminal. Always use `nohup` with output redirection and PID capture for clean process management.
+- do not only run a synthetic test suite but test with production code as well. for cli callable http mode is the --mode rest flag
