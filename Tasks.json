@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-09T14:00:00Z",
+    "lastUpdated": "2025-08-09T16:00:00Z",
     "priorities": ["critical", "high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked", "failed"]
   },
@@ -1171,6 +1171,42 @@
           "bugFix": "Fixed SQLite vec0 synchronization with manual sync patterns and AUTOINCREMENT",
           "impact": "Eliminated UNIQUE constraint violations, duplicate search results, and synchronization issues across all operations"
         }
+      },
+      {
+        "id": "fix-cli-mcp-1",
+        "title": "Fix Pre-Ingestion CLI/MCP Mode Synchronization",
+        "description": "Diagnose and fix parameter handling issue where CLI arguments aren't properly synchronized with MCP mode configuration in mcp_server.py",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "medium",
+        "priority": 1,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "warmup-1",
+        "title": "Implement Embeddings Warmup on Startup",
+        "description": "Add EMBEDDINGS_WARMUP_ENABLED config (default true) and warm FastEmbed model during server startup to eliminate cold-start latency",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "medium",
+        "priority": 1,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "enhance-errors-1",
+        "title": "Enhance Error Messages with Context",
+        "description": "Improve validation error messages with examples, valid ranges, and actionable guidance",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "small",
+        "priority": 1,
+        "relatedTasks": [],
+        "roadblocks": []
       }
     ],
     "medium": [
@@ -1811,9 +1847,7 @@
             "progress": 100
           }
         ]
-      }
-    ],
-    "medium": [
+      },
       {
         "id": "pre-ingest-1.1",
         "title": "Define popular crate list from crates.io API",
@@ -2256,6 +2290,42 @@
             "progress": 0
           }
         ]
+      },
+      {
+        "id": "fuzzy-path-2",
+        "title": "Improve Fuzzy Path Matching for Item Paths",
+        "description": "Extend existing RapidFuzz implementation to better handle item path resolution with enhanced scoring algorithms",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["fuzzy-1", "enhance-path-1"],
+        "effort": "large",
+        "priority": 2,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "doc-snippets-1",
+        "title": "Add Documentation Snippets with Context",
+        "description": "Enhance search results to include 200+ character snippets with surrounding context for better understanding",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["search-1"],
+        "effort": "medium",
+        "priority": 2,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "search-ranking-1",
+        "title": "Optimize Search Result Ranking",
+        "description": "Enhance multi-factor scoring with result diversification and improved query preprocessing",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["search-1", "search-2", "search-3"],
+        "effort": "medium",
+        "priority": 2,
+        "relatedTasks": [],
+        "roadblocks": []
       }
     ],
     "low": [
@@ -2310,6 +2380,66 @@
             "progress": 0
           }
         ]
+      },
+      {
+        "id": "cross-ref-1",
+        "title": "Implement Cross-Reference Support",
+        "description": "Parse and resolve intra-doc links from rustdoc JSON, extend reexports table for cross-references",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["idx-1"],
+        "effort": "large",
+        "priority": 3,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "version-diff-1",
+        "title": "Add Version Diff Support",
+        "description": "Create version comparison engine to show documentation changes between crate versions",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["core-4"],
+        "effort": "large",
+        "priority": 3,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "export-1",
+        "title": "Implement Export Capabilities",
+        "description": "Add MCP tool endpoints for exporting documentation in JSON and Markdown formats",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "medium",
+        "priority": 3,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "batch-ops-1",
+        "title": "Enhance Batch Operations",
+        "description": "Optimize batch processing with memory-aware sizing and transaction management",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["core-4.2", "idx-3.2"],
+        "effort": "medium",
+        "priority": 3,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "rich-docs-1",
+        "title": "Extract Richer Documentation Content",
+        "description": "Enhance rustdoc parsing to extract additional metadata fields like trait bounds and generic parameters",
+        "status": "pending",
+        "progress": 0,
+        "dependencies": ["idx-1"],
+        "effort": "large",
+        "priority": 3,
+        "relatedTasks": [],
+        "roadblocks": []
       }
     ]
   }

@@ -57,6 +57,23 @@
             "description": "Comprehensive FastMCP documentation and integration guides"
           },
           "knownIssues": {
+            "securityVulnerabilities": {
+              "cve2025496": {
+                "vulnerability": "CVE-2025-49596 in MCP Inspector",
+                "severity": "CVSS 9.4 - Critical",
+                "description": "Command injection vulnerabilities through unsanitized parameters",
+                "risks": [
+                  "Command injection through unsanitized parameters",
+                  "STDIO communication corruption when writing to stdout",
+                  "Path traversal attacks without proper validation"
+                ],
+                "mitigation": "Upgrade MCP Inspector and implement parameter sanitization"
+              },
+              "protocolRequirements": {
+                "anyOfPatterns": "anyOf patterns essential for cross-client compatibility",
+                "parameterValidation": "Implement strict parameter validation to prevent injection attacks"
+              }
+            },
             "typeCoercion": {
               "issue": "FastMCP has known issues with automatic string-to-int conversion",
               "cause": "MCP clients (Claude Code) serialize numeric parameters as strings in protocol communication",
@@ -347,6 +364,12 @@
             "accuracyLoss": "Minimal accuracy loss with binary quantization"
           },
           "acceleration": "SIMD-accelerated distance calculations for hardware optimization",
+          "optimizationStrategies": {
+            "symbolInterning": "Use Symbol/interned strings for repeated identifiers",
+            "dynamicBatching": "Dynamic batching with configurable timeout for optimal throughput",
+            "onnxPreSerialization": "Pre-serialize ONNX models with offline optimization",
+            "containerWarmup": "Container warm-up strategies for serverless deployments"
+          },
           "optimizations": [
             "Chunk-based storage reduces memory O(NM)→O(N)",
             "Vector quantization: 75% memory reduction (float32→uint8)",
@@ -361,6 +384,20 @@
         "versionConstraint": "Version 0.7.1 provides significant performance improvements",
         "model": "BAAI/bge-small-en-v1.5",
         "dimensions": 384,
+        "onnxOptimization": {
+          "description": "ONNX Runtime offline optimization significantly reduces startup time",
+          "startupTimeReduction": "60-80% reduction in model loading time",
+          "configuration": {
+            "graphOptimizationLevel": "ORT_ENABLE_EXTENDED for balanced performance",
+            "offlineMode": "Use optimized_model_filepath to pre-serialize models",
+            "quantization": "Model quantization (fp32 to int8) reduces memory footprint and loading time"
+          },
+          "performanceProfile": {
+            "coldStart": "1.4s due to model loading",
+            "warmQueries": "150-360ms for subsequent queries",
+            "issue": "First query cold start creates noticeable latency spike"
+          }
+        },
         "modelComparison": {
           "allMiniLML6v2": {
             "model": "all-MiniLM-L6-v2",
@@ -1794,6 +1831,18 @@
         "use_case": "Handle network failures when downloading rustdoc JSON files"
       }
     },
+    "security_best_practices": {
+      "databaseSecurity": {
+        "parameterizedQueries": "Use parameterized queries instead of string concatenation to prevent SQL injection",
+        "rateLimiting": "Implement rate limiting (30 req/s recommended) to prevent abuse",
+        "credentialEncryption": "Encrypt stored credentials with proper access controls"
+      },
+      "inputValidation": {
+        "toolDescriptions": "Sanitize tool descriptions to prevent prompt injection attacks",
+        "directoryAccess": "Use allow-lists for directory access to prevent path traversal",
+        "parameterSanitization": "Implement comprehensive parameter sanitization"
+      }
+    },
     "security": {
       "mcpSecurity": {
         "schemaPoisoning": {
@@ -2519,6 +2568,51 @@
               "useStatements": "Analyze common use statement patterns in real codebases"
             }
           }
+        }
+      }
+    },
+    "fuzzy_matching_enhancements": {
+      "rapidFuzzOptimization": {
+        "library": "RapidFuzz",
+        "performance": "C++-optimized for significant performance improvement over FuzzyWuzzy",
+        "algorithm": "Modified Smith-Waterman algorithm for path matching",
+        "strategies": {
+          "tokenSortRatio": "token_sort_ratio() for order-independent matching",
+          "tokenSetRatio": "token_set_ratio() for partial substring matching",
+          "preprocessing": "Set preprocessing to false from RapidFuzz 3.0.0+ for case sensitivity control"
+        },
+        "bulkOperations": {
+          "method": "process.extract() for multiple comparisons",
+          "benefit": "Optimized batch processing for improved performance"
+        }
+      }
+    },
+    "documentation_processing": {
+      "structurePreservation": {
+        "markitdown": {
+          "library": "Microsoft's MarkItDown",
+          "purpose": "Preserving document structure during conversion",
+          "benefit": "Maintains formatting and hierarchical structure"
+        },
+        "pdfConversion": {
+          "library": "PyMuPDF4LLM",
+          "purpose": "PDF-to-Markdown conversion with structure preservation",
+          "advantage": "Better structure retention than standard PDF extractors"
+        },
+        "terminalRendering": {
+          "library": "Rich library",
+          "purpose": "Terminal-friendly rendering of structured content",
+          "features": "Syntax highlighting and formatted output"
+        }
+      },
+      "crossReferences": {
+        "sphinxDomains": {
+          "feature": "Sphinx-style domain cross-references support",
+          "benefit": "Enables semantic linking between documentation elements"
+        },
+        "mkdocstrings": {
+          "system": "mkdocstrings inventory system for cross-project references",
+          "capability": "Links between different project documentation"
         }
       }
     },

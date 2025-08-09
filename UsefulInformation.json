@@ -7,6 +7,29 @@
       "description": "Solutions to specific errors encountered during development",
       "entries": [
         {
+          "error": "Pre-ingestion fails in MCP mode with parameter validation errors",
+          "solution": "CLI arguments not properly synchronized with MCP mode configuration. Fix by ensuring environment variables are set correctly in mcp_server.py before invoking pre-ingestion.",
+          "context": "MCP mode requires different parameter handling than CLI mode",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "Cold start latency of 1.4s on first embedding generation",
+          "solution": "Implement embeddings warmup on startup using asyncio.create_task(). Pre-warm FastEmbed model with dummy embed. Use ONNX offline optimization with optimized_model_filepath.",
+          "context": "First query loads ONNX model into memory causing delay",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "await asyncio.create_task(self.embed_model.embed(['warmup']))"
+        },
+        {
+          "error": "Fuzzy path matching not finding obvious matches",
+          "solution": "Extend RapidFuzz scoring algorithm. Use token_sort_ratio() for unordered matches. Set preprocessing=false in RapidFuzz 3.0.0+ for case sensitivity. Implement bulk operations with process.extract().",
+          "context": "Current fuzzy matching too strict for item paths",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "from rapidfuzz import process, fuzz; process.extract(query, choices, scorer=fuzz.token_sort_ratio, preprocessing=False)"
+        },
+        {
           "error": "FastEmbed memory leak with large batches",
           "solution": "Use generator pattern with explicit cleanup: process in small batches (16 for CPU), call gc.collect() between batches, and use streaming instead of loading all at once",
           "context": "FastEmbed v0.7.1 has known memory issues when processing large numbers of embeddings",
@@ -491,6 +514,13 @@
     },
     "performanceIssues": {
       "description": "Performance bottlenecks and optimization strategies",
+      "performance_insights": [
+        "ONNX Runtime offline optimization reduces startup by 60-80%",
+        "Use ORT_ENABLE_EXTENDED for balanced performance without layout overhead",
+        "Model quantization (fp32 to int8) reduces memory by 4x",
+        "Request-scoped dependency caching in FastAPI avoids recomputation",
+        "Adaptive batch sizing based on memory monitoring prevents OOM"
+      ],
       "entries": [
         {
           "issue": "ONNX Runtime memory accumulation in FastEmbed",
@@ -1615,6 +1645,33 @@
     },
     "bestPractices": {
       "description": "Recommended practices and patterns for development",
+      "implementation_patterns": [
+        {
+          "pattern": "Embeddings warmup",
+          "implementation": "Follow popular_crates.py background task pattern",
+          "description": "Use asyncio.create_task() for warming up models on startup"
+        },
+        {
+          "pattern": "Export endpoints",
+          "implementation": "Use existing MCP tool endpoint patterns from app.py",
+          "description": "Leverage FastMCP integration patterns for consistent API design"
+        },
+        {
+          "pattern": "Batch operations",
+          "implementation": "Leverage existing DB_BATCH_SIZE=999 pattern",
+          "description": "Use consistent batch sizes across all database operations"
+        },
+        {
+          "pattern": "Error messages",
+          "implementation": "Extend validation.py with contextual examples",
+          "description": "Include valid ranges and examples in all error messages"
+        },
+        {
+          "pattern": "Version diff",
+          "implementation": "Create new table following embeddings table pattern",
+          "description": "Use consistent table schema patterns for new features"
+        }
+      ],
       "entries": [
         {
           "practice": "Dedicated embeddings for code examples",
@@ -1986,6 +2043,20 @@
     }
   },
   "securityConsiderations": {
+    "security_vulnerabilities": [
+      "CVE-2025-49596: Critical RCE in MCP Inspector (CVSS 9.4) - upgrade to v0.14.1+",
+      "Command injection possible through unsanitized file paths - use parameterized queries",
+      "Path traversal attacks via ../ sequences - implement allow-lists for directories",
+      "STDIO corruption from stdout writes - use stderr for all logging",
+      "Prompt injection via tool descriptions - sanitize all tool metadata"
+    ],
+    "compatibility_issues": [
+      "Windows path handling requires double backslashes in JSON config",
+      "Python ModuleNotFoundError - ensure consistent virtual environments",
+      "MCP clients reject array type parameters - use anyOf patterns",
+      "Platform-specific Python path resolution - use absolute paths",
+      "JSON Schema validation occurs before Pydantic - design schemas accordingly"
+    ],
     "placeholders": {
       "securityEmail": {
         "issue": "Security contact placeholder (security@example.com) should be updated",
