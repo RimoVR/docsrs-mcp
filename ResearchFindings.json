@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-08",
+  "lastUpdated": "2025-08-09",
   "research": {
     "modelContextProtocol": {
       "overview": "Open standard by Anthropic for LLM-tool communication",
@@ -822,6 +822,28 @@
               "batchInsertion": {
                 "technique": "Batch insertions with transactions",
                 "benefit": "Significantly improved database insertion performance"
+              },
+              "reExportOptimizations": {
+                "ijsonStreamingOptimized": {
+                  "backend": "yajl2_c",
+                  "benefit": "Provides optimal memory efficiency for large rustdoc JSON processing",
+                  "implementation": "Use ijson.parse() with yajl2_c backend for streaming re-export extraction"
+                },
+                "batchInsertions": {
+                  "technique": "executemany() for bulk database operations",
+                  "performanceGain": "70% reduction in database overhead",
+                  "implementation": "Group re-export insertions into batches using executemany()"
+                },
+                "sqliteIndexing": {
+                  "index": "(crate_id, alias_path)",
+                  "performance": "O(log n) lookup performance",
+                  "benefit": "Efficient querying of re-export relationships"
+                },
+                "lruCaching": {
+                  "mechanism": "LRU cache with TTL for repeated database queries",
+                  "benefit": "Prevents redundant database lookups for frequently accessed re-exports",
+                  "implementation": "Cache resolved re-export paths with time-based expiration"
+                }
               }
             }
           },
@@ -932,6 +954,54 @@
                 "typingImports": "Missing Optional import fixed by adding to typing imports",
                 "extensionLoading": "sqlite-vec extension must be loaded before using vec_distance_L2 function",
                 "dataFormat": "Old data format (list of strings) handled with automatic conversion to new format"
+              }
+            },
+            "reExportDiscovery": {
+              "rustdocJsonFormat": {
+                "kindField": {
+                  "importIdentifier": "Items with kind field containing 'import' or 'use'",
+                  "purpose": "Identifies re-export items in rustdoc JSON structure",
+                  "implementation": "Filter rustdoc items by checking kind field for import/use values"
+                },
+                "pathInformation": {
+                  "sourceField": "inner.source",
+                  "location": "Path information available in inner.source field of import items",
+                  "benefit": "Provides original module path for re-exported items"
+                },
+                "targetPathExtraction": {
+                  "source": "rustdoc item metadata",
+                  "method": "Extract target path from rustdoc item metadata fields",
+                  "implementation": "Parse import item metadata to determine final re-export destination"
+                },
+                "globImports": {
+                  "indicator": "Asterisk (*) in path indicates glob import",
+                  "pattern": "Glob imports indicated by '*' character in import path",
+                  "specialHandling": "Requires special processing for wildcard re-export patterns"
+                }
+              },
+              "patternAnalysis": {
+                "commonPatterns": {
+                  "traitReExports": {
+                    "example": "serde::Deserialize",
+                    "description": "Common pattern for re-exporting traits from submodules",
+                    "frequency": "High frequency in ecosystem crates"
+                  },
+                  "functionReExports": {
+                    "example": "tokio::spawn",
+                    "description": "Function re-exports for convenience APIs",
+                    "benefit": "Provides simplified access to commonly used functions"
+                  },
+                  "moduleFlattening": {
+                    "example": "std::collections::HashMap from std::collections::hash_map::HashMap",
+                    "description": "Re-exports to flatten deeply nested module hierarchies",
+                    "purpose": "Improves API ergonomics by reducing import path complexity"
+                  }
+                },
+                "globImportHandling": {
+                  "wildcardPatterns": "Special handling required for wildcard re-export patterns",
+                  "implementation": "Detect and process glob imports with asterisk (*) indicators",
+                  "complexity": "Requires resolution of all items in the glob-imported module"
+                }
               }
             }
           },

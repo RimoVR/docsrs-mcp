@@ -7,6 +7,8 @@ import aiosqlite
 from rapidfuzz import fuzz, process
 from rapidfuzz.utils import default_process
 
+from .database import get_discovered_reexports
+
 logger = logging.getLogger(__name__)
 
 # Path aliases for common Rust documentation patterns
@@ -121,17 +123,26 @@ PATH_ALIASES = {
 _path_cache: dict[str, tuple[float, list[str]]] = {}
 PATH_CACHE_TTL = 300  # 5 minutes
 
+# Cache for discovered re-exports
+_reexport_cache: dict[str, tuple[float, dict[str, str]]] = {}
+REEXPORT_CACHE_TTL = 300  # 5 minutes
 
-def resolve_path_alias(crate_name: str, item_path: str) -> str:
+
+async def resolve_path_alias(
+    crate_name: str, item_path: str, db_path: str | None = None
+) -> str:
     """
     Resolve common path aliases to their actual rustdoc paths.
 
-    Returns the resolved path or original if no alias exists.
-    O(1) operation with no exceptions.
+    Priority order:
+    1. Check discovered re-exports from database
+    2. Check static PATH_ALIASES
+    3. Return original path
 
     Args:
         crate_name: Name of the crate being searched
         item_path: The path to resolve
+        db_path: Optional path to database for discovered re-exports
 
     Returns:
         The resolved path or original if no alias found
@@ -140,17 +151,60 @@ def resolve_path_alias(crate_name: str, item_path: str) -> str:
     if item_path == "crate":
         return item_path
 
+    # First, check discovered re-exports from database if available
+    if db_path:
+        try:
+            # Check cache first
+            cache_key = f"{crate_name}_reexports"
+            reexports = None
+
+            if cache_key in _reexport_cache:
+                timestamp, cached_reexports = _reexport_cache[cache_key]
+                if time.time() - timestamp < REEXPORT_CACHE_TTL:
+                    reexports = cached_reexports
+                else:
+                    # Expired, remove from cache
+                    del _reexport_cache[cache_key]
+
+            # Load from database if not cached
+            if reexports is None:
+                reexports = await get_discovered_reexports(db_path, crate_name)
+
+                # Cache the results
+                if reexports:
+                    _reexport_cache[cache_key] = (time.time(), reexports)
+
+            # Check with crate prefix
+            crate_qualified = f"{crate_name}::{item_path}"
+            if crate_qualified in reexports:
+                resolved = reexports[crate_qualified]
+                logger.debug(
+                    f"Resolved via discovered re-export: {item_path} -> {resolved}"
+                )
+                return resolved
+
+            # Check without crate prefix
+            if item_path in reexports:
+                resolved = reexports[item_path]
+                logger.debug(
+                    f"Resolved via discovered re-export: {item_path} -> {resolved}"
+                )
+                return resolved
+        except Exception as e:
+            logger.debug(f"Error checking discovered re-exports: {e}")
+
+    # Fallback to static PATH_ALIASES
     # Check for direct alias with crate prefix
     crate_qualified = f"{crate_name}::{item_path}"
     if crate_qualified in PATH_ALIASES:
         resolved = PATH_ALIASES[crate_qualified]
-        logger.debug(f"Resolved crate-specific alias {item_path} -> {resolved}")
+        logger.debug(f"Resolved via static alias: {item_path} -> {resolved}")
         return resolved
 
     # Try without crate prefix for common patterns
     if item_path in PATH_ALIASES:
         resolved = PATH_ALIASES[item_path]
-        logger.debug(f"Resolved alias {item_path} -> {resolved}")
+        logger.debug(f"Resolved via static alias: {item_path} -> {resolved}")
         return resolved
 
     # No alias found, return original

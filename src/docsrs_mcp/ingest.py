@@ -21,6 +21,8 @@ import ijson
 import sqlite_vec
 import zstandard
 from fastembed import TextEmbedding
+from pygments.lexers import guess_lexer
+from pygments.util import ClassNotFound
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .config import (
@@ -38,7 +40,13 @@ from .config import (
     RUST_VERSION_MANIFEST_URL,
     STDLIB_CRATES,
 )
-from .database import get_db_path, init_database, store_crate_metadata, store_modules
+from .database import (
+    get_db_path,
+    init_database,
+    store_crate_metadata,
+    store_modules,
+    store_reexports,
+)
 from .memory_utils import (
     MemoryMonitor,
     get_adaptive_batch_size,
@@ -640,11 +648,6 @@ def extract_code_examples(docstring: str) -> str | None:
         return None
 
     try:
-        import json
-
-        from pygments.lexers import guess_lexer
-        from pygments.util import ClassNotFound
-
         # Match code blocks with optional language tags
         # Captures: 1) optional language tag, 2) code content
         pattern = r"```(\w*)\s*\n(.*?)```"
@@ -1095,6 +1098,41 @@ async def parse_rustdoc_items_streaming(json_content: str):
                     else:
                         continue
 
+                # Check if it's an import/re-export item
+                if "use" in kind_lower or "import" in kind_lower:
+                    # This is a re-export - extract mapping information
+                    if isinstance(inner, dict):
+                        use_info = inner.get("Use") or inner.get("use") or inner
+                        if use_info:
+                            # Extract source path and check for glob
+                            source = use_info.get("source")
+                            is_glob = use_info.get("is_glob", False)
+                            
+                            # For re-exports, the name might be in use_info instead of item_info
+                            use_name = use_info.get("name") or name
+
+                            # Build the re-export mapping
+                            if source and use_name:
+                                # The alias path is the current path + name
+                                alias_path = f"{path}::{use_name}" if path else use_name
+                                # The actual path is the source
+                                actual_path = source
+
+                                # Yield a special re-export item
+                                yield {
+                                    "_reexport": {
+                                        "alias_path": alias_path,
+                                        "actual_path": actual_path,
+                                        "is_glob": is_glob,
+                                    }
+                                }
+
+                                # Log for debugging
+                                logger.debug(
+                                    f"Found re-export: {alias_path} -> {actual_path} (glob: {is_glob})"
+                                )
+                    continue  # Don't process as regular item
+
                 # Check if it's a type we want to index
                 indexable_kinds = [
                     "function",
@@ -1285,9 +1323,8 @@ async def evict_cache_if_needed() -> None:
         if PRIORITY_CACHE_EVICTION_ENABLED:
             try:
                 # Get popular crates data for priority scoring
-                # Import here to avoid circular dependency
                 from .popular_crates import get_popular_manager
-
+                
                 manager = get_popular_manager()
                 popular_crates = await manager.get_popular_crates_with_metadata()
 
@@ -1674,10 +1711,14 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 # Collect items from streaming parser
                 items = []
                 modules = {}
+                reexports = []
                 async for item in parse_rustdoc_items_streaming(json_content):
                     # Check for special modules marker
                     if "_modules" in item:
                         modules = item["_modules"]
+                    # Check for re-export items
+                    elif "_reexport" in item:
+                        reexports.append(item["_reexport"])
                     else:
                         items.append(item)
 
@@ -1691,6 +1732,11 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 if modules:
                     await store_modules(db_path, crate_id, modules)
                     logger.info(f"Stored {len(modules)} modules with hierarchy")
+
+                # Store discovered re-exports
+                if reexports:
+                    await store_reexports(db_path, crate_id, reexports)
+                    logger.info(f"Stored {len(reexports)} re-export mappings")
 
                 # Transform items to chunks
                 chunks = []

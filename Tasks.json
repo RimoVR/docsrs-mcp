@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-08T22:00:00Z",
+    "lastUpdated": "2025-08-09T00:00:00Z",
     "priorities": ["critical", "high", "medium", "low"],
     "statuses": ["pending", "in_progress", "completed", "blocked", "failed"]
   },
@@ -747,6 +747,65 @@
             "id": "task-003.4",
             "title": "Integrate with existing ingestion pipeline",
             "description": "Connect popular crate pre-ingestion with core ingestion functionality",
+            "status": "completed",
+            "progress": 100
+          }
+        ]
+      },
+      {
+        "id": "re-export-1",
+        "title": "Implement re-export auto-discovery from rustdoc JSON",
+        "description": "Automatically discover and persist re-export patterns from rustdoc JSON during crate ingestion to reduce manual PATH_ALIASES maintenance",
+        "status": "completed",
+        "progress": 100,
+        "dependencies": ["core-4"],
+        "relatedTasks": ["core-7"],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-08T23:30:00Z",
+          "implementation": "Successfully implemented auto-discovery of re-exports from rustdoc JSON during ingestion with database persistence and caching",
+          "notes": "Added reexports table to database schema for storing discovered mappings. Modified parse_rustdoc_items_streaming() to detect 'import'/'use' items in rustdoc JSON. Implemented store_reexports() for batch database insertions. Enhanced resolve_path_alias() with priority resolution (discovered → static → fuzzy). Added LRU caching with 5-minute TTL for discovered re-exports. Tested with serde, tokio, and log crates. Performance remains under 3s cold ingest threshold with sub-millisecond path resolution. Backward compatible with existing PATH_ALIASES fallback."
+        },
+        "subtasks": [
+          {
+            "id": "re-export-1.1",
+            "title": "Extend database schema for re-exports",
+            "description": "Add reexports table with foreign key relationships",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "re-export-1.2",
+            "title": "Extract re-exports during parsing",
+            "description": "Detect import/use items in rustdoc JSON stream",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "re-export-1.3",
+            "title": "Store and retrieve re-exports",
+            "description": "Implement database operations for re-export persistence",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "re-export-1.4",
+            "title": "Integrate with path resolution",
+            "description": "Update resolve_path_alias to use discovered re-exports",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "re-export-1.5",
+            "title": "Add caching layer",
+            "description": "Implement TTL-based caching for performance",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "re-export-1.6",
+            "title": "Test with real crates",
+            "description": "Verify functionality with serde, tokio, and other crates",
             "status": "completed",
             "progress": 100
           }

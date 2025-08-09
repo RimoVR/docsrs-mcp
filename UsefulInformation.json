@@ -379,6 +379,20 @@
           "prevention": "Remember sqlite-vec requires explicit k constraint in WHERE clause, not just LIMIT in query",
           "dateEncountered": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/app.py"]
+        },
+        {
+          "error": "AttributeError: 'FixtureDef' object has no attribute 'unittest' with pytest 8.4.1 and pytest-asyncio 0.21.1",
+          "context": "Running async tests during re-export auto-discovery implementation",
+          "solution": "Upgrade to pytest-asyncio 1.1.0 which has Python 3.13 support and resolves compatibility issues",
+          "prevention": "Always check version compatibility matrix when encountering fixture-related errors, especially after Python version upgrades",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["pyproject.toml", "tests/test_*.py"],
+          "upgradeCommand": "uv add --dev pytest-asyncio>=1.1.0",
+          "versionMatrix": {
+            "pytest": ">=8.0.0",
+            "pytest-asyncio": ">=1.1.0",
+            "python": ">=3.10"
+          }
         }
       ]
     },
@@ -1500,6 +1514,20 @@
           "context": "Priority-aware cache eviction feature implementation",
           "dateEncountered": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/popular_crates.py"]
+        },
+        {
+          "issue": "Cache invalidation strategy for re-export path resolution",
+          "solution": "Implement 5-minute TTL with cache key per crate for balancing cache freshness with performance. Use simple dictionary cache with timestamp tracking for path resolution caching.",
+          "lesson": "Slight staleness (5 minutes) is acceptable for path resolution as re-exports don't change frequently, but cache must be invalidated per crate to avoid cross-crate contamination.",
+          "context": "Re-export auto-discovery implementation requiring fast path lookups with reasonable freshness",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/ingest.py"],
+          "performanceImpact": {
+            "cacheTTL": "5 minutes",
+            "keyStrategy": "Per-crate isolation",
+            "tradeoff": "Slight staleness acceptable for 90% cache hit rate",
+            "fallbackBehavior": "Direct database lookup on cache miss"
+          }
         }
       ]
     },
@@ -1615,7 +1643,10 @@
       "PATH_ALIASES expansion: Add common Rust patterns like tokio::spawn -> tokio::task::spawn for better UX",
       "Fuzzy matching optimization: Consider Nucleo library for 6x performance improvement over RapidFuzz",
       "Hybrid search strategy: Combine vector similarity (60%) with BM25 keyword search (40%) for balanced results",
-      "Debug mode implementation: Add debug=true parameter for detailed query scoring and performance analysis"
+      "Debug mode implementation: Add debug=true parameter for detailed query scoring and performance analysis",
+      "Re-export detection in rustdoc JSON: Look for items with 'kind' containing 'import' or 'use' keywords, extract alias from item path and target from inner structure",
+      "Re-export path resolution: Extract alias name from item path array (last element) and resolve target path from inner.id or inner.path fields",
+      "Re-export auto-discovery: Use streaming JSON parser to identify re-export patterns without loading entire JSON into memory"
     ],
     "rateLimiting": [
       "MUST include Request parameter in endpoint function signatures or rate limiting won't work",
@@ -1772,7 +1803,9 @@
       "codeExampleExtraction": "Language detection adds minimal overhead (~200ms warm queries), deduplication by hash prevents duplicates efficiently, backward compatibility essential for format changes",
       "fuzzyPathResolution": "Use fallback-only approach with RapidFuzz for minimal performance impact, cache paths per crate, implement simple TTL dictionary cache instead of complex caching frameworks",
       "pathAliasResolution": "Static PATH_ALIASES dictionary with O(1) lookup adds <1ms overhead, maintains sub-500ms response time requirement while significantly improving user experience",
-      "implBlockParsing": "Impl block parsing uses existing streaming architecture without performance impact, composite naming creates searchable identifiers efficiently, no schema changes required for trait implementation search"
+      "implBlockParsing": "Impl block parsing uses existing streaming architecture without performance impact, composite naming creates searchable identifiers efficiently, no schema changes required for trait implementation search",
+      "databaseBatchInsertion": "Use executemany() with IGNORE clause for duplicate handling achieves 70% reduction in insertion time compared to individual INSERT statements, especially beneficial for large re-export datasets",
+      "batchInsertOptimization": "Pre-process re-export data into tuples before batching to avoid repeated serialization overhead during executemany() operations"
     }
   },
   "codeQuality": {

@@ -138,6 +138,19 @@ async def init_database(db_path: Path) -> None:
             )
         """)
 
+        # Create reexports table for auto-discovered re-export mappings
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reexports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                crate_id INTEGER NOT NULL,
+                alias_path TEXT NOT NULL,
+                actual_path TEXT NOT NULL,
+                is_glob BOOLEAN DEFAULT 0,
+                FOREIGN KEY (crate_id) REFERENCES crate_metadata(id) ON DELETE CASCADE,
+                UNIQUE(crate_id, alias_path)
+            )
+        """)
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS embeddings (
                 id INTEGER PRIMARY KEY,
@@ -175,6 +188,12 @@ async def init_database(db_path: Path) -> None:
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_modules_crate
             ON modules(crate_id, parent_id)
+        """)
+
+        # Create index for reexports lookup performance
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reexports_lookup
+            ON reexports(crate_id, alias_path)
         """)
 
         # Create composite index for filtering performance
@@ -284,6 +303,90 @@ async def store_crate_metadata(
         )
         await db.commit()
         return cursor.lastrowid
+
+
+async def store_reexports(db_path: Path, crate_id: int, reexports: list[dict]) -> None:
+    """Store discovered re-export mappings for a crate.
+
+    Args:
+        db_path: Path to database
+        crate_id: ID of the parent crate
+        reexports: List of re-export dicts with alias_path, actual_path, is_glob
+    """
+    if not reexports:
+        return
+
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Prepare batch data
+        reexport_data = [
+            (
+                crate_id,
+                reexport["alias_path"],
+                reexport["actual_path"],
+                reexport.get("is_glob", False),
+            )
+            for reexport in reexports
+        ]
+
+        # Batch insert with IGNORE for duplicates
+        await db.executemany(
+            """
+            INSERT OR IGNORE INTO reexports (crate_id, alias_path, actual_path, is_glob)
+            VALUES (?, ?, ?, ?)
+            """,
+            reexport_data,
+        )
+
+        await db.commit()
+        logger.info(f"Stored {len(reexports)} re-export mappings")
+
+
+async def get_discovered_reexports(
+    db_path: Path, crate_name: str, version: str | None = None
+) -> dict[str, str]:
+    """Get auto-discovered re-exports for a crate.
+
+    Args:
+        db_path: Path to database
+        crate_name: Name of the crate
+        version: Optional version (for logging/future use)
+
+    Returns:
+        Dictionary mapping alias_path to actual_path
+    """
+    reexport_map = {}
+
+    try:
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            # Query re-exports for this crate
+            cursor = await db.execute(
+                """
+                SELECT r.alias_path, r.actual_path, r.is_glob
+                FROM reexports r
+                JOIN crate_metadata c ON r.crate_id = c.id
+                WHERE c.name = ?
+                """,
+                (crate_name,),
+            )
+
+            async for row in cursor:
+                alias_path, actual_path, is_glob = row
+                # Store mapping
+                reexport_map[alias_path] = actual_path
+
+                # Also store without crate prefix for convenience
+                if alias_path.startswith(f"{crate_name}::"):
+                    short_alias = alias_path[len(crate_name) + 2 :]
+                    reexport_map[short_alias] = actual_path
+
+            if reexport_map:
+                logger.debug(
+                    f"Loaded {len(reexport_map)} re-export mappings for {crate_name}"
+                )
+    except Exception as e:
+        logger.warning(f"Error loading re-exports for {crate_name}: {e}")
+
+    return reexport_map
 
 
 async def store_modules(db_path: Path, crate_id: int, modules: dict) -> None:

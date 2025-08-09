@@ -1,17 +1,28 @@
 """FastAPI application for docsrs-mcp server."""
 
 import asyncio
+import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
 import aiosqlite
 import psutil
+import sqlite_vec
 from fastapi import FastAPI, HTTPException, Request
 from slowapi.errors import RateLimitExceeded
 
-from .database import get_module_tree as get_module_tree_from_db
-from .database import get_see_also_suggestions, search_embeddings
+from . import config
+from .database import (
+    CACHE_DIR,
+    get_see_also_suggestions,
+    search_embeddings,
+    search_example_embeddings,
+)
+from .database import (
+    get_module_tree as get_module_tree_from_db,
+)
 from .fuzzy_resolver import get_fuzzy_suggestions_with_fallback, resolve_path_alias
 from .ingest import get_embedding_model, ingest_crate
 from .middleware import limiter, rate_limit_handler
@@ -34,7 +45,13 @@ from .models import (
     StartPreIngestionRequest,
     StartPreIngestionResponse,
 )
-from .popular_crates import get_popular_crates_status
+from .popular_crates import (
+    _ingestion_scheduler,
+    _popular_crates_manager,
+    _pre_ingestion_worker,
+    get_popular_crates_status,
+    start_pre_ingestion,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -102,12 +119,8 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 @app.on_event("startup")
 async def startup_event():
     """Handle application startup tasks."""
-    from . import config
-
     # Start pre-ingestion if enabled via environment variable
     if config.PRE_INGEST_ENABLED:
-        from .popular_crates import start_pre_ingestion
-
         logger.info("Starting background pre-ingestion of popular crates")
         await start_pre_ingestion()
 
@@ -140,8 +153,6 @@ async def health_check():
 
     # Database health - check cache directory
     try:
-        from .database import CACHE_DIR
-
         cache_count = len(list(CACHE_DIR.glob("*/*.db")))
         subsystems["database"] = {
             "status": "healthy",
@@ -205,11 +216,6 @@ async def pre_ingestion_health():
     - Scheduler status if enabled
     - Cache statistics from PopularCratesManager
     """
-    from .popular_crates import (
-        _ingestion_scheduler,
-        _popular_crates_manager,
-        _pre_ingestion_worker,
-    )
 
     if not _pre_ingestion_worker:
         return {"status": "not_initialized", "message": "Pre-ingestion is not enabled"}
@@ -727,7 +733,9 @@ async def get_item_doc(request: Request, params: GetItemDocRequest):
         db_path = await ingest_crate(params.crate_name, params.version)
 
         # Resolve any path aliases first
-        resolved_path = resolve_path_alias(params.crate_name, params.item_path)
+        resolved_path = await resolve_path_alias(
+            params.crate_name, params.item_path, str(db_path)
+        )
 
         # Search for the specific item
         async with aiosqlite.connect(db_path) as db:
@@ -791,10 +799,6 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
     - Semantic search across example content
     """
     try:
-        import json
-
-        from .database import search_example_embeddings
-
         # Ingest crate if not already done
         db_path = await ingest_crate(params.crate_name, params.version)
 
@@ -846,8 +850,6 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
         # Fallback to searching in the main embeddings table
         async with aiosqlite.connect(db_path) as db:
             # Load sqlite-vec extension
-            import sqlite_vec
-
             await db.enable_load_extension(True)
             await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
             await db.enable_load_extension(False)
@@ -1106,8 +1108,6 @@ async def start_pre_ingestion_tool(
 
         # Apply configuration if provided
         if params.concurrency is not None:
-            import os
-
             os.environ["PRE_INGEST_CONCURRENCY"] = str(params.concurrency)
 
         if params.count is not None:
@@ -1116,8 +1116,6 @@ async def start_pre_ingestion_tool(
             pass
 
         # Start or restart pre-ingestion
-        from .popular_crates import start_pre_ingestion
-
         # If forcing restart, we might need to stop existing first
         # (This is a simplification - actual implementation would be more robust)
         if is_running and params.force:
