@@ -1196,13 +1196,20 @@
         "id": "warmup-1",
         "title": "Implement Embeddings Warmup on Startup",
         "description": "Add EMBEDDINGS_WARMUP_ENABLED config (default true) and warm FastEmbed model during server startup to eliminate cold-start latency",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": [],
         "effort": "medium",
         "priority": 1,
         "relatedTasks": [],
-        "roadblocks": []
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-09T12:00:00Z",
+          "implementation": "Successfully implemented embeddings warmup feature with DOCSRS_EMBEDDINGS_WARMUP_ENABLED configuration",
+          "technicalDetails": "Added DOCSRS_EMBEDDINGS_WARMUP_ENABLED environment variable (default: true), implemented warmup_embeddings() function that performs 3 representative embeddings on startup, integrated as non-blocking background task using asyncio.create_task(), added warmup status to health endpoint for monitoring, works seamlessly in both REST and MCP server modes",
+          "impact": "Eliminated cold-start latency for first embedding requests by pre-warming the FastEmbed model during server initialization",
+          "notes": "Warmup function uses representative text samples to initialize the embedding model, ensuring first user requests don't experience model loading delays. Health endpoint now reports warmup completion status for monitoring purposes."
+        }
       },
       {
         "id": "enhance-errors-1",

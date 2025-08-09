@@ -47,6 +47,25 @@ def run_mcp_server():
             thread = threading.Thread(target=run_pre_ingestion, daemon=True)
             thread.start()
 
+        # Start embedding warmup if enabled (matching app.py pattern)
+        if config.EMBEDDINGS_WARMUP_ENABLED:
+            logger.info("Starting embedding warmup in background")
+
+            # Create separate event loop for warmup
+            def run_warmup():
+                from .ingest import warmup_embedding_model
+
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(warmup_embedding_model())
+                finally:
+                    loop.close()
+
+            # Start in background thread (non-blocking)
+            warmup_thread = threading.Thread(target=run_warmup, daemon=True)
+            warmup_thread.start()
+
         # Run with default STDIO transport for Claude Desktop
         mcp.run()
     except Exception as e:

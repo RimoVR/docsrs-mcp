@@ -19,11 +19,19 @@
         },
         {
           "error": "Cold start latency of 1.4s on first embedding generation",
-          "solution": "Implement embeddings warmup on startup using asyncio.create_task(). Pre-warm FastEmbed model with dummy embed. Use ONNX offline optimization with optimized_model_filepath.",
+          "rootCause": "First embedding request triggers ONNX model loading into memory, causing significant delay",
+          "solution": "Implement comprehensive embedding warmup on server startup with representative text samples and dual-mode support",
           "context": "First query loads ONNX model into memory causing delay",
+          "implementation": [
+            "Use 3-5 representative text samples (short, medium, long) for thorough model warmup",
+            "Fire-and-forget pattern with asyncio.create_task() to avoid blocking server startup",
+            "Global status tracking for health endpoint integration",
+            "Dual-mode support: REST mode uses startup_event with asyncio, MCP mode uses threading with separate event loop"
+          ],
+          "pattern": "Fire-and-forget background warmup to eliminate cold-start latency",
           "dateEncountered": "2025-08-09",
-          "relatedFiles": ["src/docsrs_mcp/app.py"],
-          "codeExample": "await asyncio.create_task(self.embed_model.embed(['warmup']))"
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/mcp_server.py"],
+          "codeExample": "# REST mode\nasync def startup_event():\n    asyncio.create_task(warmup_embeddings())\n\n# MCP mode\ndef start_warmup_thread():\n    def warmup_worker():\n        loop = asyncio.new_event_loop()\n        asyncio.set_event_loop(loop)\n        loop.run_until_complete(warmup_embeddings())\n    threading.Thread(target=warmup_worker, daemon=True).start()\n\n# Shared warmup function\nasync def warmup_embeddings():\n    samples = ['short', 'medium length text sample', 'longer text sample for comprehensive model warmup']\n    await embed_model.embed(samples)"
         },
         {
           "error": "Fuzzy path matching not finding obvious matches",
@@ -1701,8 +1709,14 @@
       "implementation_patterns": [
         {
           "pattern": "Embeddings warmup",
-          "implementation": "Follow popular_crates.py background task pattern",
-          "description": "Use asyncio.create_task() for warming up models on startup"
+          "implementation": "Comprehensive dual-mode warmup with representative samples",
+          "description": "Eliminate cold-start latency through proactive model warming with fire-and-forget pattern",
+          "details": {
+            "samples": "Use 3-5 representative text samples (short, medium, long) for thorough warmup",
+            "execution": "Fire-and-forget with asyncio.create_task() to avoid blocking startup",
+            "tracking": "Global status tracking for health endpoint integration",
+            "dualMode": "REST mode: startup_event + asyncio, MCP mode: threading + separate event loop"
+          }
         },
         {
           "pattern": "Export endpoints",
@@ -1733,6 +1747,38 @@
           "benefits": ["More precise example search", "Reduced storage through deduplication", "Better search performance with dedicated indexes"],
           "caveats": ["First search is slower due to model loading", "Requires additional database storage"],
           "dateAdded": "2025-08-07"
+        },
+        {
+          "practice": "Embedding warmup implementation patterns",
+          "description": "Best practices for eliminating cold-start latency in embedding-based applications",
+          "implementation": {
+            "representativeSamples": "Use 3-5 text samples of varying lengths to thoroughly warm up the model: short (~10 chars), medium (~100 chars), long (~500+ chars)",
+            "fireAndForgetPattern": "Use asyncio.create_task() for non-blocking execution that doesn't delay server startup",
+            "globalStatusTracking": "Maintain warmup status flags for health endpoint integration and monitoring",
+            "dualModeSupport": {
+              "restMode": "Use FastAPI startup_event with asyncio for async context",
+              "mcpMode": "Use threading.Thread with separate event loop for STDIO compatibility"
+            },
+            "sharedWarmupFunction": "Both modes call the same async warmup function to eliminate code duplication"
+          },
+          "benefits": [
+            "Eliminates 1.4s cold-start latency on first embedding request",
+            "Non-blocking server startup maintains responsiveness",
+            "Health endpoints can report warmup status for monitoring",
+            "Consistent performance across all embedding operations"
+          ],
+          "codePattern": {
+            "restMode": "@app.on_event('startup')\nasync def startup_event():\n    asyncio.create_task(warmup_embeddings())",
+            "mcpMode": "def start_warmup_thread():\n    def warmup_worker():\n        loop = asyncio.new_event_loop()\n        asyncio.set_event_loop(loop)\n        loop.run_until_complete(warmup_embeddings())\n    threading.Thread(target=warmup_worker, daemon=True).start()",
+            "sharedFunction": "async def warmup_embeddings():\n    samples = ['short', 'medium length sample', 'comprehensive warmup text']\n    await embed_model.embed(samples)\n    global warmup_complete\n    warmup_complete = True"
+          },
+          "considerations": [
+            "Use daemon threads in MCP mode to avoid blocking process termination",
+            "Include warmup status in health endpoints for monitoring",
+            "Representative samples should reflect actual usage patterns",
+            "Fire-and-forget pattern prevents startup delays"
+          ],
+          "dateAdded": "2025-08-09"
         }
       ]
     },

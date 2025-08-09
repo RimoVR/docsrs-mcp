@@ -59,6 +59,9 @@ logger = logging.getLogger(__name__)
 # Global embedding model instance
 _embedding_model: TextEmbedding | None = None
 
+# Global warmup status for health endpoint
+_embeddings_warmed: bool = False
+
 # Global per-crate lock registry to prevent duplicate ingestion
 _crate_locks: dict[str, asyncio.Lock] = {}
 
@@ -102,6 +105,55 @@ def cleanup_embedding_model() -> None:
             trigger_gc_if_needed()
         except Exception as e:
             logger.warning(f"Error during embedding model cleanup: {e}")
+
+
+async def warmup_embedding_model() -> None:
+    """Warm up the embedding model to eliminate cold-start latency."""
+    import asyncio
+
+    from . import config
+
+    if not config.EMBEDDINGS_WARMUP_ENABLED:
+        return
+
+    try:
+        # Create background task to not block startup
+        warmup_task = asyncio.create_task(_perform_warmup())
+        # Fire-and-forget pattern from popular_crates.py
+        logger.info("Starting embedding model warmup in background")
+    except Exception as e:
+        logger.warning(f"Failed to start embedding warmup: {e}")
+        # Non-critical - continue without warmup
+
+
+async def _perform_warmup() -> None:
+    """Perform actual warmup in background."""
+    global _embeddings_warmed
+    try:
+        # Trigger model loading via existing function
+        model = get_embedding_model()
+
+        # Perform 3-5 representative embeddings (best practice)
+        warmup_texts = [
+            "async runtime spawn tasks",  # Short text
+            "The Rust programming language provides memory safety without garbage collection through its ownership system and borrow checker",  # Medium text
+            " ".join(["token"] * 100),  # Long text for edge case
+        ]
+
+        for text in warmup_texts:
+            await asyncio.to_thread(model.embed, [text])
+
+        # Set warmup status to true on success
+        _embeddings_warmed = True
+        logger.info("Embedding model warmup completed successfully")
+    except Exception as e:
+        logger.warning(f"Embedding warmup failed: {e}")
+        # Non-critical failure - service continues
+
+
+def get_warmup_status() -> bool:
+    """Get the current warmup status for health endpoint."""
+    return _embeddings_warmed
 
 
 async def get_crate_lock(crate_name: str, version: str) -> asyncio.Lock:

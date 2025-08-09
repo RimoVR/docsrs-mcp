@@ -306,7 +306,8 @@ async def test_api_error_response_format():
 
     # Test invalid k parameter
     response = client.post(
-        "/mcp/tools/search_items", json={"crate_name": "tokio", "query": "test", "k": "invalid"}
+        "/mcp/tools/search_items",
+        json={"crate_name": "tokio", "query": "test", "k": "invalid"},
     )
 
     assert response.status_code == 422

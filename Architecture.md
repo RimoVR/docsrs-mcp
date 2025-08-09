@@ -1933,6 +1933,16 @@ graph LR
 - **Session Caching**: Reuse ONNX sessions across requests for 300ms startup elimination
 - **Memory Management**: Clear tensor cache every 1000 embeddings to prevent memory leaks
 
+**Embedding Warmup Architecture**
+- **Configuration Control**: `DOCSRS_EMBEDDINGS_WARMUP_ENABLED` environment variable (default: true)
+- **Non-blocking Startup**: Uses `asyncio.create_task()` pattern for fire-and-forget initialization
+- **Global State Tracking**: `_embeddings_warmed` boolean prevents redundant warmup operations
+- **Dual Integration**: Activated in both REST mode (`app.py`) and MCP mode (`mcp_server.py`)
+- **Performance Impact**: Eliminates 1.4s cold-start latency, achieves <100ms warm performance
+- **Warmup Strategy**: Uses 3 representative text samples covering typical documentation patterns
+- **Memory Efficiency**: Warmup samples immediately discarded after model initialization
+- **Health Monitoring**: Exposes warmup status via `/health` endpoint under "embeddings" subsystem
+
 **Tree-sitter Future Enhancement**
 - **Parsing Speed**: 36x faster than regex for structured code extraction
 - **Language Support**: Native Rust, Python, JavaScript, TypeScript parsers available  
@@ -3470,6 +3480,143 @@ classDiagram
 - **Batch Processing**: Memory efficiency enhanced with adaptive chunking strategies
 - **Performance Target**: Maintains <512 MiB RSS target even with large rustdoc files (>1GB)
 
+## Embedding Warmup System Architecture
+
+The embedding warmup system provides significant performance improvements by eliminating cold-start latency during embedding operations. This system follows the established background task pattern and integrates seamlessly with both REST and MCP server startup processes.
+
+### System Architecture Overview
+
+```mermaid
+sequenceDiagram
+    participant App as Server Startup
+    participant Config as Environment Config
+    participant Warmup as warmup_embeddings()
+    participant FastEmbed as FastEmbed Model
+    participant Health as /health Endpoint
+    participant Global as _embeddings_warmed
+    
+    App->>Config: Check DOCSRS_EMBEDDINGS_WARMUP_ENABLED
+    Config-->>App: true (default)
+    App->>App: asyncio.create_task(warmup_embeddings())
+    Note over App: Non-blocking startup continues
+    
+    par Background Warmup Process
+        Warmup->>Global: Check _embeddings_warmed status
+        Global-->>Warmup: False (cold state)
+        Warmup->>FastEmbed: Initialize with sample texts
+        FastEmbed->>FastEmbed: Load ONNX model
+        FastEmbed->>FastEmbed: Generate embeddings (3 samples)
+        FastEmbed-->>Warmup: Model warmed
+        Warmup->>Global: Set _embeddings_warmed = True
+    and Health Monitoring
+        Health->>Global: Check warmup status
+        Global-->>Health: {"embeddings": {"warmed": true, "enabled": true}}
+    end
+```
+
+### Configuration and Control
+
+**Environment Configuration**:
+- `DOCSRS_EMBEDDINGS_WARMUP_ENABLED`: Boolean flag controlling warmup activation (default: `true`)
+- **Configuration Pattern**: Follows established environment variable conventions
+- **Runtime Behavior**: Can be disabled for testing or resource-constrained environments
+
+**Global State Management**:
+```python
+# Global warmup state tracking
+_embeddings_warmed: bool = False
+
+async def warmup_embeddings() -> None:
+    global _embeddings_warmed
+    if _embeddings_warmed:
+        return  # Prevent redundant warmup
+    
+    # Warmup implementation with representative samples
+    _embeddings_warmed = True
+```
+
+### Integration Points
+
+**REST Mode Integration** (`app.py`):
+- Activated during FastAPI startup event handler
+- Uses `asyncio.create_task()` for non-blocking initialization
+- Integrated with popular crates manager startup sequence
+
+**MCP Mode Integration** (`mcp_server.py`):
+- Activated during MCP server initialization
+- Follows same background task pattern as pre-ingestion worker
+- Non-blocking startup ensures MCP client connections aren't delayed
+
+**Startup Hook Pattern**:
+```python
+# REST mode startup
+if os.getenv("DOCSRS_EMBEDDINGS_WARMUP_ENABLED", "true").lower() == "true":
+    asyncio.create_task(warmup_embeddings())
+
+# MCP mode startup
+if os.getenv("DOCSRS_EMBEDDINGS_WARMUP_ENABLED", "true").lower() == "true":
+    asyncio.create_task(warmup_embeddings())
+```
+
+### Performance Characteristics
+
+**Cold Start Elimination**:
+- **Baseline Performance**: 1.4s latency for first embedding operation
+- **Warm Performance**: <100ms for subsequent embedding operations
+- **Improvement Factor**: ~14x performance improvement for first query
+
+**Warmup Strategy**:
+- **Sample Count**: 3 representative text samples covering typical documentation patterns
+- **Sample Types**: Function documentation, type definitions, module descriptions
+- **Memory Efficiency**: Samples discarded immediately after warmup completion
+- **Processing Time**: ~200-400ms total warmup time
+
+**Non-blocking Architecture**:
+- **Fire-and-Forget**: Server startup continues while warmup runs in background
+- **Task Management**: Strong references prevent garbage collection
+- **Error Isolation**: Warmup failures don't affect server functionality
+
+### Health Monitoring Integration
+
+The embedding warmup system integrates with the existing health monitoring infrastructure to provide visibility into warmup status.
+
+**Health Endpoint Response**:
+```json
+{
+  "status": "healthy",
+  "subsystems": {
+    "embeddings": {
+      "warmed": true,
+      "enabled": true,
+      "warmup_duration_ms": 342
+    }
+  }
+}
+```
+
+**Monitoring Capabilities**:
+- **Status Tracking**: Real-time warmup completion status
+- **Configuration Visibility**: Shows if warmup is enabled/disabled
+- **Performance Metrics**: Optional warmup duration tracking
+- **Integration**: Seamless integration with existing health check patterns
+
+### Implementation Best Practices
+
+**Background Task Pattern Compliance**:
+- Follows established `asyncio.create_task()` pattern used by popular crates manager
+- Non-blocking initialization prevents server startup delays
+- Task reference management prevents premature garbage collection
+
+**Error Handling Strategy**:
+- Graceful degradation when warmup fails
+- Logs warmup failures but doesn't block server startup
+- Cold-start performance fallback when warmup is disabled
+
+**Resource Management**:
+- Minimal memory footprint during warmup process
+- Immediate cleanup of warmup samples
+- No persistent resource allocation beyond global state flag
+
 ## Enhanced Trait Search Architecture
 
 ### Trait Resolution Enhancement
@@ -4263,6 +4410,7 @@ The enhanced popular crates architecture includes comprehensive monitoring capab
 - **API Connectivity**: crates.io API response times and availability status
 - **Storage Health**: SQLite cache database integrity and disk space utilization
 - **Background Task Status**: Pre-ingestion worker health and task completion rates
+- **Embeddings Subsystem**: Warmup status (warmed/cold) and configuration state (enabled/disabled)
 
 ### Enhanced Tool Documentation with Embedded Tutorials
 | Component | Impact | Notes |

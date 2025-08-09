@@ -98,6 +98,11 @@ if not 1024 <= PORT <= 65535:
 
 # Pre-ingestion configuration
 PRE_INGEST_ENABLED = os.getenv("DOCSRS_PRE_INGEST_ENABLED", "false").lower() == "true"
+
+# Embeddings warmup configuration
+EMBEDDINGS_WARMUP_ENABLED = (
+    os.getenv("DOCSRS_EMBEDDINGS_WARMUP_ENABLED", "true").lower() == "true"
+)
 CONCURRENCY = int(
     os.getenv("DOCSRS_CONCURRENCY", os.getenv("DOCSRS_PRE_INGEST_CONCURRENCY", "3"))
 )

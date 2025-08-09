@@ -154,6 +154,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 try:
                     # Try to serialize normally
                     import json
+
                     json.dumps(input_value)
                     error_detail["received_value"] = input_value
                 except (TypeError, ValueError):
@@ -202,6 +203,13 @@ async def startup_event():
     if config.PRE_INGEST_ENABLED:
         logger.info("Starting background pre-ingestion of popular crates")
         await start_pre_ingestion()
+
+    # Start embedding warmup if enabled
+    if config.EMBEDDINGS_WARMUP_ENABLED:
+        from .ingest import warmup_embedding_model
+
+        await warmup_embedding_model()
+        logger.info("Embedding warmup task started")
 
 
 @app.get(
@@ -253,6 +261,15 @@ async def health_check():
             subsystems["pre_ingestion"]["status"] = "idle"
     else:
         subsystems["pre_ingestion"] = {"status": "not_initialized"}
+
+    # Embeddings warmup status
+    from .ingest import get_warmup_status
+
+    subsystems["embeddings"] = {
+        "status": "warmed" if get_warmup_status() else "cold",
+        "warmup_enabled": config.EMBEDDINGS_WARMUP_ENABLED,
+        "warmed": get_warmup_status(),
+    }
 
     # Memory health
     try:
