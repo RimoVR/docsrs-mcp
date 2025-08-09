@@ -11,6 +11,8 @@ import aiosqlite
 import psutil
 import sqlite_vec
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
 from . import config
@@ -114,6 +116,83 @@ For more information, see the [GitHub repository](https://github.com/peterkloibe
 # Configure rate limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Format validation errors with enhanced context.
+
+    Provides user-friendly error messages with examples and actionable guidance
+    for all validation failures.
+    """
+    errors = []
+    for error in exc.errors():
+        # Build field path from location tuple
+        field_path = " -> ".join(
+            str(loc) for loc in error["loc"][1:]
+        )  # Skip 'body' prefix
+
+        # Extract the actual error message and context
+        error_detail = {
+            "field": field_path
+            if field_path
+            else error["loc"][-1]
+            if error["loc"]
+            else "unknown",
+            "message": error["msg"],
+            "type": error["type"],
+        }
+
+        # Add input value if available (helps with debugging)
+        if "input" in error:
+            # Handle cases where input might be an exception or non-serializable object
+            input_value = error["input"]
+            if isinstance(input_value, Exception):
+                error_detail["received_value"] = str(input_value)
+            else:
+                try:
+                    # Try to serialize normally
+                    import json
+                    json.dumps(input_value)
+                    error_detail["received_value"] = input_value
+                except (TypeError, ValueError):
+                    # If not serializable, convert to string
+                    error_detail["received_value"] = str(input_value)
+
+        # Add context if available
+        if "ctx" in error:
+            # Handle context which might contain non-serializable objects
+            context = error["ctx"]
+            if isinstance(context, dict):
+                # Try to serialize each value in the context dict
+                serializable_context = {}
+                for key, value in context.items():
+                    if isinstance(value, Exception):
+                        serializable_context[key] = str(value)
+                    else:
+                        try:
+                            json.dumps(value)
+                            serializable_context[key] = value
+                        except (TypeError, ValueError):
+                            serializable_context[key] = str(value)
+                error_detail["context"] = serializable_context
+            else:
+                # If context is not a dict, convert to string
+                error_detail["context"] = str(context)
+
+        errors.append(error_detail)
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "Validation failed",
+            "error_count": len(errors),
+            "details": errors,
+            "suggestion": "Please check the field requirements and examples provided in the error messages.",
+            "documentation": "https://github.com/peterkloiber/docsrs-mcp#api-documentation",
+        },
+    )
 
 
 @app.on_event("startup")

@@ -8,6 +8,55 @@ request models to ensure consistency and reduce code duplication.
 import re
 from typing import Any
 
+# Error message templates (precompiled for performance)
+ERROR_TEMPLATES = {
+    "range": "{field} must be between {min} and {max} (inclusive). Got: {value}. Examples: {examples}",
+    "pattern": "{field} must match pattern {pattern}. Got: '{value}'. Examples: {examples}",
+    "type": "{field} must be {expected_type}. Got: {actual_type} '{value}'. Examples: {examples}",
+    "enum": "{field} must be one of {valid_values}. Got: '{value}'. Did you mean: {suggestion}?",
+    "required": "{field} is required and cannot be None or empty. Examples: {examples}",
+    "length": "{field} must be {constraint}. Got {actual} characters: '{value}'. Examples: {examples}",
+    "custom": "{message}",
+}
+
+
+def format_error_message(template_key: str, **context) -> str:
+    """
+    Format error message with context using precompiled templates.
+
+    Args:
+        template_key: Key to select template from ERROR_TEMPLATES
+        **context: Template variables for string formatting
+
+    Returns:
+        Formatted error message with user-friendly context
+    """
+    template = ERROR_TEMPLATES.get(template_key, ERROR_TEMPLATES["custom"])
+    # Provide default message if custom template is used without message
+    if template_key == "custom" and "message" not in context:
+        context["message"] = "Validation failed"
+    return template.format(**context)
+
+
+def format_examples(examples: list[Any], max_examples: int = 3) -> str:
+    """
+    Format examples for error messages.
+
+    Args:
+        examples: List of valid example values
+        max_examples: Maximum number of examples to display
+
+    Returns:
+        Formatted string of examples
+    """
+    if not examples:
+        return "No examples available"
+    display_examples = examples[:max_examples]
+    return ", ".join(
+        f"'{e}'" if isinstance(e, str) else str(e) for e in display_examples
+    )
+
+
 # Precompiled regex patterns for performance
 CRATE_NAME_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 VERSION_PATTERN = re.compile(
@@ -34,7 +83,13 @@ def validate_crate_name(value: Any, field_name: str = "crate_name") -> str:
         ValueError: If the crate name is invalid
     """
     if value is None:
-        raise ValueError(f"{field_name} cannot be None")
+        raise ValueError(
+            format_error_message(
+                "required",
+                field=field_name,
+                examples=format_examples(["tokio", "serde_json", "async-trait"]),
+            )
+        )
 
     # Convert to string if needed
     if not isinstance(value, str):
@@ -43,22 +98,37 @@ def validate_crate_name(value: Any, field_name: str = "crate_name") -> str:
     # Check for empty string
     value = value.strip()
     if not value:
-        raise ValueError(f"{field_name} cannot be empty")
+        raise ValueError(
+            format_error_message(
+                "required",
+                field=field_name,
+                examples=format_examples(["tokio", "serde_json", "async-trait"]),
+            )
+        )
 
     # Check length limits
     if len(value) > 64:
         raise ValueError(
-            f"{field_name} must be 64 characters or less. "
-            f"Got {len(value)} characters: {repr(value)[:100]}"
+            format_error_message(
+                "length",
+                field=field_name,
+                constraint="64 characters or less",
+                actual=len(value),
+                value=value[:100] if len(value) > 100 else value,
+                examples=format_examples(["tokio", "serde_json", "async-trait"]),
+            )
         )
 
     # Validate against Rust crate naming rules
     if not CRATE_NAME_PATTERN.match(value):
         raise ValueError(
-            f"{field_name} must be a valid Rust crate name "
-            f"(lowercase, alphanumeric, hyphens, underscores). "
-            f"Got: {repr(value)[:100]}. "
-            f"Examples: 'tokio', 'serde_json', 'async-trait'"
+            format_error_message(
+                "pattern",
+                field=field_name,
+                pattern="lowercase letters, numbers, hyphens, underscores only",
+                value=value[:100] if len(value) > 100 else value,
+                examples=format_examples(["tokio", "serde_json", "async-trait"]),
+            )
         )
 
     return value
@@ -96,9 +166,15 @@ def validate_version_string(value: Any, field_name: str = "version") -> str | No
     # Validate semantic version format
     if not VERSION_PATTERN.match(value):
         raise ValueError(
-            f"{field_name} must be a valid semantic version or 'latest'. "
-            f"Got: {repr(value)[:100]}. "
-            f"Examples: '1.0.0', '2.1.3-alpha', 'latest'"
+            format_error_message(
+                "pattern",
+                field=field_name,
+                pattern="semantic version (MAJOR.MINOR.PATCH) or 'latest'",
+                value=value[:100] if len(value) > 100 else value,
+                examples=format_examples(
+                    ["1.0.0", "2.1.3-alpha", "0.3.0-beta.1", "latest"]
+                ),
+            )
         )
 
     return value
@@ -119,7 +195,15 @@ def validate_rust_path(value: Any, field_name: str = "item_path") -> str:
         ValueError: If the path is invalid
     """
     if value is None:
-        raise ValueError(f"{field_name} cannot be None")
+        raise ValueError(
+            format_error_message(
+                "required",
+                field=field_name,
+                examples=format_examples(
+                    ["tokio::spawn", "std::vec::Vec", "serde::Deserialize", "crate"]
+                ),
+            )
+        )
 
     # Convert to string if needed
     if not isinstance(value, str):
@@ -127,7 +211,15 @@ def validate_rust_path(value: Any, field_name: str = "item_path") -> str:
 
     value = value.strip()
     if not value:
-        raise ValueError(f"{field_name} cannot be empty")
+        raise ValueError(
+            format_error_message(
+                "required",
+                field=field_name,
+                examples=format_examples(
+                    ["tokio::spawn", "std::vec::Vec", "serde::Deserialize", "crate"]
+                ),
+            )
+        )
 
     # Special case for crate root
     if value == "crate":
@@ -136,24 +228,41 @@ def validate_rust_path(value: Any, field_name: str = "item_path") -> str:
     # Check length limits
     if len(value) > 256:
         raise ValueError(
-            f"{field_name} must be 256 characters or less. "
-            f"Got {len(value)} characters: {repr(value)[:100]}"
+            format_error_message(
+                "length",
+                field=field_name,
+                constraint="256 characters or less",
+                actual=len(value),
+                value=value[:100] if len(value) > 100 else value,
+                examples=format_examples(
+                    ["tokio::spawn", "std::vec::Vec", "module::Type"]
+                ),
+            )
         )
 
     # Validate Rust path syntax
     if not RUST_PATH_PATTERN.match(value):
         raise ValueError(
-            f"{field_name} must be a valid Rust path "
-            f"(identifiers separated by '::'). "
-            f"Got: {repr(value)[:100]}. "
-            f"Examples: 'tokio::spawn', 'std::vec::Vec', 'crate'"
+            format_error_message(
+                "pattern",
+                field=field_name,
+                pattern="Rust identifiers separated by '::' (e.g., module::function)",
+                value=value[:100] if len(value) > 100 else value,
+                examples=format_examples(
+                    ["tokio::spawn", "std::vec::Vec", "serde::Deserialize", "crate"]
+                ),
+            )
         )
 
     return value
 
 
 def coerce_to_int_with_bounds(
-    value: Any, field_name: str, min_val: int, max_val: int
+    value: Any,
+    field_name: str,
+    min_val: int,
+    max_val: int,
+    examples: list[int] | None = None,
 ) -> int:
     """
     Generic integer coercion with bounds checking.
@@ -165,6 +274,7 @@ def coerce_to_int_with_bounds(
         field_name: Name of the field for error messages
         min_val: Minimum allowed value (inclusive)
         max_val: Maximum allowed value (inclusive)
+        examples: Optional list of example valid values
 
     Returns:
         Validated integer within bounds
@@ -173,16 +283,30 @@ def coerce_to_int_with_bounds(
         ValueError: If the value cannot be converted or is out of bounds
     """
     if value is None:
-        raise ValueError(f"{field_name} cannot be None")
+        if not examples:
+            examples = [min_val, (min_val + max_val) // 2, max_val]
+        raise ValueError(
+            format_error_message(
+                "required", field=field_name, examples=format_examples(examples)
+            )
+        )
 
     # Handle string inputs from MCP clients
     if isinstance(value, str):
         try:
             value = int(value)
         except ValueError as e:
+            if not examples:
+                examples = [min_val, (min_val + max_val) // 2, max_val]
             raise ValueError(
-                f"{field_name} must be an integer. "
-                f"Got string that cannot be converted: {repr(value)[:100]}"
+                format_error_message(
+                    "type",
+                    field=field_name,
+                    expected_type="an integer",
+                    actual_type="string",
+                    value=value[:100] if len(value) > 100 else value,
+                    examples=format_examples(examples),
+                )
             ) from e
 
     # Ensure we have an integer
@@ -190,16 +314,124 @@ def coerce_to_int_with_bounds(
         try:
             value = int(value)
         except (TypeError, ValueError) as e:
+            if not examples:
+                examples = [min_val, (min_val + max_val) // 2, max_val]
             raise ValueError(
-                f"{field_name} must be an integer. "
-                f"Got {type(value).__name__}: {repr(value)[:100]}"
+                format_error_message(
+                    "type",
+                    field=field_name,
+                    expected_type="an integer",
+                    actual_type=type(value).__name__,
+                    value=repr(value)[:100],
+                    examples=format_examples(examples),
+                )
             ) from e
 
     # Check bounds
     if value < min_val or value > max_val:
+        if not examples:
+            examples = [min_val, (min_val + max_val) // 2, max_val]
         raise ValueError(
-            f"{field_name} must be between {min_val} and {max_val} (inclusive). "
-            f"Got: {value}"
+            format_error_message(
+                "range",
+                field=field_name,
+                min=min_val,
+                max=max_val,
+                value=value,
+                examples=format_examples(examples),
+            )
+        )
+
+    return value
+
+
+def coerce_to_float_with_bounds(
+    value: Any,
+    field_name: str,
+    min_val: float,
+    max_val: float,
+    examples: list[float] | None = None,
+) -> float:
+    """
+    Generic float coercion with bounds checking.
+
+    Handles MCP client compatibility by accepting string inputs.
+
+    Args:
+        value: The value to validate and coerce
+        field_name: Name of the field for error messages
+        min_val: Minimum allowed value (inclusive)
+        max_val: Maximum allowed value (inclusive)
+        examples: Optional list of example valid values
+
+    Returns:
+        Validated float within bounds
+
+    Raises:
+        ValueError: If the value cannot be converted or is out of bounds
+    """
+    if value is None:
+        if not examples:
+            examples = [min_val, (min_val + max_val) / 2, max_val]
+        raise ValueError(
+            format_error_message(
+                "required", field=field_name, examples=format_examples(examples)
+            )
+        )
+
+    # Handle string inputs from MCP clients
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError as e:
+            if not examples:
+                examples = [min_val, (min_val + max_val) / 2, max_val]
+            raise ValueError(
+                format_error_message(
+                    "type",
+                    field=field_name,
+                    expected_type="a decimal number",
+                    actual_type="string",
+                    value=value[:100] if len(value) > 100 else value,
+                    examples=format_examples(examples),
+                )
+            ) from e
+
+    # Handle integer to float conversion
+    if isinstance(value, int):
+        value = float(value)
+
+    # Ensure we have a float
+    if not isinstance(value, float):
+        try:
+            value = float(value)
+        except (TypeError, ValueError) as e:
+            if not examples:
+                examples = [min_val, (min_val + max_val) / 2, max_val]
+            raise ValueError(
+                format_error_message(
+                    "type",
+                    field=field_name,
+                    expected_type="a decimal number",
+                    actual_type=type(value).__name__,
+                    value=repr(value)[:100],
+                    examples=format_examples(examples),
+                )
+            ) from e
+
+    # Check bounds
+    if value < min_val or value > max_val:
+        if not examples:
+            examples = [min_val, (min_val + max_val) / 2, max_val]
+        raise ValueError(
+            format_error_message(
+                "range",
+                field=field_name,
+                min=min_val,
+                max=max_val,
+                value=value,
+                examples=format_examples(examples),
+            )
         )
 
     return value
@@ -325,16 +557,35 @@ def validate_optional_path(value: Any, field_name: str = "path") -> str | None:
     # Validate similar to Rust paths but allow module paths
     if len(value) > 256:
         raise ValueError(
-            f"{field_name} must be 256 characters or less. "
-            f"Got {len(value)} characters: {repr(value)[:100]}"
+            format_error_message(
+                "length",
+                field=field_name,
+                constraint="256 characters or less",
+                actual=len(value),
+                value=value[:100] if len(value) > 100 else value,
+                examples=format_examples(
+                    ["src/lib", "tests/integration", "examples/basic"]
+                ),
+            )
         )
 
     # Module paths can contain :: and /
     if not re.match(r"^[a-zA-Z0-9_/:]+$", value):
         raise ValueError(
-            f"{field_name} must be a valid module path. "
-            f"Got: {repr(value)[:100]}. "
-            f"Examples: 'src/lib', 'tests/integration', 'examples'"
+            format_error_message(
+                "pattern",
+                field=field_name,
+                pattern="alphanumeric characters, underscores, colons, and forward slashes only",
+                value=value[:100] if len(value) > 100 else value,
+                examples=format_examples(
+                    [
+                        "src/lib",
+                        "tests/integration",
+                        "examples/basic",
+                        "modules::nested",
+                    ]
+                ),
+            )
         )
 
     return value

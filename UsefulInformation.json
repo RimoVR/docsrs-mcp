@@ -153,6 +153,55 @@
           "codeExample": "CREATE TABLE embeddings (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Added AUTOINCREMENT\n    item_path TEXT NOT NULL UNIQUE,\n    -- other columns\n);",
           "prevention": "Use AUTOINCREMENT on PRIMARY KEY columns when foreign tables or virtual tables reference the rowid",
           "lessonLearned": "Virtual tables that reference rowids are sensitive to rowid reuse patterns"
+        },
+        {
+          "error": "Pydantic RequestValidationError non-serializable fields in custom exception handlers",
+          "solution": "When creating custom FastAPI exception handlers for RequestValidationError, convert error['input'] and error['ctx'] to strings before including in JSON responses. These fields may contain non-serializable objects like ValueError exceptions",
+          "context": "Custom exception handlers for enhanced validation error messages",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/app.py"],
+          "codeExample": "def format_error_detail(error: dict) -> str:\n    field = error.get('loc', [])[-1] if error.get('loc') else 'field'\n    value = str(error.get('input', 'unknown'))[:100]  # Convert to string\n    return f'{field} validation failed. Got: {value}'"
+        },
+        {
+          "error": "Error message template inconsistency across validation handlers",
+          "solution": "Use consistent template-based formatting with placeholders for field, value, constraints, and examples. Store templates in a dictionary for reusability and maintain consistent error message patterns across all validation functions",
+          "context": "Standardizing validation error message formatting across the application",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/validation.py"],
+          "codeExample": "ERROR_TEMPLATES = {\n    'invalid_type': '{field} must be {expected_type}. Got: {value}. Examples: {examples}',\n    'out_of_range': '{field} must be {constraint}. Got: {value}. Examples: {examples}'\n}",
+          "prevention": "Define error message templates at module level for consistency and reusability"
+        },
+        {
+          "error": "MCP parameter string-to-type conversion compatibility issues",
+          "solution": "All numeric and boolean parameters must support string-to-type conversion for MCP clients using coercion functions with mode='before' validators. Handle None values first, then check existing type, then attempt string conversion with try/catch",
+          "context": "MCP protocol compatibility requires flexible parameter type handling",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/models.py"],
+          "codeExample": "@field_validator('k', mode='before')\n@classmethod\ndef validate_k(cls, v):\n    if v is None:\n        return None\n    if isinstance(v, int):\n        return v\n    if isinstance(v, str):\n        try:\n            return int(v.strip())\n        except ValueError:\n            raise ValueError(f'k must be integer. Got: {repr(v)[:100]}. Examples: 5, \"10\"')\n    raise ValueError(f'k must be integer. Got: {type(v).__name__}')"
+        },
+        {
+          "error": "Circular import issues with validation utilities in field validators",
+          "solution": "When using validation utilities in Pydantic field validators, import them inside the validator method to avoid circular imports. This is especially important when validation utilities are defined in the same module hierarchy",
+          "context": "Pydantic field validator implementation patterns",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "src/docsrs_mcp/validation.py"],
+          "codeExample": "@field_validator('query', mode='before')\n@classmethod\ndef validate_query(cls, v):\n    from .validation import validate_query_string  # Import inside method\n    return validate_query_string(v)"
+        },
+        {
+          "error": "API endpoint testing with incorrect URL patterns",
+          "solution": "Use `/mcp/tools/` prefix for API endpoint tests, not just the tool name. FastAPI mounts MCP tools under this path structure for proper routing",
+          "context": "Testing MCP tool endpoints through FastAPI test client",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["tests/"],
+          "codeExample": "response = client.post('/mcp/tools/search_items', json={...})  # Correct\n# NOT: response = client.post('/search_items', json={...})  # Incorrect"
+        },
+        {
+          "error": "Performance degradation from repeated template compilation",
+          "solution": "Precompile error message templates and regex patterns at module level for better performance. Store compiled patterns in module-level constants rather than compiling them on each validation call",
+          "context": "Optimizing validation error message generation performance",
+          "dateEncountered": "2025-08-09",
+          "relatedFiles": ["src/docsrs_mcp/validation.py"],
+          "codeExample": "import re\n\n# Module level - compiled once\nMODULE_PATH_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z_][a-zA-Z0-9_]*)*$')\nERROR_TEMPLATES = {\n    'invalid_path': 'Invalid module path format. Got: {value}. Examples: \"std::collections\", \"serde::de\"'\n}\n\ndef validate_module_path(value: str) -> str:\n    if not MODULE_PATH_PATTERN.match(value):\n        raise ValueError(ERROR_TEMPLATES['invalid_path'].format(value=repr(value)[:100]))\n    return value"
         }
       ]
     },

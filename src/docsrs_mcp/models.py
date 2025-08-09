@@ -272,29 +272,16 @@ class SearchItemsRequest(BaseModel):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
             return v
-        if isinstance(v, str):
-            try:
-                value = int(v)
-                # Provide helpful guidance if value is out of bounds
-                if value < 1:
-                    raise ValueError(
-                        f"k parameter must be at least 1 (requested: {value}). "
-                        "Use k=1 for single result or increase for more results."
-                    )
-                if value > 20:
-                    raise ValueError(
-                        f"k parameter cannot exceed 20 (requested: {value}). "
-                        "Large result sets may impact performance. Consider using k=10 for comprehensive results."
-                    )
-                return value
-            except ValueError as err:
-                if "invalid literal" in str(err):
-                    raise ValueError(
-                        f"k parameter must be a valid integer, got '{v}'. "
-                        "Examples: k=5 for top 5 results, k=10 for more comprehensive search."
-                    ) from err
-                raise
-        return v
+        # Use enhanced validation with examples
+        from docsrs_mcp.validation import coerce_to_int_with_bounds
+
+        return coerce_to_int_with_bounds(
+            value=v,
+            field_name="k (number of results)",
+            min_val=1,
+            max_val=20,
+            examples=[1, 5, 10],
+        )
 
     @field_validator("min_doc_length", mode="before")
     @classmethod
@@ -302,29 +289,16 @@ class SearchItemsRequest(BaseModel):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
             return v
-        if isinstance(v, str):
-            try:
-                value = int(v)
-                # Provide helpful guidance if value is out of bounds
-                if value < 100:
-                    raise ValueError(
-                        f"min_doc_length parameter must be at least 100 (requested: {value}). "
-                        "Use min_doc_length=100 for minimal documentation or increase for more comprehensive docs."
-                    )
-                if value > 10000:
-                    raise ValueError(
-                        f"min_doc_length parameter cannot exceed 10000 (requested: {value}). "
-                        "Very long documentation filters may exclude most results. Consider using min_doc_length=1000 for substantial docs."
-                    )
-                return value
-            except ValueError as err:
-                if "invalid literal" in str(err):
-                    raise ValueError(
-                        f"min_doc_length parameter must be a valid integer, got '{v}'. "
-                        "Examples: min_doc_length=500 for medium docs, min_doc_length=1000 for comprehensive documentation."
-                    ) from err
-                raise
-        return v
+        # Use enhanced validation with examples
+        from docsrs_mcp.validation import coerce_to_int_with_bounds
+
+        return coerce_to_int_with_bounds(
+            value=v,
+            field_name="min_doc_length (minimum documentation length)",
+            min_val=100,
+            max_val=10000,
+            examples=[100, 500, 1000],
+        )
 
     @field_validator("item_type", mode="before")
     @classmethod
@@ -728,32 +702,16 @@ class RankingConfig(BaseModel):
         """Convert string numbers to float for MCP client compatibility."""
         if v is None:
             return v
-        if isinstance(v, str):
-            try:
-                value = float(v)
-                # Provide helpful guidance if value is out of bounds
-                if value < 0.0:
-                    raise ValueError(
-                        f"Weight parameter must be at least 0.0 (requested: {value}). "
-                        "Weights must be non-negative values between 0.0 and 1.0."
-                    )
-                if value > 1.0:
-                    raise ValueError(
-                        f"Weight parameter cannot exceed 1.0 (requested: {value}). "
-                        "Weights must be normalized values between 0.0 and 1.0."
-                    )
-                return value
-            except ValueError as err:
-                if "could not convert" in str(err):
-                    raise ValueError(
-                        f"Weight parameter must be a valid number, got '{v}'. "
-                        "Examples: 0.7 for high weight, 0.15 for medium weight, 0.05 for low weight."
-                    ) from err
-                raise
-        # Handle integer to float conversion
-        if isinstance(v, int):
-            return float(v)
-        return v
+        # Use enhanced validation with examples
+        from docsrs_mcp.validation import coerce_to_float_with_bounds
+
+        return coerce_to_float_with_bounds(
+            value=v,
+            field_name="weight parameter",
+            min_val=0.0,
+            max_val=1.0,
+            examples=[0.05, 0.15, 0.7],
+        )
 
     @field_validator(
         "vector_weight", "type_weight", "quality_weight", "examples_weight"
@@ -796,34 +754,16 @@ class SearchResult(BaseModel):
     @classmethod
     def coerce_score_to_float(cls, v):
         """Convert string numbers to float for MCP client compatibility."""
-        if v is None:
-            raise ValueError("Score is required and cannot be None")
-        if isinstance(v, str):
-            try:
-                value = float(v)
-                # Provide helpful guidance if value is out of bounds
-                if value < 0.0:
-                    raise ValueError(
-                        f"Score must be at least 0.0 (requested: {value}). "
-                        "Similarity scores must be between 0.0 and 1.0, where 1.0 is a perfect match."
-                    )
-                if value > 1.0:
-                    raise ValueError(
-                        f"Score cannot exceed 1.0 (requested: {value}). "
-                        "Similarity scores must be between 0.0 and 1.0, where 1.0 is a perfect match."
-                    )
-                return value
-            except ValueError as err:
-                if "could not convert" in str(err):
-                    raise ValueError(
-                        f"Score must be a valid number, got '{v}'. "
-                        "Scores represent similarity: 0.9+ (excellent), 0.7-0.9 (good), 0.5-0.7 (fair)."
-                    ) from err
-                raise
-        # Handle integer to float conversion
-        if isinstance(v, int):
-            return float(v)
-        return v
+        # Use enhanced validation with examples
+        from docsrs_mcp.validation import coerce_to_float_with_bounds
+
+        return coerce_to_float_with_bounds(
+            value=v,
+            field_name="score (similarity score)",
+            min_val=0.0,
+            max_val=1.0,
+            examples=[0.5, 0.7, 0.9],
+        )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -904,29 +844,16 @@ class ErrorResponse(BaseModel):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
             return 500  # Default to 500 if None
-        if isinstance(v, str):
-            try:
-                value = int(v)
-                # Provide helpful guidance if value is out of bounds
-                if value < 400:
-                    raise ValueError(
-                        f"status_code must be at least 400 (requested: {value}). "
-                        "HTTP error codes start at 400. Use 400 for client errors, 500 for server errors."
-                    )
-                if value > 599:
-                    raise ValueError(
-                        f"status_code cannot exceed 599 (requested: {value}). "
-                        "HTTP error codes end at 599. Use 400-499 for client errors, 500-599 for server errors."
-                    )
-                return value
-            except ValueError as err:
-                if "invalid literal" in str(err):
-                    raise ValueError(
-                        f"status_code must be a valid HTTP error code, got '{v}'. "
-                        "Examples: 400 (Bad Request), 404 (Not Found), 500 (Internal Server Error)."
-                    ) from err
-                raise
-        return v
+        # Use enhanced validation with examples
+        from docsrs_mcp.validation import coerce_to_int_with_bounds
+
+        return coerce_to_int_with_bounds(
+            value=v,
+            field_name="status_code (HTTP error code)",
+            min_val=400,
+            max_val=599,
+            examples=[400, 404, 500],
+        )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1025,34 +952,17 @@ class SearchExamplesRequest(BaseModel):
     def coerce_k_to_int(cls, v):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
-            return 5
-        if isinstance(v, str):
-            try:
-                value = int(v)
-                if value < 1:
-                    raise ValueError(
-                        f"k parameter must be at least 1 (requested: {value}). "
-                        f"Use k=1 for single result, k=5 for standard results, k=10 for comprehensive."
-                    )
-                if value > 20:
-                    raise ValueError(
-                        f"k parameter cannot exceed 20 (requested: {value}). "
-                        f"Large result sets may impact performance. Use k=10 for comprehensive results."
-                    )
-                return value
-            except ValueError as err:
-                if "invalid literal" in str(err):
-                    raise ValueError(
-                        f"k parameter must be a valid integer between 1-20, got '{v}'. "
-                        f"Examples: k=5 (default), k=10 (comprehensive), k=20 (maximum)"
-                    ) from err
-                raise
-        if isinstance(v, int) and (v < 1 or v > 20):
-            raise ValueError(
-                f"k must be between 1-20, got {v}. "
-                f"Use k=5 for standard results, k=10 for comprehensive search."
-            )
-        return v
+            return 5  # Default value
+        # Use enhanced validation with examples
+        from docsrs_mcp.validation import coerce_to_int_with_bounds
+
+        return coerce_to_int_with_bounds(
+            value=v,
+            field_name="k (number of examples)",
+            min_val=1,
+            max_val=20,
+            examples=[5, 10, 20],
+        )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1124,28 +1034,16 @@ class StartPreIngestionRequest(BaseModel):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
             return v
-        if isinstance(v, str):
-            try:
-                value = int(v)
-                if value < 1 or value > 10:
-                    raise ValueError(
-                        f"concurrency must be between 1-10, got {value}. "
-                        f"Use concurrency=3 for balanced performance, concurrency=10 for maximum speed."
-                    )
-                return value
-            except ValueError as err:
-                if "invalid literal" in str(err):
-                    raise ValueError(
-                        f"concurrency must be a valid integer between 1-10, got '{v}'. "
-                        f"Examples: concurrency=3 (default), concurrency=5 (moderate), concurrency=10 (maximum)"
-                    ) from err
-                raise
-        if isinstance(v, int) and (v < 1 or v > 10):
-            raise ValueError(
-                f"concurrency must be between 1-10, got {v}. "
-                f"Use concurrency=3 for balanced performance, concurrency=10 for maximum speed."
-            )
-        return v
+        # Use enhanced validation with examples
+        from docsrs_mcp.validation import coerce_to_int_with_bounds
+
+        return coerce_to_int_with_bounds(
+            value=v,
+            field_name="concurrency (parallel download workers)",
+            min_val=1,
+            max_val=10,
+            examples=[3, 5, 10],
+        )
 
     @field_validator("count", mode="before")
     @classmethod
@@ -1153,28 +1051,16 @@ class StartPreIngestionRequest(BaseModel):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
             return v
-        if isinstance(v, str):
-            try:
-                value = int(v)
-                if value < 10 or value > 500:
-                    raise ValueError(
-                        f"count must be between 10-500, got {value}. "
-                        f"Use count=100 for standard cache, count=200 for comprehensive, count=500 for maximum."
-                    )
-                return value
-            except ValueError as err:
-                if "invalid literal" in str(err):
-                    raise ValueError(
-                        f"count must be a valid integer between 10-500, got '{v}'. "
-                        f"Examples: count=100 (default), count=200 (comprehensive), count=500 (maximum)"
-                    ) from err
-                raise
-        if isinstance(v, int) and (v < 10 or v > 500):
-            raise ValueError(
-                f"count must be between 10-500, got {v}. "
-                f"Use count=100 for standard cache, count=200 for comprehensive, count=500 for maximum."
-            )
-        return v
+        # Use enhanced validation with examples
+        from docsrs_mcp.validation import coerce_to_int_with_bounds
+
+        return coerce_to_int_with_bounds(
+            value=v,
+            field_name="count (number of crates to pre-ingest)",
+            min_val=10,
+            max_val=500,
+            examples=[100, 200, 500],
+        )
 
     model_config = ConfigDict(extra="forbid")
 
