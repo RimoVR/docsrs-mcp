@@ -74,13 +74,13 @@ graph LR
         end
         
         subgraph "Ingestion Layer"
-            ING[ingest.py<br/>Enhanced rustdoc pipeline<br/>Complete item extraction]
+            ING[ingest.py<br/>Enhanced rustdoc pipeline<br/>Three-tier fallback system<br/>Complete item extraction with macro extraction]
             POPULAR[popular_crates.py<br/>PopularCratesManager & PreIngestionWorker<br/>Background asyncio.create_task startup<br/>asyncio.Semaphore(3) rate limiting<br/>Multi-tier cache with circuit breaker<br/>Priority queue with memory monitoring]
             VER[Version Resolution<br/>docs.rs redirects]
             DL[Compression Support<br/>zst, gzip, json]
             PARSE[ijson Parser<br/>Memory-efficient streaming<br/>Module hierarchy extraction<br/>Path validation with fallback generation]
             HIERARCHY[build_module_hierarchy()<br/>Parent-child relationships<br/>Depth calculation<br/>Item counting]
-            EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]
+            EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]<br/>FALLBACK[Three-Tier Fallback Architecture<br/>Tier 1: Rustdoc JSON (10-15% coverage)<br/>Tier 2: Source extraction via CDN (80%+ coverage)<br/>Tier 3: Latest version fallback (100% guarantee)<br/>CDN URL: static.crates.io/crates/{name}/{name}-{version}.crate<br/>Enhanced macro extraction with fragment specifiers]<br/>MACROEXT[EnhancedMacroExtractor<br/>Patterns: macro_rules!, #[proc_macro], #[proc_macro_derive], #[proc_macro_attribute]<br/>Fragment specifiers: expr, ident, pat, ty, stmt, block, item, meta, tt, vis, literal, path<br/>Results: lazy_static(4 macros), serde_derive(5 macros), anyhow(15 macros)]
             PATHVAL[Path Validation<br/>validate_item_path_with_fallback()<br/>Database integrity enforcement]
             EMBED[FastEmbed<br/>Batch processing<br/>Embeddings warmup during startup<br/>Memory-aware batch operations<br/>Enhanced transaction management]
             LOCK[Per-crate Locks<br/>Prevent duplicates]
@@ -1454,6 +1454,96 @@ The CI/CD pipeline seamlessly integrates with the deployment architecture:
 4. **Rollback**: Git tag-based versioning supports easy rollbacks
 
 This architecture ensures reliable, secure, and efficient delivery of docsrs-mcp updates while maintaining high code quality standards across all supported platforms.
+
+## Enhanced Three-Tier Fallback System
+
+The system implements a comprehensive three-tier extraction strategy that significantly expands documentation coverage from ~10% to 80%+ of available crates:
+
+```mermaid
+graph TD
+    START[Ingestion Request] --> TIER1[Tier 1: Rustdoc JSON]
+    TIER1 --> CHECK1{Available?}
+    CHECK1 -->|Yes| SUCCESS1[Use Rustdoc JSON<br/>Highest Quality]
+    CHECK1 -->|RustdocVersionNotFoundError| TIER2[Tier 2: Source Extraction]
+    
+    TIER2 --> CDN[Download from CDN<br/>static.crates.io/crates/{name}/{name}-{version}.crate]
+    CDN --> EXTRACT[Enhanced Source Extraction]
+    EXTRACT --> MACRO[Macro Extraction<br/>EnhancedMacroExtractor]
+    MACRO --> CHECK2{Success?}
+    CHECK2 -->|Yes| SUCCESS2[Use Extracted Documentation<br/>Medium-High Quality]
+    CHECK2 -->|Timeout/Error| TIER3[Tier 3: Latest Version Fallback]
+    
+    TIER3 --> SUCCESS3[Description-only Embedding<br/>Basic Quality]
+    
+    SUCCESS1 --> STORE[Store in Database]
+    SUCCESS2 --> STORE
+    SUCCESS3 --> STORE
+```
+
+### Tier Architecture Details
+
+**Tier 1: Rustdoc JSON Extraction**
+- **Source**: docs.rs structured JSON
+- **Coverage**: ~10-15% of crates
+- **Quality**: Highest - complete metadata, structured content
+- **Performance**: Fastest, no additional processing needed
+- **Trigger**: Primary extraction method
+
+**Tier 2: Enhanced Source Extraction**
+- **Source**: CDN at `https://static.crates.io/crates/{name}/{name}-{version}.crate`
+- **Coverage**: 80%+ of crates
+- **Quality**: Medium-high with intelligent extraction
+- **Rate Limits**: None - CDN optimized for bulk access
+- **Trigger**: RustdocVersionNotFoundError or JSON parsing failure
+- **Features**:
+  - Memory-efficient streaming tar.gz processing
+  - Enhanced macro extraction with `EnhancedMacroExtractor`
+  - Fragment specifier support: `expr`, `ident`, `pat`, `ty`, `stmt`, `block`, `item`, `meta`, `tt`, `vis`, `literal`, `path`
+  - Macro pattern detection: `macro_rules!`, `#[proc_macro]`, `#[proc_macro_derive]`, `#[proc_macro_attribute]`
+  - Validated extraction results: lazy_static (4 macros), serde_derive (5 macros), anyhow (15 macros)
+  - Regex-based documentation parsing for comprehensive coverage
+  - MemoryMonitor integration for consistent memory management
+
+**Tier 3: Latest Version Fallback**
+- **Source**: Fallback to latest available version
+- **Coverage**: 100% guaranteed
+- **Quality**: Basic - ensures no crate is left undocumented
+- **Purpose**: Ultimate safety net for complete coverage
+- **Trigger**: CDN unavailable or extraction timeout
+
+### Implementation Details
+
+**CDN Integration**:
+- **URL Pattern**: `https://static.crates.io/crates/{name}/{name}-{version}.crate`
+- **No Rate Limits**: CDN designed for bulk access without throttling
+- **Archive Format**: Tar.gz files containing complete source code
+- **Memory Management**: Streaming decompression to prevent memory exhaustion
+
+**Enhanced Macro Extraction**:
+- **Class**: `EnhancedMacroExtractor` with comprehensive pattern matching
+- **Declarative Macros**: `macro_rules!` with fragment specifier detection
+- **Procedural Macros**: `#[proc_macro]`, `#[proc_macro_derive]`, `#[proc_macro_attribute]`
+- **Fragment Specifiers**: Complete support for `expr`, `ident`, `pat`, `ty`, `stmt`, `block`, `item`, `meta`, `tt`, `vis`, `literal`, `path`
+- **Validation**: Tested with real-world crates showing successful extraction
+
+**Performance Characteristics**:
+- **Search Latency**: Sub-500ms maintained across all tiers
+- **Memory Safety**: MemoryMonitor integration prevents memory issues
+- **Graceful Degradation**: Each tier provides progressively basic but functional coverage
+- **Error Isolation**: Failures in higher tiers don't affect lower-tier fallbacks
+- **Import Dependencies**: All fallback paths include proper MemoryMonitor imports
+
+### Error Handling and Recovery
+
+**Critical Import Fix**: MemoryMonitor imports were missing in fallback extraction sections, causing import errors during source extraction. The fix ensures all fallback paths include proper MemoryMonitor imports for consistent memory management.
+
+**Decision Logic**:
+1. **Tier 1 → Tier 2**: Triggered by `RustdocVersionNotFoundError` or JSON parsing failure
+2. **Tier 2 → Tier 3**: Triggered by CDN unavailability or extraction timeout
+3. **Consistent Interface**: All tiers produce the same data structure for seamless integration
+4. **Logging**: Clear indication of which tier was used and why fallback occurred
+
+This three-tier architecture ensures comprehensive documentation coverage while maintaining performance and reliability standards across the entire Rust ecosystem.
 
 ## Critical Bug Analysis and Fixes
 

@@ -416,8 +416,8 @@ async def download_rustdoc(
     # Create a specific exception type to distinguish version unavailability
     class RustdocVersionNotFoundError(Exception):
         """Raised when a specific version doesn't have rustdoc JSON available."""
-        pass
-    
+
+
     if all_404:
         # All attempts were 404s - this version doesn't have rustdoc JSON
         raise RustdocVersionNotFoundError(
@@ -428,9 +428,7 @@ async def download_rustdoc(
         raise last_error
     else:
         # Shouldn't reach here, but handle it
-        raise Exception(
-            f"Failed to download rustdoc JSON for {crate_name}@{version}"
-        )
+        raise Exception(f"Failed to download rustdoc JSON for {crate_name}@{version}")
 
 
 async def decompress_content(content: bytes, url: str) -> str:
@@ -1978,32 +1976,9 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                         e.__class__.__name__ == "RustdocVersionNotFoundError"
                         or "RustdocVersionNotFoundError" in str(type(e))
                     )
-                    
-                    if (
-                        is_version_not_found
-                        and version != "latest"
-                        and not is_stdlib_crate(crate_name)
-                    ):
-                        logger.warning(
-                            f"Rustdoc JSON not available for {crate_name}@{resolved_version} "
-                            f"(likely published before rustdoc JSON support), "
-                            f"falling back to latest version"
-                        )
-                        # Resolve latest version URL
-                        latest_version, latest_url = await resolve_version(
-                            session, crate_name, "latest"
-                        )
-                        logger.info(f"Trying with latest version: {latest_version}")
 
-                        # Try downloading with latest version
-                        compressed_content, download_url = await download_rustdoc(
-                            session, crate_name, latest_version, latest_url
-                        )
-                        # Update resolved_version for logging purposes
-                        resolved_version = latest_version
-                    else:
-                        # Re-raise for other errors or if already tried latest
-                        raise
+                    # Don't fall back to latest automatically - let source extraction handle it
+                    raise
 
                 # Decompress content
                 logger.info("Decompressing rustdoc content")
@@ -2124,6 +2099,182 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     )
                 else:
                     logger.warning(f"Failed to process rustdoc JSON: {e}")
+
+                # Try source extraction fallback for non-stdlib crates
+                if not is_stdlib_crate(crate_name):
+                    logger.info("Attempting source extraction fallback")
+                    try:
+                        # Import extractor module from parent directory
+                        import sys
+                        from pathlib import Path
+
+                        # Add parent directory to path if needed
+                        parent_dir = Path(__file__).parent.parent.parent
+                        if str(parent_dir) not in sys.path:
+                            sys.path.insert(0, str(parent_dir))
+
+                        from extractors.source_extractor import CratesIoSourceExtractor
+
+                        # Create extractor with existing session
+                        async with CratesIoSourceExtractor(
+                            session=session,
+                            memory_monitor=None,  # We'll use existing memory monitoring
+                            timeout=30,
+                        ) as extractor:
+                            # Extract documentation from source
+                            extracted_items = await extractor.extract_from_source(
+                                name=crate_name, version=version
+                            )
+
+                            if extracted_items:
+                                logger.info(
+                                    f"Extracted {len(extracted_items)} items from source"
+                                )
+
+                                # Transform to chunk format
+                                chunks = []
+                                for item in extracted_items:
+                                    # Extract code examples from docstring
+                                    examples = []
+                                    docstring = item.get("docstring", "")
+                                    if docstring:
+                                        # Find code blocks in documentation
+                                        code_blocks = re.findall(
+                                            r"```(?:rust|rs)?\n(.*?)\n```",
+                                            docstring,
+                                            re.DOTALL,
+                                        )
+                                        for code in code_blocks:
+                                            if code.strip():
+                                                examples.append(
+                                                    {
+                                                        "description": "Code example from documentation",
+                                                        "code": code.strip(),
+                                                        "language": "rust",
+                                                    }
+                                                )
+
+                                    chunk = {
+                                        "item_path": item["item_path"],
+                                        "header": item["header"],
+                                        "content": docstring,
+                                        "item_type": item.get("item_type"),
+                                        "signature": item.get("signature"),
+                                        "parent_id": None,  # We don't track parent relationships in fallback
+                                        "examples": examples,
+                                        "visibility": item.get("visibility", "public"),
+                                        "deprecated": False,
+                                    }
+                                    chunks.append(chunk)
+
+                                # Generate and store embeddings using existing infrastructure
+                                from .memory_utils import MemoryMonitor
+                                with MemoryMonitor(
+                                    f"fallback_embeddings_{crate_name}_{version}"
+                                ):
+                                    chunk_embedding_pairs = (
+                                        generate_embeddings_streaming(chunks)
+                                    )
+                                    await store_embeddings_streaming(
+                                        db_path, chunk_embedding_pairs
+                                    )
+
+                                logger.info(
+                                    f"Successfully stored {len(chunks)} fallback items for {crate_name}@{version}"
+                                )
+
+                                # Skip the basic description fallback since we have real data
+                                return db_path
+
+                    except Exception as extraction_error:
+                        logger.warning(
+                            f"Source extraction fallback failed: {extraction_error}"
+                        )
+                        
+                        # Second fallback: Try latest version's rustdoc JSON
+                        if version != "latest" and not is_stdlib_crate(crate_name):
+                            logger.info(
+                                f"Source extraction failed, falling back to latest version's rustdoc JSON"
+                            )
+                            try:
+                                # Resolve latest version URL
+                                latest_version, latest_url = await resolve_version(
+                                    session, crate_name, "latest"
+                                )
+                                logger.info(f"Trying with latest version: {latest_version}")
+
+                                # Try downloading with latest version
+                                compressed_content, download_url = await download_rustdoc(
+                                    session, crate_name, latest_version, latest_url
+                                )
+                                
+                                # Decompress and process
+                                logger.info("Decompressing rustdoc content")
+                                json_content = await decompress_content(
+                                    compressed_content, download_url
+                                )
+                                
+                                # Parse and store using existing logic
+                                items = []
+                                modules = {}
+                                reexports = []
+                                crossrefs = []
+                                async for item in parse_rustdoc_items_streaming(json_content):
+                                    if "_modules" in item:
+                                        modules = item["_modules"]
+                                    elif "_reexports" in item:
+                                        reexports = item["_reexports"]
+                                    elif "_crossrefs" in item:
+                                        crossrefs = item["_crossrefs"]
+                                    else:
+                                        items.append(item)
+                                
+                                logger.info(f"Collected {len(items)} rustdoc items from latest version")
+                                
+                                # Store modules and process items
+                                await store_modules(db_path, crate_id, modules)
+                                
+                                all_reexports = reexports + crossrefs
+                                if all_reexports:
+                                    await store_reexports(db_path, crate_id, all_reexports)
+                                
+                                # Generate chunks and embeddings
+                                chunks = []
+                                for item in items:
+                                    chunk = {
+                                        "item_path": item["item_path"],
+                                        "header": item["header"],
+                                        "content": item.get("docstring", ""),
+                                        "item_type": item.get("item_type"),
+                                        "signature": item.get("signature"),
+                                        "parent_id": item.get("parent_id"),
+                                        "examples": item.get("examples", []),
+                                        "visibility": item.get("visibility", "public"),
+                                        "deprecated": item.get("deprecated", False),
+                                    }
+                                    chunks.append(chunk)
+                                
+                                from .memory_utils import MemoryMonitor
+                                with MemoryMonitor(f"embeddings_{crate_name}_{version}"):
+                                    chunk_embedding_pairs = generate_embeddings_streaming(chunks)
+                                    await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+                                
+                                logger.info(f"Successfully ingested latest version as fallback for {crate_name}@{version}")
+                                
+                                # Try to generate example embeddings
+                                try:
+                                    await generate_example_embeddings(db_path, crate_name, version)
+                                except Exception as ex_err:
+                                    logger.warning(f"Failed to generate example embeddings: {ex_err}")
+                                
+                                return db_path
+                                
+                            except Exception as latest_error:
+                                logger.warning(
+                                    f"Latest version fallback also failed: {latest_error}"
+                                )
+                                # Continue to basic description fallback
+
                 logger.info("Falling back to basic crate description embedding")
 
                 # Fallback: create a simple embedding from the crate description
