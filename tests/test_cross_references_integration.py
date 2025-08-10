@@ -17,62 +17,64 @@ def client():
 
 def create_comprehensive_rustdoc_json():
     """Create a comprehensive test rustdoc JSON with cross-references."""
-    return json.dumps({
-        "format_version": 27,
-        "root": "0:0",
-        "crate": {
-            "name": "test_crate",
-            "version": "1.0.0",
-        },
-        "paths": {
-            "0:0": {"path": ["test_crate"], "kind": "module"},
-            "0:1": {"path": ["test_crate", "parse"], "kind": "function"},
-            "0:2": {"path": ["test_crate", "Parser"], "kind": "struct"},
-            "0:3": {"path": ["test_crate", "ParseError"], "kind": "enum"},
-            "0:4": {"path": ["test_crate", "Parseable"], "kind": "trait"},
-        },
-        "index": {
-            "0:0": {
+    return json.dumps(
+        {
+            "format_version": 27,
+            "root": "0:0",
+            "crate": {
                 "name": "test_crate",
-                "docs": "Test crate root module",
-                "inner": {"Module": {}},
+                "version": "1.0.0",
             },
-            "0:1": {
-                "name": "parse",
-                "docs": "Parse input using [`Parser`] which implements [`Parseable`]. May return [`ParseError`].",
-                "inner": {"Function": {"decl": {"inputs": [], "output": None}}},
-                "links": {
-                    "Parser": "0:2",
-                    "Parseable": "0:4",
-                    "ParseError": "0:3",
+            "paths": {
+                "0:0": {"path": ["test_crate"], "kind": "module"},
+                "0:1": {"path": ["test_crate", "parse"], "kind": "function"},
+                "0:2": {"path": ["test_crate", "Parser"], "kind": "struct"},
+                "0:3": {"path": ["test_crate", "ParseError"], "kind": "enum"},
+                "0:4": {"path": ["test_crate", "Parseable"], "kind": "trait"},
+            },
+            "index": {
+                "0:0": {
+                    "name": "test_crate",
+                    "docs": "Test crate root module",
+                    "inner": {"Module": {}},
+                },
+                "0:1": {
+                    "name": "parse",
+                    "docs": "Parse input using [`Parser`] which implements [`Parseable`]. May return [`ParseError`].",
+                    "inner": {"Function": {"decl": {"inputs": [], "output": None}}},
+                    "links": {
+                        "Parser": "0:2",
+                        "Parseable": "0:4",
+                        "ParseError": "0:3",
+                    },
+                },
+                "0:2": {
+                    "name": "Parser",
+                    "docs": "Main parser struct that implements [`Parseable`]",
+                    "inner": {"Struct": {"kind": "unit"}},
+                    "links": {
+                        "Parseable": "0:4",
+                    },
+                },
+                "0:3": {
+                    "name": "ParseError",
+                    "docs": "Error type returned by [`parse`] function",
+                    "inner": {"Enum": {}},
+                    "links": {
+                        "parse": "0:1",
+                    },
+                },
+                "0:4": {
+                    "name": "Parseable",
+                    "docs": "Trait implemented by [`Parser`]",
+                    "inner": {"Trait": {}},
+                    "links": {
+                        "Parser": "0:2",
+                    },
                 },
             },
-            "0:2": {
-                "name": "Parser",
-                "docs": "Main parser struct that implements [`Parseable`]",
-                "inner": {"Struct": {"kind": "unit"}},
-                "links": {
-                    "Parseable": "0:4",
-                },
-            },
-            "0:3": {
-                "name": "ParseError",
-                "docs": "Error type returned by [`parse`] function",
-                "inner": {"Enum": {}},
-                "links": {
-                    "parse": "0:1",
-                },
-            },
-            "0:4": {
-                "name": "Parseable",
-                "docs": "Trait implemented by [`Parser`]",
-                "inner": {"Trait": {}},
-                "links": {
-                    "Parser": "0:2",
-                },
-            },
-        },
-    })
+        }
+    )
 
 
 @pytest.mark.asyncio
@@ -82,12 +84,13 @@ async def test_end_to_end_crossref_flow(client):
     # Mock the rustdoc download and decompression
     rustdoc_json = create_comprehensive_rustdoc_json()
 
-    with patch("docsrs_mcp.ingest.fetch_crate_info") as mock_fetch_info, \
-         patch("docsrs_mcp.ingest.resolve_version") as mock_resolve_version, \
-         patch("docsrs_mcp.ingest.download_rustdoc") as mock_download, \
-         patch("docsrs_mcp.ingest.decompress_content") as mock_decompress, \
-         patch("docsrs_mcp.ingest.generate_embeddings_streaming") as mock_embeddings:
-
+    with (
+        patch("docsrs_mcp.ingest.fetch_crate_info") as mock_fetch_info,
+        patch("docsrs_mcp.ingest.resolve_version") as mock_resolve_version,
+        patch("docsrs_mcp.ingest.download_rustdoc") as mock_download,
+        patch("docsrs_mcp.ingest.decompress_content") as mock_decompress,
+        patch("docsrs_mcp.ingest.generate_embeddings_streaming") as mock_embeddings,
+    ):
         # Setup mocks
         mock_fetch_info.return_value = {
             "name": "test_crate",
@@ -95,8 +98,14 @@ async def test_end_to_end_crossref_flow(client):
             "max_stable_version": "1.0.0",
         }
 
-        mock_resolve_version.return_value = ("1.0.0", "https://docs.rs/test_crate/1.0.0/test_crate.json")
-        mock_download.return_value = (b"compressed_content", "https://docs.rs/test_crate/1.0.0/test_crate.json")
+        mock_resolve_version.return_value = (
+            "1.0.0",
+            "https://docs.rs/test_crate/1.0.0/test_crate.json",
+        )
+        mock_download.return_value = (
+            b"compressed_content",
+            "https://docs.rs/test_crate/1.0.0/test_crate.json",
+        )
         mock_decompress.return_value = rustdoc_json
 
         # Mock embeddings to return simple values
@@ -166,52 +175,58 @@ async def test_end_to_end_crossref_flow(client):
             # Incoming: parse -> Parser, Parseable -> Parser
             if "to" in cross_refs:
                 source_paths = {ref["source_path"] for ref in cross_refs["to"]}
-                assert "test_crate::parse" in source_paths or "test_crate::Parseable" in source_paths
+                assert (
+                    "test_crate::parse" in source_paths
+                    or "test_crate::Parseable" in source_paths
+                )
 
 
 @pytest.mark.asyncio
 async def test_crossref_with_path_resolution(client):
     """Test that cross-references work with path alias resolution."""
 
-    rustdoc_json = json.dumps({
-        "format_version": 27,
-        "root": "0:0",
-        "crate": {
-            "name": "test_crate",
-            "version": "1.0.0",
-        },
-        "paths": {
-            "0:0": {"path": ["test_crate"], "kind": "module"},
-            "0:1": {"path": ["test_crate", "prelude"], "kind": "module"},
-            "0:2": {"path": ["test_crate", "core", "Parser"], "kind": "struct"},
-        },
-        "index": {
-            "0:0": {
+    rustdoc_json = json.dumps(
+        {
+            "format_version": 27,
+            "root": "0:0",
+            "crate": {
                 "name": "test_crate",
-                "docs": "Root",
-                "inner": {"Module": {}},
+                "version": "1.0.0",
             },
-            "0:1": {
-                "name": "prelude",
-                "docs": "Prelude with re-export",
-                "inner": {"Module": {}},
-                # Re-export (handled separately from cross-refs)
+            "paths": {
+                "0:0": {"path": ["test_crate"], "kind": "module"},
+                "0:1": {"path": ["test_crate", "prelude"], "kind": "module"},
+                "0:2": {"path": ["test_crate", "core", "Parser"], "kind": "struct"},
             },
-            "0:2": {
-                "name": "Parser",
-                "docs": "Parser struct",
-                "inner": {"Struct": {"kind": "unit"}},
-                "links": {},
+            "index": {
+                "0:0": {
+                    "name": "test_crate",
+                    "docs": "Root",
+                    "inner": {"Module": {}},
+                },
+                "0:1": {
+                    "name": "prelude",
+                    "docs": "Prelude with re-export",
+                    "inner": {"Module": {}},
+                    # Re-export (handled separately from cross-refs)
+                },
+                "0:2": {
+                    "name": "Parser",
+                    "docs": "Parser struct",
+                    "inner": {"Struct": {"kind": "unit"}},
+                    "links": {},
+                },
             },
-        },
-    })
+        }
+    )
 
-    with patch("docsrs_mcp.ingest.fetch_crate_info") as mock_fetch_info, \
-         patch("docsrs_mcp.ingest.resolve_version") as mock_resolve_version, \
-         patch("docsrs_mcp.ingest.download_rustdoc") as mock_download, \
-         patch("docsrs_mcp.ingest.decompress_content") as mock_decompress, \
-         patch("docsrs_mcp.ingest.generate_embeddings_streaming") as mock_embeddings:
-
+    with (
+        patch("docsrs_mcp.ingest.fetch_crate_info") as mock_fetch_info,
+        patch("docsrs_mcp.ingest.resolve_version") as mock_resolve_version,
+        patch("docsrs_mcp.ingest.download_rustdoc") as mock_download,
+        patch("docsrs_mcp.ingest.decompress_content") as mock_decompress,
+        patch("docsrs_mcp.ingest.generate_embeddings_streaming") as mock_embeddings,
+    ):
         # Setup mocks
         mock_fetch_info.return_value = {
             "name": "test_crate",
@@ -249,38 +264,41 @@ async def test_missing_crossrefs_graceful_handling(client):
     """Test that missing cross-references are handled gracefully."""
 
     # Rustdoc without links field
-    rustdoc_json = json.dumps({
-        "format_version": 27,
-        "root": "0:0",
-        "crate": {
-            "name": "test_crate",
-            "version": "1.0.0",
-        },
-        "paths": {
-            "0:0": {"path": ["test_crate"], "kind": "module"},
-            "0:1": {"path": ["test_crate", "foo"], "kind": "function"},
-        },
-        "index": {
-            "0:0": {
+    rustdoc_json = json.dumps(
+        {
+            "format_version": 27,
+            "root": "0:0",
+            "crate": {
                 "name": "test_crate",
-                "docs": "Root",
-                "inner": {"Module": {}},
+                "version": "1.0.0",
             },
-            "0:1": {
-                "name": "foo",
-                "docs": "Function without links",
-                "inner": {"Function": {}},
-                # No links field
+            "paths": {
+                "0:0": {"path": ["test_crate"], "kind": "module"},
+                "0:1": {"path": ["test_crate", "foo"], "kind": "function"},
             },
-        },
-    })
+            "index": {
+                "0:0": {
+                    "name": "test_crate",
+                    "docs": "Root",
+                    "inner": {"Module": {}},
+                },
+                "0:1": {
+                    "name": "foo",
+                    "docs": "Function without links",
+                    "inner": {"Function": {}},
+                    # No links field
+                },
+            },
+        }
+    )
 
-    with patch("docsrs_mcp.ingest.fetch_crate_info") as mock_fetch_info, \
-         patch("docsrs_mcp.ingest.resolve_version") as mock_resolve_version, \
-         patch("docsrs_mcp.ingest.download_rustdoc") as mock_download, \
-         patch("docsrs_mcp.ingest.decompress_content") as mock_decompress, \
-         patch("docsrs_mcp.ingest.generate_embeddings_streaming") as mock_embeddings:
-
+    with (
+        patch("docsrs_mcp.ingest.fetch_crate_info") as mock_fetch_info,
+        patch("docsrs_mcp.ingest.resolve_version") as mock_resolve_version,
+        patch("docsrs_mcp.ingest.download_rustdoc") as mock_download,
+        patch("docsrs_mcp.ingest.decompress_content") as mock_decompress,
+        patch("docsrs_mcp.ingest.generate_embeddings_streaming") as mock_embeddings,
+    ):
         mock_fetch_info.return_value = {
             "name": "test_crate",
             "description": "Test",

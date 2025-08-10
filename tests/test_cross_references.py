@@ -167,13 +167,17 @@ async def test_store_and_retrieve_crossrefs(temp_db):
     await store_reexports(temp_db, crate_id, crossrefs)
 
     # Retrieve cross-references for foo
-    cross_refs = await get_cross_references(temp_db, "test_crate::foo", direction="from")
+    cross_refs = await get_cross_references(
+        temp_db, "test_crate::foo", direction="from"
+    )
 
     assert "from" in cross_refs
     assert len(cross_refs["from"]) == 2
 
     # Check specific references
-    bar_ref = next((r for r in cross_refs["from"] if r["target_path"] == "test_crate::Bar"), None)
+    bar_ref = next(
+        (r for r in cross_refs["from"] if r["target_path"] == "test_crate::Bar"), None
+    )
     assert bar_ref is not None
     assert bar_ref["link_text"] == "Bar"
     assert bar_ref["confidence"] == 1.0
@@ -221,11 +225,12 @@ async def test_mixed_reexports_and_crossrefs(temp_db):
     """Test that regular reexports and cross-references can coexist."""
     # First, create a crate metadata entry
     import aiosqlite
+
     async with aiosqlite.connect(temp_db) as db:
         await db.execute(
             """INSERT INTO crate_metadata (name, version, description) 
                VALUES (?, ?, ?)""",
-            ("test_crate", "1.0.0", "Test crate")
+            ("test_crate", "1.0.0", "Test crate"),
         )
         await db.commit()
         crate_id = 1
@@ -250,13 +255,17 @@ async def test_mixed_reexports_and_crossrefs(temp_db):
     await store_reexports(temp_db, crate_id, entries)
 
     # Get reexports only (no cross-refs)
-    reexports = await get_discovered_reexports(temp_db, "test_crate", include_crossrefs=False)
+    reexports = await get_discovered_reexports(
+        temp_db, "test_crate", include_crossrefs=False
+    )
 
     assert "test_crate::prelude::Vec" in reexports
     assert "test_crate::foo" not in reexports  # Cross-ref should be excluded
 
     # Get all mappings including cross-refs
-    all_mappings = await get_discovered_reexports(temp_db, "test_crate", include_crossrefs=True)
+    all_mappings = await get_discovered_reexports(
+        temp_db, "test_crate", include_crossrefs=True
+    )
 
     assert "test_crate::prelude::Vec" in all_mappings
     assert "test_crate::foo" in all_mappings  # Cross-ref should be included
@@ -290,12 +299,18 @@ async def test_crossref_confidence_scores(temp_db):
     await store_reexports(temp_db, crate_id, crossrefs)
 
     # Retrieve and check confidence scores
-    cross_refs = await get_cross_references(temp_db, "test_crate::foo", direction="from")
+    cross_refs = await get_cross_references(
+        temp_db, "test_crate::foo", direction="from"
+    )
 
     assert "from" in cross_refs
 
-    bar_ref = next((r for r in cross_refs["from"] if r["target_path"] == "test_crate::Bar"), None)
+    bar_ref = next(
+        (r for r in cross_refs["from"] if r["target_path"] == "test_crate::Bar"), None
+    )
     assert bar_ref["confidence"] == 0.9
 
-    baz_ref = next((r for r in cross_refs["from"] if r["target_path"] == "test_crate::Baz"), None)
+    baz_ref = next(
+        (r for r in cross_refs["from"] if r["target_path"] == "test_crate::Baz"), None
+    )
     assert baz_ref["confidence"] == 0.7

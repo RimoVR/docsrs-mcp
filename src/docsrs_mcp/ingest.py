@@ -417,7 +417,6 @@ async def download_rustdoc(
     class RustdocVersionNotFoundError(Exception):
         """Raised when a specific version doesn't have rustdoc JSON available."""
 
-
     if all_404:
         # All attempts were 404s - this version doesn't have rustdoc JSON
         raise RustdocVersionNotFoundError(
@@ -520,9 +519,66 @@ def normalize_item_type(kind: dict | str) -> str:
     return kind_str
 
 
-def format_signature(decl: dict) -> str:
-    """Format a function/method declaration into a readable signature."""
+def format_signature(decl: dict, generics: dict | None = None) -> str:
+    """Format a function/method declaration into a readable signature with generics."""
     try:
+        # Extract generics if present
+        generic_str = ""
+        if generics and isinstance(generics, dict):
+            params = generics.get("params", [])
+            if params:
+                generic_parts = []
+                for param in params:
+                    if isinstance(param, dict):
+                        name = param.get("name", "")
+                        kind = param.get("kind", {})
+
+                        # Handle different generic parameter kinds
+                        if isinstance(kind, dict):
+                            if "lifetime" in kind:
+                                generic_parts.append(f"'{name}")
+                            elif "const" in kind:
+                                const_type = (
+                                    kind["const"].get("type")
+                                    if isinstance(kind["const"], dict)
+                                    else None
+                                )
+                                if const_type:
+                                    type_name = extract_type_name(const_type)
+                                    generic_parts.append(f"const {name}: {type_name}")
+                                else:
+                                    generic_parts.append(f"const {name}")
+                            elif "type" in kind:
+                                # Check for bounds on the type parameter
+                                type_info = kind["type"]
+                                if (
+                                    isinstance(type_info, dict)
+                                    and "bounds" in type_info
+                                ):
+                                    bounds = []
+                                    for bound in type_info["bounds"]:
+                                        if isinstance(bound, dict):
+                                            bound_str = extract_type_name(
+                                                bound.get("trait")
+                                            )
+                                            if bound_str:
+                                                bounds.append(bound_str)
+                                    if bounds:
+                                        generic_parts.append(
+                                            f"{name}: {' + '.join(bounds)}"
+                                        )
+                                    else:
+                                        generic_parts.append(name)
+                                else:
+                                    generic_parts.append(name)
+                            else:
+                                generic_parts.append(name)
+                        else:
+                            generic_parts.append(name)
+
+                if generic_parts:
+                    generic_str = f"<{', '.join(generic_parts)}>"
+
         inputs = decl.get("inputs", [])
         output = decl.get("output")
 
@@ -541,7 +597,7 @@ def format_signature(decl: dict) -> str:
             else:
                 params.append(str(param))
 
-        signature = f"({', '.join(params)})"
+        signature = f"{generic_str}({', '.join(params)})"
 
         # Add return type if present
         if output and output != "unit":
@@ -558,21 +614,25 @@ def format_signature(decl: dict) -> str:
 
 
 def extract_signature(item: dict) -> str | None:
-    """Extract function/method signature."""
+    """Extract function/method signature with generics."""
     try:
         inner = item.get("inner", {})
 
         # Check for function
         if isinstance(inner, dict) and "function" in inner:
-            decl = inner["function"].get("decl", {})
+            func_data = inner["function"]
+            decl = func_data.get("decl", {})
+            generics = func_data.get("generics")
             if decl:
-                return format_signature(decl)
+                return format_signature(decl, generics)
 
         # Check for method
         if isinstance(inner, dict) and "method" in inner:
-            decl = inner["method"].get("decl", {})
+            method_data = inner["method"]
+            decl = method_data.get("decl", {})
+            generics = method_data.get("generics")
             if decl:
-                return format_signature(decl)
+                return format_signature(decl, generics)
 
         # Check for other inner types that might have signatures
         for key in ["assoc_const", "assoc_type"]:
@@ -1129,6 +1189,207 @@ def extract_deprecated(item: dict) -> bool:
         return False
 
 
+def extract_generic_params(item: dict) -> str | None:
+    """Extract generic parameters from rustdoc item."""
+    try:
+        inner = item.get("inner", {})
+        if not isinstance(inner, dict):
+            return None
+
+        # Look for generics in various item types
+        generics = None
+
+        # Direct generics field
+        if "generics" in inner:
+            generics = inner["generics"]
+        # Function generics
+        elif "function" in inner and isinstance(inner["function"], dict):
+            generics = inner["function"].get("generics")
+        # Struct generics
+        elif "struct" in inner and isinstance(inner["struct"], dict):
+            generics = inner["struct"].get("generics")
+        # Trait generics
+        elif "trait" in inner and isinstance(inner["trait"], dict):
+            generics = inner["trait"].get("generics")
+        # Enum generics
+        elif "enum" in inner and isinstance(inner["enum"], dict):
+            generics = inner["enum"].get("generics")
+        # Type alias generics
+        elif "typedef" in inner and isinstance(inner["typedef"], dict):
+            generics = inner["typedef"].get("generics")
+        # Impl block generics
+        elif "impl" in inner and isinstance(inner["impl"], dict):
+            generics = inner["impl"].get("generics")
+
+        if not generics or not isinstance(generics, dict):
+            return None
+
+        # Extract generic parameters
+        params = generics.get("params", [])
+        if not params:
+            return None
+
+        result = []
+        for param in params:
+            if not isinstance(param, dict):
+                continue
+
+            param_info = {
+                "name": param.get("name", ""),
+                "kind": "type",  # default
+            }
+
+            # Determine parameter kind
+            kind = param.get("kind")
+            if isinstance(kind, dict):
+                if "lifetime" in kind:
+                    param_info["kind"] = "lifetime"
+                elif "const" in kind:
+                    param_info["kind"] = "const"
+                    # Add const type if available
+                    const_type = (
+                        kind["const"].get("type")
+                        if isinstance(kind["const"], dict)
+                        else None
+                    )
+                    if const_type:
+                        param_info["const_type"] = extract_type_name(const_type)
+                elif "type" in kind:
+                    param_info["kind"] = "type"
+                    # Extract bounds if present
+                    type_info = kind["type"]
+                    if isinstance(type_info, dict) and "bounds" in type_info:
+                        bounds = []
+                        for bound in type_info["bounds"]:
+                            if isinstance(bound, dict):
+                                bound_str = extract_type_name(bound.get("trait"))
+                                if bound_str:
+                                    bounds.append(bound_str)
+                        if bounds:
+                            param_info["bounds"] = bounds
+            elif isinstance(kind, str):
+                param_info["kind"] = kind.lower()
+
+            result.append(param_info)
+
+        return json.dumps(result) if result else None
+
+    except Exception as e:
+        logger.warning(f"Failed to extract generic params: {e}")
+        return None
+
+
+def extract_trait_bounds(item: dict) -> str | None:
+    """Extract trait bounds and where clauses from rustdoc item."""
+    try:
+        inner = item.get("inner", {})
+        if not isinstance(inner, dict):
+            return None
+
+        # Look for generics which contain where predicates
+        generics = None
+
+        # Direct generics field
+        if "generics" in inner:
+            generics = inner["generics"]
+        # Function generics
+        elif "function" in inner and isinstance(inner["function"], dict):
+            generics = inner["function"].get("generics")
+        # Struct generics
+        elif "struct" in inner and isinstance(inner["struct"], dict):
+            generics = inner["struct"].get("generics")
+        # Trait generics
+        elif "trait" in inner and isinstance(inner["trait"], dict):
+            generics = inner["trait"].get("generics")
+        # Enum generics
+        elif "enum" in inner and isinstance(inner["enum"], dict):
+            generics = inner["enum"].get("generics")
+        # Type alias generics
+        elif "typedef" in inner and isinstance(inner["typedef"], dict):
+            generics = inner["typedef"].get("generics")
+        # Impl block generics and trait bounds
+        elif "impl" in inner and isinstance(inner["impl"], dict):
+            impl_data = inner["impl"]
+            generics = impl_data.get("generics")
+
+            # Also check for trait being implemented
+            trait_info = impl_data.get("trait")
+            if trait_info:
+                trait_name = extract_type_name(trait_info)
+                if trait_name:
+                    # Include impl trait as a special bound
+                    result = [{"type": "impl", "trait": trait_name}]
+                    # Continue to check for where clauses
+                    if generics and isinstance(generics, dict):
+                        where_predicates = generics.get("where_predicates", [])
+                        if where_predicates:
+                            for pred in where_predicates:
+                                if isinstance(pred, dict):
+                                    result.append(extract_where_predicate(pred))
+                    return json.dumps(result)
+
+        if not generics or not isinstance(generics, dict):
+            return None
+
+        # Extract where predicates
+        where_predicates = generics.get("where_predicates", [])
+        if not where_predicates:
+            return None
+
+        result = []
+        for predicate in where_predicates:
+            if not isinstance(predicate, dict):
+                continue
+
+            pred_info = extract_where_predicate(predicate)
+            if pred_info:
+                result.append(pred_info)
+
+        return json.dumps(result) if result else None
+
+    except Exception as e:
+        logger.warning(f"Failed to extract trait bounds: {e}")
+        return None
+
+
+def extract_where_predicate(predicate: dict) -> dict | None:
+    """Extract a single where predicate into a structured format."""
+    try:
+        pred_type = predicate.get("type", "")
+
+        if pred_type == "bound_predicate":
+            # T: Display + Debug style
+            type_name = extract_type_name(predicate.get("type"))
+            bounds = []
+            for bound in predicate.get("bounds", []):
+                if isinstance(bound, dict):
+                    trait_name = extract_type_name(bound.get("trait"))
+                    if trait_name:
+                        bounds.append(trait_name)
+
+            if type_name and bounds:
+                return {"type": "bound", "target": type_name, "bounds": bounds}
+
+        elif pred_type == "region_predicate":
+            # 'a: 'b style lifetime bounds
+            lifetime = predicate.get("lifetime")
+            bounds = predicate.get("bounds", [])
+            if lifetime and bounds:
+                return {"type": "lifetime", "lifetime": lifetime, "bounds": bounds}
+
+        elif pred_type == "eq_predicate":
+            # T = ConcreteType style
+            lhs = extract_type_name(predicate.get("lhs"))
+            rhs = extract_type_name(predicate.get("rhs"))
+            if lhs and rhs:
+                return {"type": "equality", "left": lhs, "right": rhs}
+
+        return None
+
+    except Exception:
+        return None
+
+
 async def parse_rustdoc_items_streaming(json_content: str):
     """Parse rustdoc JSON using ijson for memory-efficient streaming.
 
@@ -1322,6 +1583,8 @@ async def parse_rustdoc_items_streaming(json_content: str):
                     examples = extract_code_examples(docs)
                     visibility = extract_visibility(item_info)
                     deprecated = extract_deprecated(item_info)
+                    generic_params = extract_generic_params(item_info)
+                    trait_bounds = extract_trait_bounds(item_info)
 
                     # Extract cross-references from the links field
                     links = item_info.get("links", {})
@@ -1356,6 +1619,8 @@ async def parse_rustdoc_items_streaming(json_content: str):
                         "examples": examples,
                         "visibility": visibility,
                         "deprecated": deprecated,
+                        "generic_params": generic_params,
+                        "trait_bounds": trait_bounds,
                     }
 
                     item_count += 1
@@ -1811,14 +2076,16 @@ async def _store_batch(
                         else None,
                         chunk.get("visibility", "public"),
                         chunk.get("deprecated", False),
+                        chunk.get("generic_params"),  # Already JSON string or None
+                        chunk.get("trait_bounds"),  # Already JSON string or None
                     )
                 )
 
             await db.executemany(
                 """
                 INSERT INTO embeddings 
-                (item_path, header, content, embedding, item_type, signature, parent_id, examples, visibility, deprecated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (item_path, header, content, embedding, item_type, signature, parent_id, examples, visibility, deprecated, generic_params, trait_bounds)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 insert_data,
             )
@@ -1915,12 +2182,14 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                         else:
                             # Run migrations if needed
                             from .database import (
+                                migrate_add_generics_metadata,
                                 migrate_database_duplicates,
                                 migrate_reexports_for_crossrefs,
                             )
 
                             await migrate_database_duplicates(db_path)
                             await migrate_reexports_for_crossrefs(db_path)
+                            await migrate_add_generics_metadata(db_path)
                 except Exception as e:
                     logger.error(f"Error checking database: {e}")
                     await init_database(db_path)
@@ -2062,6 +2331,8 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                         "examples": item.get("examples", []),
                         "visibility": item.get("visibility", "public"),
                         "deprecated": item.get("deprecated", False),
+                        "generic_params": item.get("generic_params"),
+                        "trait_bounds": item.get("trait_bounds"),
                     }
                     chunks.append(chunk)
 
@@ -2164,11 +2435,14 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                         "examples": examples,
                                         "visibility": item.get("visibility", "public"),
                                         "deprecated": False,
+                                        "generic_params": None,  # Not available in fallback
+                                        "trait_bounds": None,  # Not available in fallback
                                     }
                                     chunks.append(chunk)
 
                                 # Generate and store embeddings using existing infrastructure
                                 from .memory_utils import MemoryMonitor
+
                                 with MemoryMonitor(
                                     f"fallback_embeddings_{crate_name}_{version}"
                                 ):
@@ -2190,36 +2464,43 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                         logger.warning(
                             f"Source extraction fallback failed: {extraction_error}"
                         )
-                        
+
                         # Second fallback: Try latest version's rustdoc JSON
                         if version != "latest" and not is_stdlib_crate(crate_name):
                             logger.info(
-                                f"Source extraction failed, falling back to latest version's rustdoc JSON"
+                                "Source extraction failed, falling back to latest version's rustdoc JSON"
                             )
                             try:
                                 # Resolve latest version URL
                                 latest_version, latest_url = await resolve_version(
                                     session, crate_name, "latest"
                                 )
-                                logger.info(f"Trying with latest version: {latest_version}")
+                                logger.info(
+                                    f"Trying with latest version: {latest_version}"
+                                )
 
                                 # Try downloading with latest version
-                                compressed_content, download_url = await download_rustdoc(
+                                (
+                                    compressed_content,
+                                    download_url,
+                                ) = await download_rustdoc(
                                     session, crate_name, latest_version, latest_url
                                 )
-                                
+
                                 # Decompress and process
                                 logger.info("Decompressing rustdoc content")
                                 json_content = await decompress_content(
                                     compressed_content, download_url
                                 )
-                                
+
                                 # Parse and store using existing logic
                                 items = []
                                 modules = {}
                                 reexports = []
                                 crossrefs = []
-                                async for item in parse_rustdoc_items_streaming(json_content):
+                                async for item in parse_rustdoc_items_streaming(
+                                    json_content
+                                ):
                                     if "_modules" in item:
                                         modules = item["_modules"]
                                     elif "_reexports" in item:
@@ -2228,16 +2509,20 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                         crossrefs = item["_crossrefs"]
                                     else:
                                         items.append(item)
-                                
-                                logger.info(f"Collected {len(items)} rustdoc items from latest version")
-                                
+
+                                logger.info(
+                                    f"Collected {len(items)} rustdoc items from latest version"
+                                )
+
                                 # Store modules and process items
                                 await store_modules(db_path, crate_id, modules)
-                                
+
                                 all_reexports = reexports + crossrefs
                                 if all_reexports:
-                                    await store_reexports(db_path, crate_id, all_reexports)
-                                
+                                    await store_reexports(
+                                        db_path, crate_id, all_reexports
+                                    )
+
                                 # Generate chunks and embeddings
                                 chunks = []
                                 for item in items:
@@ -2251,24 +2536,39 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                         "examples": item.get("examples", []),
                                         "visibility": item.get("visibility", "public"),
                                         "deprecated": item.get("deprecated", False),
+                                        "generic_params": item.get("generic_params"),
+                                        "trait_bounds": item.get("trait_bounds"),
                                     }
                                     chunks.append(chunk)
-                                
+
                                 from .memory_utils import MemoryMonitor
-                                with MemoryMonitor(f"embeddings_{crate_name}_{version}"):
-                                    chunk_embedding_pairs = generate_embeddings_streaming(chunks)
-                                    await store_embeddings_streaming(db_path, chunk_embedding_pairs)
-                                
-                                logger.info(f"Successfully ingested latest version as fallback for {crate_name}@{version}")
-                                
+
+                                with MemoryMonitor(
+                                    f"embeddings_{crate_name}_{version}"
+                                ):
+                                    chunk_embedding_pairs = (
+                                        generate_embeddings_streaming(chunks)
+                                    )
+                                    await store_embeddings_streaming(
+                                        db_path, chunk_embedding_pairs
+                                    )
+
+                                logger.info(
+                                    f"Successfully ingested latest version as fallback for {crate_name}@{version}"
+                                )
+
                                 # Try to generate example embeddings
                                 try:
-                                    await generate_example_embeddings(db_path, crate_name, version)
+                                    await generate_example_embeddings(
+                                        db_path, crate_name, version
+                                    )
                                 except Exception as ex_err:
-                                    logger.warning(f"Failed to generate example embeddings: {ex_err}")
-                                
+                                    logger.warning(
+                                        f"Failed to generate example embeddings: {ex_err}"
+                                    )
+
                                 return db_path
-                                
+
                             except Exception as latest_error:
                                 logger.warning(
                                     f"Latest version fallback also failed: {latest_error}"

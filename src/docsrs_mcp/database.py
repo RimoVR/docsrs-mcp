@@ -144,6 +144,8 @@ async def migrate_database_duplicates(db_path: Path) -> None:
                 examples TEXT,
                 visibility TEXT DEFAULT 'public',
                 deprecated BOOLEAN DEFAULT 0,
+                generic_params TEXT DEFAULT NULL,
+                trait_bounds TEXT DEFAULT NULL,
                 UNIQUE(item_path)
             )
         """)
@@ -253,11 +255,11 @@ async def migrate_reexports_for_crossrefs(db_path: Path) -> None:
         """)
 
         result = await cursor.fetchone()
-        if result and 'link_text' in result[0]:
+        if result and "link_text" in result[0]:
             # Check if we need to fix the unique constraint
-            if 'UNIQUE(crate_id, alias_path, actual_path, link_type)' not in result[0]:
+            if "UNIQUE(crate_id, alias_path, actual_path, link_type)" not in result[0]:
                 logger.info("Fixing unique constraint for cross-references")
-                
+
                 # Create new table with correct constraint
                 await db.execute("""
                     CREATE TABLE reexports_new (
@@ -274,35 +276,35 @@ async def migrate_reexports_for_crossrefs(db_path: Path) -> None:
                         UNIQUE(crate_id, alias_path, actual_path, link_type)
                     )
                 """)
-                
+
                 # Copy data
                 await db.execute("""
                     INSERT INTO reexports_new 
                     SELECT * FROM reexports
                 """)
-                
+
                 # Drop old table and rename new one
                 await db.execute("DROP TABLE reexports")
                 await db.execute("ALTER TABLE reexports_new RENAME TO reexports")
-                
+
                 # Recreate indexes
                 await db.execute("""
                     CREATE INDEX IF NOT EXISTS idx_reexports_lookup
                     ON reexports(crate_id, alias_path)
                 """)
-                
+
                 await db.execute("""
                     CREATE INDEX IF NOT EXISTS idx_reexports_crossref_forward
                     ON reexports(crate_id, alias_path, link_text)
                     WHERE link_type = 'crossref'
                 """)
-                
+
                 await db.execute("""
                     CREATE INDEX IF NOT EXISTS idx_reexports_crossref_reverse
                     ON reexports(crate_id, target_item_id)
                     WHERE link_type = 'crossref'
                 """)
-                
+
                 await db.commit()
                 logger.info("Successfully fixed unique constraint")
             return
@@ -316,7 +318,9 @@ async def migrate_reexports_for_crossrefs(db_path: Path) -> None:
             pass  # Column might already exist
 
         try:
-            await db.execute("ALTER TABLE reexports ADD COLUMN link_type TEXT DEFAULT 'reexport'")
+            await db.execute(
+                "ALTER TABLE reexports ADD COLUMN link_type TEXT DEFAULT 'reexport'"
+            )
         except Exception:
             pass
 
@@ -326,7 +330,9 @@ async def migrate_reexports_for_crossrefs(db_path: Path) -> None:
             pass
 
         try:
-            await db.execute("ALTER TABLE reexports ADD COLUMN confidence_score REAL DEFAULT 1.0")
+            await db.execute(
+                "ALTER TABLE reexports ADD COLUMN confidence_score REAL DEFAULT 1.0"
+            )
         except Exception:
             pass
 
@@ -345,6 +351,43 @@ async def migrate_reexports_for_crossrefs(db_path: Path) -> None:
 
         await db.commit()
         logger.info("Successfully migrated reexports table for cross-reference support")
+
+
+async def migrate_add_generics_metadata(db_path: Path) -> None:
+    """Add generic_params and trait_bounds columns for richer metadata."""
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Check if migration is needed by checking for generic_params column
+        cursor = await db.execute("""
+            SELECT sql FROM sqlite_master 
+            WHERE type='table' AND name='embeddings'
+        """)
+
+        result = await cursor.fetchone()
+        if result and "generic_params" in result[0]:
+            # Already has the columns
+            return
+
+        logger.info("Migrating database to add generic_params and trait_bounds columns")
+
+        # Add new columns if they don't exist
+        try:
+            await db.execute(
+                "ALTER TABLE embeddings ADD COLUMN generic_params TEXT DEFAULT NULL"
+            )
+            logger.info("Added generic_params column")
+        except Exception:
+            pass  # Column might already exist
+
+        try:
+            await db.execute(
+                "ALTER TABLE embeddings ADD COLUMN trait_bounds TEXT DEFAULT NULL"
+            )
+            logger.info("Added trait_bounds column")
+        except Exception:
+            pass  # Column might already exist
+
+        await db.commit()
+        logger.info("Successfully added generic_params and trait_bounds columns")
 
 
 async def init_database(db_path: Path) -> None:
@@ -415,6 +458,8 @@ async def init_database(db_path: Path) -> None:
                 examples TEXT,
                 visibility TEXT DEFAULT 'public',
                 deprecated BOOLEAN DEFAULT 0,
+                generic_params TEXT DEFAULT NULL,
+                trait_bounds TEXT DEFAULT NULL,
                 UNIQUE(item_path)
             )
         """)
@@ -581,7 +626,7 @@ async def store_reexports(db_path: Path, crate_id: int, reexports: list[dict]) -
     Args:
         db_path: Path to database
         crate_id: ID of the parent crate
-        reexports: List of re-export/crossref dicts with alias_path, actual_path, is_glob, 
+        reexports: List of re-export/crossref dicts with alias_path, actual_path, is_glob,
                   and optionally link_text, link_type, target_item_id, confidence_score
     """
     if not reexports:
@@ -622,13 +667,18 @@ async def store_reexports(db_path: Path, crate_id: int, reexports: list[dict]) -
         reexport_count = len(reexports) - crossref_count
 
         if crossref_count > 0:
-            logger.info(f"Stored {crossref_count} cross-references and {reexport_count} re-export mappings")
+            logger.info(
+                f"Stored {crossref_count} cross-references and {reexport_count} re-export mappings"
+            )
         else:
             logger.info(f"Stored {reexport_count} re-export mappings")
 
 
 async def get_discovered_reexports(
-    db_path: Path, crate_name: str, version: str | None = None, include_crossrefs: bool = False
+    db_path: Path,
+    crate_name: str,
+    version: str | None = None,
+    include_crossrefs: bool = False,
 ) -> dict[str, str]:
     """Get auto-discovered re-exports and optionally cross-references for a crate.
 
@@ -678,9 +728,7 @@ async def get_discovered_reexports(
                     reexport_map[short_alias] = actual_path
 
             if reexport_map:
-                logger.debug(
-                    f"Loaded {len(reexport_map)} mappings for {crate_name}"
-                )
+                logger.debug(f"Loaded {len(reexport_map)} mappings for {crate_name}")
     except Exception as e:
         logger.warning(f"Error loading mappings for {crate_name}: {e}")
 
@@ -691,12 +739,12 @@ async def get_cross_references(
     db_path: Path, item_path: str, direction: str = "both"
 ) -> dict[str, list[dict]]:
     """Get cross-references for a specific item.
-    
+
     Args:
         db_path: Path to database
         item_path: Path of the item to get cross-references for
         direction: "from" (outgoing), "to" (incoming), or "both"
-    
+
     Returns:
         Dictionary with 'from' and/or 'to' lists of cross-reference dicts
     """
@@ -712,17 +760,19 @@ async def get_cross_references(
                     FROM reexports
                     WHERE alias_path = ? AND link_type = 'crossref'
                     """,
-                    (item_path,)
+                    (item_path,),
                 )
 
                 from_refs = []
                 async for row in cursor:
                     target_path, link_text, confidence = row
-                    from_refs.append({
-                        "target_path": target_path,
-                        "link_text": link_text,
-                        "confidence": confidence
-                    })
+                    from_refs.append(
+                        {
+                            "target_path": target_path,
+                            "link_text": link_text,
+                            "confidence": confidence,
+                        }
+                    )
 
                 if from_refs:
                     result["from"] = from_refs
@@ -735,17 +785,19 @@ async def get_cross_references(
                     FROM reexports
                     WHERE actual_path = ? AND link_type = 'crossref'
                     """,
-                    (item_path,)
+                    (item_path,),
                 )
 
                 to_refs = []
                 async for row in cursor:
                     source_path, link_text, confidence = row
-                    to_refs.append({
-                        "source_path": source_path,
-                        "link_text": link_text,
-                        "confidence": confidence
-                    })
+                    to_refs.append(
+                        {
+                            "source_path": source_path,
+                            "link_text": link_text,
+                            "confidence": confidence,
+                        }
+                    )
 
                 if to_refs:
                     result["to"] = to_refs
