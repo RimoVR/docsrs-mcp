@@ -1682,6 +1682,38 @@
             "accuracyImprovement": "~25% better results compared to single algorithm approaches",
             "weightingStrategy": "Balanced weighting preserves both overall similarity and path-specific relevance"
           }
+        },
+        {
+          "lesson": "Tutorial content pattern optimization for token efficiency",
+          "context": "Implementing MCP tool tutorials with structured content patterns for optimal context usage",
+          "details": "4-line structure (purpose, mechanism, performance, best practice) works well for tutorial content, keeping descriptions under 300 characters for optimal token usage. Use active voice and action-oriented language for maximum clarity. This structured approach provides comprehensive guidance while maintaining context efficiency",
+          "impact": "Enables rich tutorial content without significant token overhead, improving user experience while maintaining performance",
+          "dateLearned": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Direct modification approach simplifies tutorial implementation",
+          "context": "Adding tutorial content to MCP tools without complex infrastructure changes",
+          "details": "Direct modification of app.py is simpler than building complex tutorial infrastructure. Inline content eliminates file I/O overhead and following existing patterns (like start_pre_ingestion) ensures consistency with established code patterns. This pragmatic approach enables quick feature delivery",
+          "impact": "Reduces development complexity while maintaining code consistency, enables faster feature implementation",
+          "dateLearned": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Tutorial validation success metrics and testing patterns",
+          "context": "Ensuring tutorial content meets requirements and integrates properly with existing systems",
+          "details": "All tutorials validated under 1000 character limit (actual range: 205-911 chars) with tutorial test (test_mcp_manifest_includes_tutorials) passing successfully. Manifest generation remains fast with embedded content approach. Pre-existing test failures were unrelated to tutorial changes (health check format, validation messages)",
+          "impact": "Provides confidence in tutorial implementation quality while maintaining system performance and test suite integrity",
+          "dateLearned": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "tests/test_app.py"]
+        },
+        {
+          "lesson": "Character count validation script utility for content management",
+          "context": "Implementing simple validation tools for ensuring tutorial content meets length requirements",
+          "details": "Simple Python script can validate tutorial lengths effectively before deployment. Character count validation is important for maintaining performance requirements and ensuring consistent user experience across all tutorial content",
+          "impact": "Prevents content length issues from reaching production, ensures consistent tutorial quality",
+          "dateLearned": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/app.py"]
         }
       ]
     },

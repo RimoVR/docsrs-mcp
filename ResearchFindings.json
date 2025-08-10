@@ -1,9 +1,9 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-09",
+    "lastUpdated": "2025-08-10",
     "compressionVersion": "1.0",
-    "originalTokens": 44930,
+    "originalTokens": 45200,
     "legend": {
       "keys": {
         "desc": "description",
@@ -672,6 +672,27 @@
         "quickstart": ["Purpose statement", "Required params only", "Expected output", "Concrete example"],
         "patterns": {"org": "Group related patterns", "progression": "Simple→advanced", "errors": "Common conditions", "practices": "Optimal usage"}
       }
+    },
+    "mcp_documentation": {
+      "protocol_principles": {
+        "api_design": "Token-efficient, self-documenting APIs with JSON schemas",
+        "structured_outputs": "100% format consistency best practice",
+        "token_optimization": "60% usage reduction through concise, focused content",
+        "tutorial_embedding": "Industry standard: tutorials in tool schemas as additive metadata"
+      },
+      "semantic_search": {
+        "embedding_model": "BAAI/bge-small-en-v1.5",
+        "performance": "<50ms warm searches",
+        "optimization": "Token context window exhaustion mitigation"
+      },
+      "common_issues": {
+        "token_limits": "200-token limit per tutorial prevents context window exhaustion",
+        "type_coercion": "JSON Schema anyOf patterns handle MCP client type coercion requirements"
+      },
+      "sources": {
+        "primary": ["Model Context Protocol specification", "OpenAI Platform Documentation on Structured Outputs"],
+        "industry": "AI agent documentation best practices"
+      }
     }
   },
   "recommendations": {
@@ -714,7 +735,11 @@
       "ValueError exceptions in field validators, not ValidationError",
       "FastAPI RequestValidationError handlers for custom error formatting",
       "Precompile error templates and regex patterns for performance",
-      "Include field path, message, type, and context in error responses"
+      "Include field path, message, type, and context in error responses",
+      "Use structured outputs for 100% format consistency in MCP tools",
+      "Embed tutorials directly in JSON schemas as additive metadata",
+      "Apply 200-token limit per tutorial to prevent context window exhaustion",
+      "Use BAAI/bge-small-en-v1.5 embeddings for <50ms semantic search performance"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",
@@ -740,10 +765,10 @@
     }
   },
   "stats": {
-    "original_tokens": 44930,
-    "compressed_tokens_estimate": 15000,
-    "compression_ratio": "66.7%",
-    "token_reduction": 29930,
+    "original_tokens": 45200,
+    "compressed_tokens_estimate": 15100,
+    "compression_ratio": "66.6%",
+    "token_reduction": 30100,
     "preservation": {
       "technical_details": "100%",
       "library_versions": "100%", 

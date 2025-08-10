@@ -406,16 +406,21 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name"],
                 },
-                tutorial="Fetches crate metadata including version, description, and module structure. First-time ingestion may take 1-10 seconds.",
+                tutorial=(
+                    "Fetches crate metadata including version, description, and module structure.\n"
+                    "Automatically downloads and ingests crates on first access with smart caching.\n"
+                    "First-time ingestion: 1-10 seconds depending on crate size.\n"
+                    "Use for initial crate exploration before diving into specific documentation."
+                ),
                 examples=[
-                    'get_crate_summary(crate_name="tokio")',
-                    'get_crate_summary(crate_name="serde", version="1.0.195")',
-                    'get_crate_summary(crate_name="std")',
+                    "Basic: get_crate_summary(crate_name='tokio')",
+                    "Specific version: get_crate_summary(crate_name='serde', version='1.0.104')",
+                    "Stdlib: get_crate_summary(crate_name='std')",
                 ],
                 use_cases=[
-                    "Explore crate structure and modules",
-                    "Check available versions and metadata",
-                    "Get repository and documentation URLs",
+                    "Initial crate discovery and exploration",
+                    "Version compatibility checking",
+                    "Understanding module organization",
                 ],
             ),
             MCPTool(
@@ -473,16 +478,21 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name", "query"],
                 },
-                tutorial="Semantic search across crate documentation. Returns ranked results by similarity score using BAAI/bge-small-en-v1.5 embeddings.",
+                tutorial=(
+                    "Performs semantic search across all crate documentation using embeddings.\n"
+                    "Results ranked by relevance using BAAI/bge-small-en-v1.5 model.\n"
+                    "Warm searches complete in <50ms. Rate limit: 30 req/sec.\n"
+                    "Best for finding functionality when you don't know exact item names."
+                ),
                 examples=[
-                    'search_items(crate_name="tokio", query="spawn tasks")',
-                    'search_items(crate_name="serde", query="deserialize JSON", k=10, item_type="trait")',
-                    'search_items(crate_name="std", query="file operations", module_path="fs")',
+                    "Basic: search_items(crate_name='tokio', query='spawn tasks')",
+                    "Filtered: search_items(crate_name='serde', query='deserialize', item_type='trait')",
+                    "Limited: search_items(crate_name='actix-web', query='middleware', k=10)",
                 ],
                 use_cases=[
-                    "Find relevant functions and methods",
-                    "Discover traits and implementations",
-                    "Locate code examples in documentation",
+                    "Finding relevant APIs by description",
+                    "Discovering similar functionality",
+                    "Exploring unfamiliar crates",
                 ],
             ),
             MCPTool(
@@ -506,16 +516,21 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name", "item_path"],
                 },
-                tutorial="Retrieves complete documentation for a specific item by path. Use search_items first if unsure of exact path.",
+                tutorial=(
+                    "Retrieves complete documentation for a specific item by path.\n"
+                    "Returns markdown-formatted docs with examples and descriptions.\n"
+                    "Use after search_items to get full details on discovered items.\n"
+                    "Tip: Use 'crate' as item_path for crate-level documentation."
+                ),
                 examples=[
-                    'get_item_doc(crate_name="tokio", item_path="spawn")',
-                    'get_item_doc(crate_name="serde", item_path="Deserialize")',
-                    'get_item_doc(crate_name="std", item_path="vec::Vec")',
+                    "Function: get_item_doc(crate_name='tokio', item_path='tokio::spawn')",
+                    "Trait: get_item_doc(crate_name='serde', item_path='serde::Deserialize')",
+                    "Crate docs: get_item_doc(crate_name='reqwest', item_path='crate')",
                 ],
                 use_cases=[
-                    "Read full documentation and examples",
-                    "View method signatures and parameters",
-                    "Access detailed trait information",
+                    "Reading complete API documentation",
+                    "Understanding implementation details",
+                    "Accessing code examples",
                 ],
             ),
             MCPTool(
@@ -548,16 +563,21 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name", "query"],
                 },
-                tutorial="Searches code examples in documentation. Language-aware filtering available. Returns snippets with context.",
+                tutorial=(
+                    "Searches code examples extracted from crate documentation.\n"
+                    "Includes language detection and filtering capabilities.\n"
+                    "Returns runnable code snippets with context.\n"
+                    "Perfect for learning implementation patterns."
+                ),
                 examples=[
-                    'search_examples(crate_name="tokio", query="async runtime")',
-                    'search_examples(crate_name="clap", query="parse arguments", k=3)',
-                    'search_examples(crate_name="sqlx", query="database connection", language="rust")',
+                    "Basic: search_examples(crate_name='tokio', query='async runtime')",
+                    "Language filter: search_examples(crate_name='diesel', query='migrations', language='sql')",
+                    "More results: search_examples(crate_name='actix-web', query='handlers', k=10)",
                 ],
                 use_cases=[
-                    "Find usage patterns and best practices",
-                    "Discover code snippets for learning",
-                    "Locate specific implementation examples",
+                    "Finding implementation patterns",
+                    "Learning library usage",
+                    "Discovering best practices",
                 ],
             ),
             MCPTool(
@@ -577,16 +597,21 @@ async def get_mcp_manifest(request: Request):
                     },
                     "required": ["crate_name"],
                 },
-                tutorial="Returns hierarchical module structure with item counts. Useful for navigating large crates and understanding organization.",
+                tutorial=(
+                    "Returns hierarchical module structure with parent-child relationships.\n"
+                    "Shows item counts and depth levels for navigation.\n"
+                    "First-time processing: 1-10 seconds for crate ingestion.\n"
+                    "Essential for understanding crate organization."
+                ),
                 examples=[
-                    'get_module_tree(crate_name="tokio")',
-                    'get_module_tree(crate_name="actix-web", version="4.4.0")',
-                    'get_module_tree(crate_name="std")',
+                    "Basic: get_module_tree(crate_name='tokio')",
+                    "Specific version: get_module_tree(crate_name='serde', version='1.0.104')",
+                    "Large crate: get_module_tree(crate_name='rustc')",
                 ],
                 use_cases=[
-                    "Navigate crate structure and organization",
-                    "Find submodules and nested items",
-                    "Understand crate architecture at a glance",
+                    "Navigating complex crates",
+                    "Understanding architecture",
+                    "Finding module locations",
                 ],
             ),
             MCPTool(

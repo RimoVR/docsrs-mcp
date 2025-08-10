@@ -4187,17 +4187,18 @@ classDiagram
         +description: str
         +inputSchema: Dict
         +tutorial: str | None
-        +examples: str | None
-        +use_cases: str | None
+        +examples: list[str] | None
+        +use_cases: list[str] | None
         +validate_tutorial_length()
         +validate_examples_count()
         +validate_use_cases_format()
     }
     
     class TutorialValidation {
-        +maxLength: 200 tokens
-        +maxItems: 5 examples
-        +format: structured text
+        +maxLength: 1000 characters
+        +maxItems: 3 examples
+        +maxItems: 3 use_cases
+        +format: 4-line structured text
         +schema_extras: JSON validation
     }
     
@@ -4205,11 +4206,11 @@ classDiagram
 ```
 
 **Tutorial Field Architecture**:
-- **tutorial**: Optional string field (≤200 tokens) containing quick-start guides and essential usage patterns
-- **examples**: Optional string field with up to 5 practical code examples formatted as structured text
-- **use_cases**: Optional string field describing common scenarios and applications
-- **Backward Compatibility**: All tutorial fields are `str | None` type, ensuring existing tools continue working
-- **JSON Schema Validation**: Uses Pydantic `Field` with `json_schema_extra` for client-side validation
+- **tutorial**: Optional string field (≤1000 characters) containing 4-line structured tutorials: purpose, how it works, performance, best practice
+- **examples**: Optional list field with up to 3 practical code examples formatted as structured text
+- **use_cases**: Optional list field with up to 3 common scenarios and applications
+- **Backward Compatibility**: All tutorial fields use optional types (`str | None`, `list[str] | None`), ensuring existing tools continue working
+- **JSON Schema Validation**: Uses Pydantic `Field` with `json_schema_extra` for client-side validation with maxLength=1000 and maxItems=3 limits
 
 ### Tool Documentation Structure
 ```mermaid
@@ -4244,8 +4245,8 @@ classDiagram
         +description: str
         +inputSchema: Dict
         +tutorial: str | None
-        +examples: str | None
-        +use_cases: str | None
+        +examples: list[str] | None
+        +use_cases: list[str] | None
     }
     
     class MCPManifest {
@@ -4262,11 +4263,12 @@ classDiagram
 ### Token Efficiency Design
 
 **Core Principles**:
-- **200 Token Budget**: Each tutorial field strictly limited to ≤200 tokens for optimal context efficiency
-- **Embedded Content**: Tutorial information stored directly in MCPTool model, eliminating separate metadata lookups
-- **Smart Compression**: Essential information prioritized, verbose explanations condensed
-- **Structured Format**: Consistent formatting patterns across all tutorial fields
-- **Progressive Detail**: Basic usage in tutorial field, advanced patterns in examples field
+- **1000 Character Limit**: Tutorial field limited to ≤1000 characters (~200 tokens) for optimal context efficiency
+- **4-Line Structure**: Standardized tutorial format: purpose, how it works, performance, best practice
+- **Embedded Content**: Tutorial information stored directly in MCPTool model within get_mcp_manifest() function, eliminating separate metadata lookups
+- **Follows Existing Pattern**: Implements same inline approach as start_pre_ingestion tool for consistency
+- **Version Control Consistency**: No external files ensures tutorials stay synchronized with code changes
+- **Fast Generation**: Inline content approach provides optimal performance without template loading
 
 **Validation Strategy**:
 ```python
@@ -4274,23 +4276,31 @@ classDiagram
 class MCPTool(BaseModel):
     tutorial: str | None = Field(
         None,
-        json_schema_extra={
-            "maxLength": 200,  # Token limit enforced
-            "description": "Quick-start guide and essential patterns"
-        }
+        description="Concise tutorial with usage examples",
+        json_schema_extra={"maxLength": 1000},  # ~200 tokens
     )
-    examples: str | None = Field(
+    examples: list[str] | None = Field(
+        None, 
+        description="Quick example invocations", 
+        json_schema_extra={"maxItems": 3}
+    )
+    use_cases: list[str] | None = Field(
         None,
-        json_schema_extra={
-            "maxItems": 5,  # Maximum example count
-            "description": "Practical code examples with explanations"
-        }
+        description="Common use cases for this tool",
+        json_schema_extra={"maxItems": 3},
     )
 ```
 
 ### Tutorial Content Embedding
 
-Tutorial content is embedded directly in the `get_mcp_manifest()` function rather than loaded from external files:
+Tutorial content is embedded directly in the `get_mcp_manifest()` function rather than loaded from external files, following the same pattern established by the `start_pre_ingestion` tool:
+
+**Implementation Approach**:
+- **Inline Content**: All tutorial content stored as multi-line strings within the function
+- **4-Line Tutorial Structure**: Each tutorial follows consistent format: purpose, mechanism, performance characteristics, best practice
+- **No External Dependencies**: Eliminates need for template files or external documentation resources
+- **Version Control Integration**: Tutorial changes tracked alongside code changes in same commit
+- **Performance Optimization**: Direct string assignment is faster than file I/O or template rendering
 
 ```mermaid
 flowchart TD
@@ -4298,9 +4308,9 @@ flowchart TD
     B --> C[Embed Tutorial Content]
     C --> D[Apply Token Optimization]
     
-    D --> E{Validate Token Budget}
-    E -->|Under 200 tokens| F[Include Full Tutorial]
-    E -->|Over 200 tokens| G[Compress Content]
+    D --> E{Validate Character Limit}
+    E -->|Under 1000 chars| F[Include Full Tutorial]
+    E -->|Over 1000 chars| G[Compress Content]
     
     G --> H[Remove Non-essential Words]
     H --> I[Use Abbreviated Examples]
@@ -4371,9 +4381,9 @@ flowchart TD
     B --> C[Create Base MCPTool Instances]
     C --> D[Embed Tutorial Content Directly]
     
-    D --> E{Token Budget Validation}
-    E -->|≤200 tokens| F[Set Tutorial Fields]
-    E -->|>200 tokens| G[Compress Content]
+    D --> E{Character Limit Validation}
+    E -->|≤1000 chars| F[Set Tutorial Fields]
+    E -->|>1000 chars| G[Compress Content]
     
     G --> H[Remove Non-essential Text]
     H --> I[Truncate Examples]
@@ -4430,7 +4440,7 @@ The enhanced popular crates architecture includes comprehensive monitoring capab
 |-----------|--------|------------|
 | Manifest Size | +25% | Embedded tutorial fields in MCPTool instances |
 | Generation Time | +5ms | Direct embedding eliminates template loading |
-| Token Efficiency | +40% | 200-token limit ensures optimal context usage |
+| Token Efficiency | +40% | 1000-character limit (~200 tokens) ensures optimal context usage |
 | Client Experience | Significantly Improved | Rich tutorials without external dependencies |
 | Memory Usage | +2MB | Tutorial content embedded in manifest, no separate caching |
 | Backward Compatibility | 100% | Optional fields (str \| None) maintain compatibility |

@@ -178,20 +178,28 @@ After configuration, restart Claude Desktop or use the `/mcp` command in Claude 
 
 ## MCP Tools
 
-The server exposes the following MCP tools through the `/mcp/tools/{tool_name}` endpoint:
+The server exposes 6 core MCP tools through the `/mcp/tools/{tool_name}` endpoint, all with comprehensive embedded tutorials for enhanced AI agent integration.
 
 ### Enhanced Tool Documentation
 
-All MCP tools now include embedded tutorials to help AI agents use them effectively:
+All 6 core MCP tools now include comprehensive embedded tutorials designed for optimal AI agent discovery and usage:
 
-- **tutorial**: Concise usage guide (≤200 tokens per tutorial)
-- **examples**: Sample invocations showing common usage patterns
-- **use_cases**: Common scenarios where the tool is most useful
+#### Tutorial Features
+Each tool provides:
+- **Tutorial**: Concise 4-line usage guide covering essential usage patterns
+- **Examples**: 3 practical invocation patterns demonstrating real-world usage
+- **Use Cases**: 3 common scenarios where the tool is most effective
 
-Access via `GET /mcp/manifest` to see the enhanced tool descriptions. These tutorial fields are:
-- **Backward compatible**: Fields are optional and don't affect existing clients
-- **Token-efficient**: Designed for context-aware AI agents with minimal overhead
-- **Self-documenting**: Each tool provides its own usage instructions
+#### Tutorial Design Philosophy
+- **Token-efficient**: ≤200 tokens per tutorial for minimal context overhead
+- **Self-documenting**: Tools provide their own usage instructions for improved AI agent discovery
+- **Backward compatible**: Tutorial fields are optional and don't affect existing MCP clients
+- **Context-aware**: Designed specifically for AI agents requiring clear, actionable guidance
+
+#### Accessing Enhanced Descriptions
+- **Full manifest**: `GET /mcp/manifest` returns complete tool descriptions with tutorials
+- **Individual tools**: Each tool endpoint includes tutorial data in responses
+- **MCP compatibility**: Seamlessly integrates with existing MCP 2025-06-18 specification
 
 ### `get_crate_summary`
 
@@ -324,6 +332,108 @@ curl -X POST http://localhost:8000/mcp/tools/get_item_doc \
   "description": "A data structure that can be deserialized from any data format supported by Serde.",
   "documentation": "# Examples\n\n```rust\nuse serde::Deserialize;\n\n#[derive(Deserialize)]\nstruct User {\n    name: String,\n    age: u32,\n}\n```\n\nThis trait can be derived using `#[derive(Deserialize)]` or implemented manually...",
   "signature": "pub trait Deserialize<'de>: Sized"
+}
+```
+
+### `search_examples`
+
+Searches for code examples within crate documentation using vector similarity search.
+
+**Parameters:**
+- `crate_name` (string, required): Name of the crate to search within
+- `query` (string, required): Search query for finding relevant code examples
+- `k` (integer, optional): Number of examples to return (default: 5, max: 20)
+
+**Example Request:**
+```bash
+curl -X POST http://localhost:8000/mcp/tools/search_examples \
+  -H "Content-Type: application/json" \
+  -d '{
+    "crate_name": "tokio",
+    "query": "async spawn example",
+    "k": 3
+  }'
+```
+
+**Example Response:**
+```json
+{
+  "results": [
+    {
+      "item_path": "tokio::spawn",
+      "example_text": "use tokio::spawn;\n\n#[tokio::main]\nasync fn main() {\n    let handle = spawn(async {\n        // async work here\n    });\n    handle.await.unwrap();\n}",
+      "context": "Basic spawn usage",
+      "score": 0.92
+    }
+  ]
+}
+```
+
+### `get_module_tree`
+
+Retrieves the module hierarchy structure for a crate, showing organization and item counts.
+
+**Parameters:**
+- `crate_name` (string, required): Name of the crate
+- `version` (string, optional): Specific version or "latest" (default: "latest")
+
+**Example Request:**
+```bash
+curl -X POST http://localhost:8000/mcp/tools/get_module_tree \
+  -H "Content-Type: application/json" \
+  -d '{
+    "crate_name": "serde",
+    "version": "latest"
+  }'
+```
+
+**Example Response:**
+```json
+{
+  "crate_name": "serde",
+  "version": "1.0.195",
+  "tree": {
+    "serde": {
+      "items": 15,
+      "modules": {
+        "de": {
+          "items": 8,
+          "modules": {}
+        },
+        "ser": {
+          "items": 12,
+          "modules": {}
+        }
+      }
+    }
+  }
+}
+```
+
+### `start_pre_ingestion`
+
+Initiates background ingestion of a crate's documentation for improved performance on subsequent queries.
+
+**Parameters:**
+- `crate_name` (string, required): Name of the crate to pre-ingest
+- `version` (string, optional): Specific version or "latest" (default: "latest")
+
+**Example Request:**
+```bash
+curl -X POST http://localhost:8000/mcp/tools/start_pre_ingestion \
+  -H "Content-Type: application/json" \
+  -d '{
+    "crate_name": "tokio",
+    "version": "1.35.1"
+  }'
+```
+
+**Example Response:**
+```json
+{
+  "message": "Pre-ingestion started for tokio@1.35.1",
+  "status": "processing",
+  "estimated_time_seconds": 15
 }
 ```
 
