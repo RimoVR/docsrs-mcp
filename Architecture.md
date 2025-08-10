@@ -1750,6 +1750,113 @@ graph TB
     NORMALIZE --> RANK
 ```
 
+### Maximum Marginal Relevance (MMR) Diversification
+
+The system implements Maximum Marginal Relevance (MMR) algorithm to balance relevance and diversity in search results, preventing homogeneous results while maintaining high relevance scores:
+
+```mermaid
+graph TB
+    subgraph "MMR Diversification Pipeline"
+        RANKED_RESULTS[Initial Ranked Results<br/>k+over_fetch candidates<br/>Sorted by relevance score]
+        MMR_CHECK{Enable MMR?<br/>RANKING_DIVERSITY_WEIGHT > 0<br/>Results > k}
+        MMR_ALG[MMR Algorithm<br/>λ * relevance + (1-λ) * diversity<br/>λ = 0.6 (default)]
+        DIVERSITY_CALC[Diversity Calculation<br/>Type penalty: 0.2 per same type<br/>Path similarity penalty<br/>Module diversity boost]
+        FINAL_K[Final Top-k Results<br/>Balanced relevance & diversity]
+        NO_MMR[Direct Top-k Selection<br/>Pure relevance ranking]
+    end
+    
+    RANKED_RESULTS --> MMR_CHECK
+    MMR_CHECK -->|Yes| MMR_ALG
+    MMR_CHECK -->|No| NO_MMR
+    MMR_ALG --> DIVERSITY_CALC
+    DIVERSITY_CALC --> FINAL_K
+    NO_MMR --> FINAL_K
+```
+
+**Configuration**:
+- **RANKING_DIVERSITY_LAMBDA**: Controls relevance vs diversity balance (default: 0.6)
+  - Higher values (→1.0) favor relevance
+  - Lower values (→0.0) favor diversity
+- **RANKING_DIVERSITY_WEIGHT**: Global diversification toggle (default: 0.1)
+  - Set to 0 to disable MMR completely
+  - Used for dynamic fetch_k adjustment (1.5x multiplier when enabled)
+
+**Dynamic Fetch Strategy**:
+```mermaid
+graph LR
+    subgraph "Intelligent Over-fetching"
+        SELECTIVITY[Filter Selectivity Analysis<br/>Cardinality estimation]
+        BASE_FETCH[Base Over-fetch<br/>k + 10 default]
+        MMR_BOOST{MMR Enabled?}
+        FINAL_FETCH[Final fetch_k<br/>Capped at 50 for performance]
+    end
+    
+    SELECTIVITY --> BASE_FETCH
+    BASE_FETCH --> MMR_BOOST
+    MMR_BOOST -->|Yes| FINAL_FETCH
+    MMR_BOOST -->|No| FINAL_FETCH
+```
+
+### Fuzzy Query Normalization
+
+The system includes intelligent fuzzy normalization to handle common spelling variations, particularly British/American English differences:
+
+```mermaid
+graph TD
+    subgraph "Query Preprocessing Enhancement"
+        INPUT_QUERY[Input Query<br/>e.g., "serialise data"]
+        UNICODE_NORM[Unicode NFKC<br/>Normalization]
+        FUZZY_NORM[Fuzzy Normalization<br/>British → American spelling]
+        FINAL_QUERY[Processed Query<br/>e.g., "serialize data"]
+    end
+    
+    subgraph "Normalization Patterns"
+        ISE_IZE["ise → ize<br/>(serialise → serialize)"]
+        OUR_OR["our → or<br/>(colour → color)"]  
+        RE_ER["re → er<br/>(centre → center)"]
+        CASE_PRESERVE[Case Pattern Preservation<br/>Maintains original casing]
+    end
+    
+    INPUT_QUERY --> UNICODE_NORM
+    UNICODE_NORM --> FUZZY_NORM
+    FUZZY_NORM --> FINAL_QUERY
+    
+    FUZZY_NORM -.-> ISE_IZE
+    FUZZY_NORM -.-> OUR_OR
+    FUZZY_NORM -.-> RE_ER
+    FUZZY_NORM -.-> CASE_PRESERVE
+```
+
+**Implementation Features**:
+- **Word Boundary Matching**: Only replaces whole words, not partial matches
+- **Case Preservation**: Maintains original case patterns (SERIALISE → SERIALIZE)
+- **Performance**: Regex-based replacement with minimal overhead (<1ms)
+- **Integration**: Applied during Pydantic model validation in `_apply_fuzzy_normalization()`
+
+### Enhanced Search Architecture Integration
+
+The complete enhanced search pipeline integrates all optimization components:
+
+```mermaid
+graph TB
+    subgraph "Enhanced Search Pipeline"
+        QUERY[Raw Query]
+        PREPROCESS[Query Preprocessing<br/>Unicode + Fuzzy Normalization]
+        SELECTIVITY[Filter Selectivity Analysis<br/>Dynamic fetch_k adjustment]
+        VECTOR_SEARCH[Vector Search<br/>sqlite-vec MATCH operator]
+        SCORING[Multi-factor Scoring<br/>60% vector + 15% type + 10% quality + 15% examples]
+        MMR_DIV[MMR Diversification<br/>λ=0.6 relevance-diversity balance]
+        FINAL_RESULTS[Final Ranked Results<br/>Optimized for relevance and diversity]
+    end
+    
+    QUERY --> PREPROCESS
+    PREPROCESS --> SELECTIVITY
+    SELECTIVITY --> VECTOR_SEARCH
+    VECTOR_SEARCH --> SCORING
+    SCORING --> MMR_DIV
+    MMR_DIV --> FINAL_RESULTS
+```
+
 ### Smart Snippet Extraction System
 
 The smart snippet extraction system provides intelligently-bounded content snippets for search results, enhancing readability while maintaining consistent length targets across both search_items and search_examples endpoints.

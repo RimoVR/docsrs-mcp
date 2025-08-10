@@ -33,6 +33,24 @@ RANKING_TYPE_WEIGHT = float(os.getenv("DOCSRS_RANKING_TYPE_WEIGHT", "0.15"))
 RANKING_QUALITY_WEIGHT = float(os.getenv("DOCSRS_RANKING_QUALITY_WEIGHT", "0.1"))
 RANKING_EXAMPLES_WEIGHT = float(os.getenv("DOCSRS_RANKING_EXAMPLES_WEIGHT", "0.15"))
 
+# MMR Diversification configuration
+RANKING_DIVERSITY_LAMBDA = float(os.getenv("DOCSRS_RANKING_DIVERSITY_LAMBDA", "0.6"))
+RANKING_DIVERSITY_WEIGHT = float(os.getenv("DOCSRS_RANKING_DIVERSITY_WEIGHT", "0.1"))
+
+# Validate that ranking weights sum to approximately 1.0
+_weight_sum = (
+    RANKING_VECTOR_WEIGHT
+    + RANKING_TYPE_WEIGHT
+    + RANKING_QUALITY_WEIGHT
+    + RANKING_EXAMPLES_WEIGHT
+)
+if not 0.99 <= _weight_sum <= 1.01:
+    warnings.warn(
+        f"Ranking weights sum to {_weight_sum:.2f} instead of 1.0. "
+        f"Weights will be normalized during ranking.",
+        stacklevel=2,
+    )
+
 # Type-specific weights for ranking
 TYPE_WEIGHTS = {
     "function": float(os.getenv("DOCSRS_TYPE_WEIGHT_FUNCTION", "1.2")),

@@ -4,7 +4,12 @@ import hashlib
 import time
 from typing import Any
 
-from .config import CACHE_SIZE, CACHE_TTL
+from .config import (
+    CACHE_SIZE,
+    CACHE_TTL,
+    RANKING_DIVERSITY_LAMBDA,
+    RANKING_DIVERSITY_WEIGHT,
+)
 
 
 class SearchCache:
@@ -35,7 +40,7 @@ class SearchCache:
         visibility: str | None = None,
         deprecated: bool | None = None,
     ) -> str:
-        """Generate a cache key from search parameters."""
+        """Generate a cache key from search parameters including diversity settings."""
         # Use a subset of the embedding for efficiency
         # Full embedding would be too large for a key
         key_parts = [
@@ -48,6 +53,9 @@ class SearchCache:
             str(min_doc_length) if min_doc_length else "none",
             str(visibility) if visibility else "none",
             str(deprecated) if deprecated is not None else "none",
+            # Include diversity parameters in cache key
+            f"lambda_{RANKING_DIVERSITY_LAMBDA:.2f}",
+            f"weight_{RANKING_DIVERSITY_WEIGHT:.2f}",
         ]
         key_str = "|".join(key_parts)
         return hashlib.md5(key_str.encode()).hexdigest()

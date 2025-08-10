@@ -673,6 +673,90 @@ async def get_module_by_path(db_path: Path, module_path: str) -> dict | None:
         return None
 
 
+def _apply_mmr_diversification(
+    ranked_results: list[tuple[float, str, str, str, str]],
+    k: int,
+    lambda_param: float,
+) -> list[tuple[float, str, str, str]]:
+    """
+    Apply Maximum Marginal Relevance (MMR) for result diversification.
+
+    MMR balances relevance and diversity using the formula:
+    MMR = λ * relevance + (1-λ) * diversity
+
+    Args:
+        ranked_results: List of (score, path, header, content, item_type) tuples
+        k: Number of results to select
+        lambda_param: Balance between relevance (1.0) and diversity (0.0)
+
+    Returns:
+        List of diversified results as (score, path, header, content) tuples
+    """
+    if not ranked_results:
+        return []
+
+    # Start with the highest scoring result
+    selected = []
+    candidates = list(ranked_results)
+
+    # Select first item (highest relevance)
+    first_item = candidates.pop(0)
+    selected.append(first_item[:4])  # Exclude item_type from output
+
+    # Track selected item types for diversity calculation
+    selected_types = [first_item[4]]
+    selected_paths = [first_item[1]]
+
+    # Iteratively select remaining items
+    while len(selected) < k and candidates:
+        best_mmr_score = -1
+        best_idx = -1
+
+        for idx, candidate in enumerate(candidates):
+            score, path, header, content, item_type = candidate
+
+            # Calculate relevance (already computed score)
+            relevance = score
+
+            # Calculate diversity based on item type and path similarity
+            diversity = 1.0
+
+            # Penalize same item types
+            type_penalty = selected_types.count(item_type) * 0.2
+            diversity -= min(0.6, type_penalty)
+
+            # Penalize similar paths (same module)
+            for sel_path in selected_paths:
+                # Check if paths share the same module prefix
+                sel_parts = sel_path.split("::")
+                cand_parts = path.split("::")
+
+                # Compare module prefixes
+                if len(sel_parts) > 1 and len(cand_parts) > 1:
+                    if sel_parts[:-1] == cand_parts[:-1]:
+                        # Same module, reduce diversity
+                        diversity -= 0.3
+                        break
+
+            # Ensure diversity stays in [0, 1]
+            diversity = max(0.0, min(1.0, diversity))
+
+            # Calculate MMR score
+            mmr_score = lambda_param * relevance + (1 - lambda_param) * diversity
+
+            if mmr_score > best_mmr_score:
+                best_mmr_score = mmr_score
+                best_idx = idx
+
+        if best_idx >= 0:
+            selected_item = candidates.pop(best_idx)
+            selected.append(selected_item[:4])  # Exclude item_type from output
+            selected_types.append(selected_item[4])
+            selected_paths.append(selected_item[1])
+
+    return selected
+
+
 async def search_embeddings(
     db_path: Path,
     query_embedding: list[float],
@@ -798,8 +882,30 @@ async def search_embeddings(
             prefilter_count = result[0] if result else 0
             filter_times["selectivity_analysis"] = (time.time() - filter_start) * 1000
 
-            # Use progressive filtering if result set is small enough (<10K items)
-            should_prefilter = prefilter_count < 10000 and prefilter_count > 0
+            # Enhanced selectivity analysis with cardinality estimation
+            # Estimate selectivity for each filter type
+            total_count_query = "SELECT COUNT(*) FROM embeddings"
+            total_cursor = await db.execute(total_count_query)
+            total_count = (await total_cursor.fetchone())[0]
+
+            # Calculate selectivity ratio
+            selectivity_ratio = (
+                prefilter_count / total_count if total_count > 0 else 1.0
+            )
+
+            # Dynamic threshold based on filter types
+            # More selective filters (lower ratio) can handle larger result sets
+            if selectivity_ratio < 0.05:  # Very selective (< 5% of data)
+                threshold = 20000
+            elif selectivity_ratio < 0.15:  # Selective (< 15% of data)
+                threshold = 10000
+            elif selectivity_ratio < 0.30:  # Moderately selective (< 30% of data)
+                threshold = 5000
+            else:  # Not very selective
+                threshold = 2000
+
+            # Use progressive filtering based on dynamic threshold
+            should_prefilter = prefilter_count < threshold and prefilter_count > 0
 
             # Log filter selectivity analysis
             logger.debug(
@@ -818,8 +924,25 @@ async def search_embeddings(
 
             debug_info["results_at_stage"]["after_filters"] = prefilter_count
 
-        # Fetch k+10 results to allow for re-ranking
-        fetch_k = min(k + 10, 50)  # Cap at 50 for performance
+        # Dynamic fetch_k adjustment based on filter selectivity
+        # More selective filters need less over-fetching
+        if "selectivity_ratio" in locals():
+            if selectivity_ratio < 0.1:  # Very selective
+                over_fetch = 5
+            elif selectivity_ratio < 0.3:  # Moderately selective
+                over_fetch = 10
+            else:  # Less selective
+                over_fetch = 15
+        else:
+            over_fetch = 10  # Default over-fetch
+
+        # Adjust for MMR diversification if enabled
+        if app_config.RANKING_DIVERSITY_WEIGHT > 0:
+            over_fetch = int(
+                over_fetch * 1.5
+            )  # Need more candidates for diversification
+
+        fetch_k = min(k + over_fetch, 50)  # Cap at 50 for performance
 
         # Prepare patterns for LIKE queries
         crate_pattern = f"{crate_filter}::%%" if crate_filter else None
@@ -942,11 +1065,24 @@ async def search_embeddings(
                 )
                 final_score = max(0.0, min(1.0, final_score))
 
-            ranked_results.append((final_score, item_path, header, content))
+            ranked_results.append((final_score, item_path, header, content, item_type))
 
-        # Sort by final score and return top k
+        # Sort by final score
         ranked_results.sort(key=lambda x: x[0], reverse=True)
-        top_results = ranked_results[:k]
+
+        # Apply MMR diversification if we have enough results
+        if len(ranked_results) > k and app_config.RANKING_DIVERSITY_WEIGHT > 0:
+            top_results = _apply_mmr_diversification(
+                ranked_results,
+                k,
+                app_config.RANKING_DIVERSITY_LAMBDA,
+            )
+        else:
+            # No diversification, just take top k
+            top_results = [
+                (score, path, header, content)
+                for score, path, header, content, _ in ranked_results[:k]
+            ]
 
         # Performance monitoring
         elapsed_ms = (time.time() - start_time) * 1000

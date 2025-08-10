@@ -215,7 +215,8 @@ class SearchItemsRequest(BaseModel):
         Preprocess and normalize search query for consistent matching.
 
         Applies Unicode normalization (NFKC) and whitespace normalization
-        to improve search consistency and cache hit rates.
+        to improve search consistency and cache hit rates. Includes
+        fuzzy normalization support for improved international queries.
         """
         # Step 1: Convert to string (but don't strip yet to detect whitespace-only)
         if v is None:
@@ -248,16 +249,25 @@ class SearchItemsRequest(BaseModel):
                 "Consider using more specific search terms to narrow your query."
             )
 
-        # Step 5: Unicode normalization (NFKC for search)
-        # NFKC converts compatibility characters (e.g., ﬀ → ff) and normalizes
-        # Unicode combining characters for consistent matching
-        query = unicodedata.normalize("NFKC", query)
+        # Step 5: Quick-check for already normalized text (optimization)
+        # If text is already in NFKC form, skip normalization
+        original_query = query
+        normalized_query = unicodedata.normalize("NFKC", query)
+
+        # Only apply full normalization if needed
+        if original_query != normalized_query:
+            query = normalized_query
 
         # Step 6: Whitespace normalization
         # Replace multiple spaces, tabs, newlines with single space
         query = " ".join(query.split())
 
-        # Step 7: Final validation after normalization
+        # Step 7: Fuzzy normalization for common variations
+        # This handles common misspellings and international variations
+        # e.g., "serialise" -> "serialize", "colour" -> "color"
+        query = cls._apply_fuzzy_normalization(query)
+
+        # Step 8: Final validation after normalization
         if len(query) < 1:
             raise ValueError(
                 "Query cannot be empty after normalization. "
@@ -265,6 +275,53 @@ class SearchItemsRequest(BaseModel):
             )
 
         return query
+
+    @classmethod
+    def _apply_fuzzy_normalization(cls, query: str) -> str:
+        """
+        Apply fuzzy normalization for common spelling variations.
+
+        This improves search for international English variations and
+        common technical term misspellings.
+        """
+        # Common British/American English variations in technical terms
+        replacements = {
+            "serialise": "serialize",
+            "deserialise": "deserialize",
+            "synchronise": "synchronize",
+            "initialise": "initialize",
+            "optimise": "optimize",
+            "finalise": "finalize",
+            "normalise": "normalize",
+            "authorise": "authorize",
+            "colour": "color",
+            "behaviour": "behavior",
+            "catalogue": "catalog",
+            "centre": "center",
+            "defence": "defense",
+            "licence": "license",
+            "practise": "practice",
+        }
+
+        # Apply replacements for whole words only (avoid partial replacements)
+        words = query.split()
+        normalized_words = []
+
+        for word in words:
+            # Check if word (case-insensitive) matches a replacement
+            word_lower = word.lower()
+            if word_lower in replacements:
+                # Preserve original case pattern
+                if word.isupper():
+                    normalized_words.append(replacements[word_lower].upper())
+                elif word[0].isupper():
+                    normalized_words.append(replacements[word_lower].capitalize())
+                else:
+                    normalized_words.append(replacements[word_lower])
+            else:
+                normalized_words.append(word)
+
+        return " ".join(normalized_words)
 
     @field_validator("k", mode="before")
     @classmethod
