@@ -969,7 +969,19 @@ async def get_item_doc(request: Request, params: GetItemDocRequest):
             row = await cursor.fetchone()
 
             if row:
-                return {"content": row[0], "format": "markdown"}
+                # Get cross-references for this item
+                from .database import get_cross_references
+
+                cross_refs = await get_cross_references(db_path, resolved_path)
+
+                # Build response with cross-references
+                response = {"content": row[0], "format": "markdown"}
+
+                # Add cross-references if any exist
+                if cross_refs:
+                    response["cross_references"] = cross_refs
+
+                return response
             else:
                 # Try fuzzy matching for suggestions
                 suggestions = await get_fuzzy_suggestions_with_fallback(

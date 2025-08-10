@@ -318,6 +318,36 @@
           "mem_mgmt": "Chunk processing",
           "caching": "Aggressive - expensive parsing"
         }
+      },
+      "cross_reference_support": {
+        "rustdoc_links_field": {
+          "native_field": "links: FxHashMap<String, Id>",
+          "desc": "Pre-resolved intra-doc link mappings in rustdoc JSON",
+          "format": "link_text -> item_id mapping",
+          "advantage": "No regex parsing needed - rustdoc provides resolved links"
+        },
+        "docs_rs_availability": {
+          "json_start_date": "May 23, 2025",
+          "compatibility": "Older crate versions may not have rustdoc JSON available",
+          "fallback": "HTML-only documentation for pre-JSON era crates"
+        },
+        "api_endpoints": {
+          "pattern": "https://docs.rs/crate/{name}/{version}/json",
+          "version_specific": "Each crate version has dedicated JSON endpoint",
+          "cdn_delivery": "Served via static.docs.rs CDN"
+        },
+        "compression_formats": {
+          "primary": ".json.zst (Zstandard compression)",
+          "fallback": ".json.gz (Gzip compression)", 
+          "uncompressed": ".json (raw JSON)",
+          "preference": "zstd for optimal size/speed balance"
+        },
+        "extraction_strategy": {
+          "no_regex": "Native rustdoc links field eliminates parsing complexity",
+          "pre_resolved": "Links already resolved to target item IDs",
+          "implementation": "Direct JSON field access via ijson streaming",
+          "performance": "Significant speedup vs HTML parsing + regex extraction"
+        }
       }
     },
     "validation": {

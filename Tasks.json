@@ -2373,6 +2373,7 @@
         "status": "pending",
         "progress": 0,
         "dependencies": ["core-1", "core-2", "core-3", "core-4"],
+        "priority": "deferred",
         "relatedTasks": [],
         "roadblocks": [],
         "subtasks": [
@@ -2399,6 +2400,7 @@
         "status": "pending",
         "progress": 0,
         "dependencies": ["ci-1"],
+        "priority": "deferred",
         "relatedTasks": [],
         "roadblocks": [],
         "subtasks": [
@@ -2422,11 +2424,11 @@
         "id": "cross-ref-1",
         "title": "Implement Cross-Reference Support",
         "description": "Parse and resolve intra-doc links from rustdoc JSON, extend reexports table for cross-references",
-        "status": "pending",
-        "progress": 0,
+        "status": "completed",
+        "progress": 100,
         "dependencies": ["idx-1"],
         "effort": "large",
-        "priority": 3,
+        "priority": 1,
         "relatedTasks": [],
         "roadblocks": []
       },
@@ -2438,7 +2440,7 @@
         "progress": 0,
         "dependencies": ["core-4"],
         "effort": "large",
-        "priority": 3,
+        "priority": 2,
         "relatedTasks": [],
         "roadblocks": []
       },
@@ -2450,7 +2452,7 @@
         "progress": 0,
         "dependencies": [],
         "effort": "medium",
-        "priority": 3,
+        "priority": "low",
         "relatedTasks": [],
         "roadblocks": []
       },
@@ -2462,7 +2464,7 @@
         "progress": 0,
         "dependencies": ["core-4.2", "idx-3.2"],
         "effort": "medium",
-        "priority": 3,
+        "priority": 2,
         "relatedTasks": [],
         "roadblocks": []
       },
@@ -2474,7 +2476,7 @@
         "progress": 0,
         "dependencies": ["idx-1"],
         "effort": "large",
-        "priority": 3,
+        "priority": 1,
         "relatedTasks": [],
         "roadblocks": []
       }

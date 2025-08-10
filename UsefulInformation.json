@@ -1011,6 +1011,69 @@
           "impact": "25x improvement in cache loading performance",
           "dateLearned": "2025-08-08",
           "relatedFiles": ["src/docsrs_mcp/cache.py"]
+        },
+        {
+          "error": "docs.rs 404 fallback issue - rustdoc JSON only available for versions after May 23, 2025",
+          "rootCause": "docs.rs only generates rustdoc JSON files for crate versions published after May 23, 2025. Older versions return 404 errors that need to be distinguished from actual missing crates",
+          "solution": "Implement RustdocVersionNotFoundError to distinguish between true 404 errors (non-existent crates) and version-specific unavailability (pre-May 2025 versions). This allows graceful handling of older crate versions.",
+          "context": "Cross-reference implementation requiring rustdoc JSON from docs.rs API",
+          "implementation": [
+            "Create custom exception class RustdocVersionNotFoundError",
+            "Check HTTP response status and distinguish 404 causes",
+            "Provide clear error messages indicating version limitations",
+            "Allow fallback strategies for older versions"
+          ],
+          "pattern": "Version-aware error handling for external API dependencies",
+          "dateEncountered": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/cross_reference.py"],
+          "codeExample": "class RustdocVersionNotFoundError(Exception):\n    \"\"\"Raised when rustdoc JSON is not available for a specific version\"\"\"\n    pass\n\nif response.status_code == 404:\n    raise RustdocVersionNotFoundError(f\"Rustdoc JSON not available for {crate}:{version}\")"
+        },
+        {
+          "error": "Integration test parameter wrapping - API expects parameters directly in JSON body",
+          "rootCause": "Integration tests were incorrectly wrapping parameters in a 'params' object, but the API expects parameters to be at the root level of the JSON body",
+          "solution": "Remove 'params' wrapper and send parameters directly in JSON body. Use flat JSON structure matching the API's expected format.",
+          "context": "Cross-reference implementation integration testing",
+          "implementation": [
+            "Change from {'params': {'crate': 'serde'}} to {'crate': 'serde'}",
+            "Update all test cases to use flat parameter structure",
+            "Verify API endpoint parameter handling expectations"
+          ],
+          "pattern": "Match test parameter structure to actual API expectations",
+          "dateEncountered": "2025-08-10",
+          "relatedFiles": ["tests/test_cross_reference.py"],
+          "codeExample": "# Wrong:\nresponse = client.post('/api/endpoint', json={'params': {'crate': 'serde'}})\n\n# Correct:\nresponse = client.post('/api/endpoint', json={'crate': 'serde'})"
+        },
+        {
+          "error": "Database unique constraint violation - composite key needed for cross-references",
+          "rootCause": "Original UNIQUE constraint on (crate_id, alias_path) was insufficient for cross-references where the same alias can point to multiple actual paths with different link types",
+          "solution": "Change unique constraint from UNIQUE(crate_id, alias_path) to UNIQUE(crate_id, alias_path, actual_path, link_type) to allow multiple cross-reference entries for the same alias when they have different targets or types.",
+          "context": "Cross-reference database schema design for handling multiple alias mappings",
+          "implementation": [
+            "Update database migration to change unique constraint",
+            "Allow same alias to point to different actual paths",
+            "Include link_type in constraint to distinguish reference types",
+            "Ensure data integrity while supporting complex cross-reference relationships"
+          ],
+          "pattern": "Composite unique constraints for complex relationship data",
+          "dateEncountered": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "migrations/"],
+          "codeExample": "# Old constraint:\nUNIQUE(crate_id, alias_path)\n\n# New constraint:\nUNIQUE(crate_id, alias_path, actual_path, link_type)"
+        },
+        {
+          "lesson": "Performance optimization for bidirectional cross-reference lookups",
+          "context": "Cross-reference implementation requiring efficient queries in both directions (alias -> actual and actual -> aliases)",
+          "solution": "Create composite indexes for bidirectional lookups: INDEX on (crate_id, alias_path) for forward lookups and INDEX on (crate_id, actual_path) for reverse lookups. This enables sub-millisecond query performance in both directions.",
+          "implementation": [
+            "Create forward lookup index: CREATE INDEX idx_cross_ref_forward ON cross_references(crate_id, alias_path)",
+            "Create reverse lookup index: CREATE INDEX idx_cross_ref_reverse ON cross_references(crate_id, actual_path)",
+            "Include link_type in queries when specific reference types are needed",
+            "Monitor query performance with EXPLAIN QUERY PLAN"
+          ],
+          "pattern": "Bidirectional indexing for efficient relationship queries",
+          "dateEncountered": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/database.py"],
+          "performanceNotes": "Bidirectional indexes enable O(log n) lookup performance in both directions without table scans",
+          "codeExample": "# Forward lookup (alias -> actual)\nSELECT actual_path FROM cross_references WHERE crate_id = ? AND alias_path = ?\n\n# Reverse lookup (actual -> aliases)\nSELECT alias_path FROM cross_references WHERE crate_id = ? AND actual_path = ?"
         }
       ]
     },

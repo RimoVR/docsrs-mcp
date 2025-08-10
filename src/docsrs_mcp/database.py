@@ -243,6 +243,110 @@ async def migrate_database_duplicates(db_path: Path) -> None:
         )
 
 
+async def migrate_reexports_for_crossrefs(db_path: Path) -> None:
+    """Migrate existing reexports table to support cross-references."""
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Check if migration is needed by checking for link_text column
+        cursor = await db.execute("""
+            SELECT sql FROM sqlite_master 
+            WHERE type='table' AND name='reexports'
+        """)
+
+        result = await cursor.fetchone()
+        if result and 'link_text' in result[0]:
+            # Check if we need to fix the unique constraint
+            if 'UNIQUE(crate_id, alias_path, actual_path, link_type)' not in result[0]:
+                logger.info("Fixing unique constraint for cross-references")
+                
+                # Create new table with correct constraint
+                await db.execute("""
+                    CREATE TABLE reexports_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        crate_id INTEGER NOT NULL,
+                        alias_path TEXT NOT NULL,
+                        actual_path TEXT NOT NULL,
+                        is_glob BOOLEAN DEFAULT 0,
+                        link_text TEXT,
+                        link_type TEXT DEFAULT 'reexport',
+                        target_item_id TEXT,
+                        confidence_score REAL DEFAULT 1.0,
+                        FOREIGN KEY (crate_id) REFERENCES crate_metadata(id) ON DELETE CASCADE,
+                        UNIQUE(crate_id, alias_path, actual_path, link_type)
+                    )
+                """)
+                
+                # Copy data
+                await db.execute("""
+                    INSERT INTO reexports_new 
+                    SELECT * FROM reexports
+                """)
+                
+                # Drop old table and rename new one
+                await db.execute("DROP TABLE reexports")
+                await db.execute("ALTER TABLE reexports_new RENAME TO reexports")
+                
+                # Recreate indexes
+                await db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reexports_lookup
+                    ON reexports(crate_id, alias_path)
+                """)
+                
+                await db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reexports_crossref_forward
+                    ON reexports(crate_id, alias_path, link_text)
+                    WHERE link_type = 'crossref'
+                """)
+                
+                await db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_reexports_crossref_reverse
+                    ON reexports(crate_id, target_item_id)
+                    WHERE link_type = 'crossref'
+                """)
+                
+                await db.commit()
+                logger.info("Successfully fixed unique constraint")
+            return
+
+        logger.info("Migrating reexports table to support cross-references")
+
+        # Add new columns if they don't exist
+        try:
+            await db.execute("ALTER TABLE reexports ADD COLUMN link_text TEXT")
+        except Exception:
+            pass  # Column might already exist
+
+        try:
+            await db.execute("ALTER TABLE reexports ADD COLUMN link_type TEXT DEFAULT 'reexport'")
+        except Exception:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE reexports ADD COLUMN target_item_id TEXT")
+        except Exception:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE reexports ADD COLUMN confidence_score REAL DEFAULT 1.0")
+        except Exception:
+            pass
+
+        # Create new indexes for cross-reference lookups
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reexports_crossref_forward
+            ON reexports(crate_id, alias_path, link_text)
+            WHERE link_type = 'crossref'
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reexports_crossref_reverse
+            ON reexports(crate_id, target_item_id)
+            WHERE link_type = 'crossref'
+        """)
+
+        await db.commit()
+        logger.info("Successfully migrated reexports table for cross-reference support")
+
+
 async def init_database(db_path: Path) -> None:
     """Initialize database with required tables and extensions."""
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
@@ -281,7 +385,7 @@ async def init_database(db_path: Path) -> None:
             )
         """)
 
-        # Create reexports table for auto-discovered re-export mappings
+        # Create reexports table for auto-discovered re-export mappings and cross-references
         await db.execute("""
             CREATE TABLE IF NOT EXISTS reexports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -289,8 +393,12 @@ async def init_database(db_path: Path) -> None:
                 alias_path TEXT NOT NULL,
                 actual_path TEXT NOT NULL,
                 is_glob BOOLEAN DEFAULT 0,
+                link_text TEXT,
+                link_type TEXT DEFAULT 'reexport',
+                target_item_id TEXT,
+                confidence_score REAL DEFAULT 1.0,
                 FOREIGN KEY (crate_id) REFERENCES crate_metadata(id) ON DELETE CASCADE,
-                UNIQUE(crate_id, alias_path)
+                UNIQUE(crate_id, alias_path, actual_path, link_type)
             )
         """)
 
@@ -342,6 +450,19 @@ async def init_database(db_path: Path) -> None:
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_reexports_lookup
             ON reexports(crate_id, alias_path)
+        """)
+
+        # Create composite indexes for cross-reference lookups
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reexports_crossref_forward
+            ON reexports(crate_id, alias_path, link_text)
+            WHERE link_type = 'crossref'
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_reexports_crossref_reverse
+            ON reexports(crate_id, target_item_id)
+            WHERE link_type = 'crossref'
         """)
 
         # Create composite index for filtering performance
@@ -455,12 +576,13 @@ async def store_crate_metadata(
 
 
 async def store_reexports(db_path: Path, crate_id: int, reexports: list[dict]) -> None:
-    """Store discovered re-export mappings for a crate.
+    """Store discovered re-export mappings and cross-references for a crate.
 
     Args:
         db_path: Path to database
         crate_id: ID of the parent crate
-        reexports: List of re-export dicts with alias_path, actual_path, is_glob
+        reexports: List of re-export/crossref dicts with alias_path, actual_path, is_glob, 
+                  and optionally link_text, link_type, target_item_id, confidence_score
     """
     if not reexports:
         return
@@ -473,6 +595,10 @@ async def store_reexports(db_path: Path, crate_id: int, reexports: list[dict]) -
                 reexport["alias_path"],
                 reexport["actual_path"],
                 reexport.get("is_glob", False),
+                reexport.get("link_text", None),
+                reexport.get("link_type", "reexport"),
+                reexport.get("target_item_id", None),
+                reexport.get("confidence_score", 1.0),
             )
             for reexport in reexports
         ]
@@ -480,25 +606,37 @@ async def store_reexports(db_path: Path, crate_id: int, reexports: list[dict]) -
         # Batch insert with IGNORE for duplicates
         await db.executemany(
             """
-            INSERT OR IGNORE INTO reexports (crate_id, alias_path, actual_path, is_glob)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO reexports (
+                crate_id, alias_path, actual_path, is_glob,
+                link_text, link_type, target_item_id, confidence_score
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             reexport_data,
         )
 
         await db.commit()
-        logger.info(f"Stored {len(reexports)} re-export mappings")
+
+        # Count by type for logging
+        crossref_count = sum(1 for r in reexports if r.get("link_type") == "crossref")
+        reexport_count = len(reexports) - crossref_count
+
+        if crossref_count > 0:
+            logger.info(f"Stored {crossref_count} cross-references and {reexport_count} re-export mappings")
+        else:
+            logger.info(f"Stored {reexport_count} re-export mappings")
 
 
 async def get_discovered_reexports(
-    db_path: Path, crate_name: str, version: str | None = None
+    db_path: Path, crate_name: str, version: str | None = None, include_crossrefs: bool = False
 ) -> dict[str, str]:
-    """Get auto-discovered re-exports for a crate.
+    """Get auto-discovered re-exports and optionally cross-references for a crate.
 
     Args:
         db_path: Path to database
         crate_name: Name of the crate
         version: Optional version (for logging/future use)
+        include_crossrefs: Whether to include cross-references
 
     Returns:
         Dictionary mapping alias_path to actual_path
@@ -508,18 +646,29 @@ async def get_discovered_reexports(
     try:
         async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
             # Query re-exports for this crate
-            cursor = await db.execute(
+            if include_crossrefs:
+                query = """
+                    SELECT r.alias_path, r.actual_path, r.is_glob, r.link_type
+                    FROM reexports r
+                    JOIN crate_metadata c ON r.crate_id = c.id
+                    WHERE c.name = ?
                 """
-                SELECT r.alias_path, r.actual_path, r.is_glob
-                FROM reexports r
-                JOIN crate_metadata c ON r.crate_id = c.id
-                WHERE c.name = ?
-                """,
-                (crate_name,),
-            )
+            else:
+                query = """
+                    SELECT r.alias_path, r.actual_path, r.is_glob
+                    FROM reexports r
+                    JOIN crate_metadata c ON r.crate_id = c.id
+                    WHERE c.name = ? AND r.link_type = 'reexport'
+                """
+
+            cursor = await db.execute(query, (crate_name,))
 
             async for row in cursor:
-                alias_path, actual_path, is_glob = row
+                if include_crossrefs and len(row) == 4:
+                    alias_path, actual_path, is_glob, link_type = row
+                else:
+                    alias_path, actual_path, is_glob = row
+
                 # Store mapping
                 reexport_map[alias_path] = actual_path
 
@@ -530,12 +679,81 @@ async def get_discovered_reexports(
 
             if reexport_map:
                 logger.debug(
-                    f"Loaded {len(reexport_map)} re-export mappings for {crate_name}"
+                    f"Loaded {len(reexport_map)} mappings for {crate_name}"
                 )
     except Exception as e:
-        logger.warning(f"Error loading re-exports for {crate_name}: {e}")
+        logger.warning(f"Error loading mappings for {crate_name}: {e}")
 
     return reexport_map
+
+
+async def get_cross_references(
+    db_path: Path, item_path: str, direction: str = "both"
+) -> dict[str, list[dict]]:
+    """Get cross-references for a specific item.
+    
+    Args:
+        db_path: Path to database
+        item_path: Path of the item to get cross-references for
+        direction: "from" (outgoing), "to" (incoming), or "both"
+    
+    Returns:
+        Dictionary with 'from' and/or 'to' lists of cross-reference dicts
+    """
+    result = {}
+
+    try:
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            # Get outgoing cross-references (this item links to others)
+            if direction in ["from", "both"]:
+                cursor = await db.execute(
+                    """
+                    SELECT actual_path, link_text, confidence_score
+                    FROM reexports
+                    WHERE alias_path = ? AND link_type = 'crossref'
+                    """,
+                    (item_path,)
+                )
+
+                from_refs = []
+                async for row in cursor:
+                    target_path, link_text, confidence = row
+                    from_refs.append({
+                        "target_path": target_path,
+                        "link_text": link_text,
+                        "confidence": confidence
+                    })
+
+                if from_refs:
+                    result["from"] = from_refs
+
+            # Get incoming cross-references (other items link to this)
+            if direction in ["to", "both"]:
+                cursor = await db.execute(
+                    """
+                    SELECT alias_path, link_text, confidence_score
+                    FROM reexports
+                    WHERE actual_path = ? AND link_type = 'crossref'
+                    """,
+                    (item_path,)
+                )
+
+                to_refs = []
+                async for row in cursor:
+                    source_path, link_text, confidence = row
+                    to_refs.append({
+                        "source_path": source_path,
+                        "link_text": link_text,
+                        "confidence": confidence
+                    })
+
+                if to_refs:
+                    result["to"] = to_refs
+
+    except Exception as e:
+        logger.warning(f"Error loading cross-references for {item_path}: {e}")
+
+    return result
 
 
 async def store_modules(db_path: Path, crate_id: int, modules: dict) -> None:

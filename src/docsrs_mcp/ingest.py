@@ -353,6 +353,7 @@ async def download_rustdoc(
         )
 
     last_error = None
+    all_404 = True  # Track if all attempts were 404s
     for url in urls_to_try:
         try:
             logger.info(f"Attempting to download rustdoc from: {url}")
@@ -375,6 +376,7 @@ async def download_rustdoc(
                     # Try next format
                     continue
                 elif resp.status != 200:
+                    all_404 = False  # This wasn't a 404
                     raise Exception(f"Failed to download rustdoc: HTTP {resp.status}")
 
                 # Check compressed size
@@ -405,16 +407,29 @@ async def download_rustdoc(
 
         except Exception as e:
             last_error = e
-            # Only log non-404 errors
+            # Track if this was NOT a 404
             if "404" not in str(e):
+                all_404 = False
                 logger.warning(f"Failed to download from {url}: {e}")
 
     # All formats failed
-    if last_error:
+    # Create a specific exception type to distinguish version unavailability
+    class RustdocVersionNotFoundError(Exception):
+        """Raised when a specific version doesn't have rustdoc JSON available."""
+        pass
+    
+    if all_404:
+        # All attempts were 404s - this version doesn't have rustdoc JSON
+        raise RustdocVersionNotFoundError(
+            f"Rustdoc JSON not found for {crate_name}@{version} - version may not have rustdoc JSON available"
+        )
+    elif last_error:
+        # Some other error occurred (network, server error, etc.)
         raise last_error
     else:
+        # Shouldn't reach here, but handle it
         raise Exception(
-            f"Rustdoc JSON not found for {crate_name}@{version} in any format"
+            f"Failed to download rustdoc JSON for {crate_name}@{version}"
         )
 
 
@@ -1310,6 +1325,27 @@ async def parse_rustdoc_items_streaming(json_content: str):
                     visibility = extract_visibility(item_info)
                     deprecated = extract_deprecated(item_info)
 
+                    # Extract cross-references from the links field
+                    links = item_info.get("links", {})
+                    if links and isinstance(links, dict):
+                        for link_text, target_id in links.items():
+                            # Resolve target path using id_to_path mapping
+                            if target_id in id_to_path:
+                                target_path = id_to_path[target_id]
+                                # Yield cross-reference marker
+                                yield {
+                                    "_crossref": {
+                                        "source_path": full_path,
+                                        "link_text": link_text,
+                                        "target_path": target_path,
+                                        "target_item_id": target_id,
+                                        "confidence": 1.0,
+                                    }
+                                }
+                                logger.debug(
+                                    f"Found cross-reference: {full_path} -> {target_path} via '{link_text}'"
+                                )
+
                     yield {
                         "item_id": item_id,
                         "item_path": full_path,
@@ -1879,10 +1915,14 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                             )
                             await init_database(db_path)
                         else:
-                            # Run migration to clean duplicates if needed
-                            from .database import migrate_database_duplicates
+                            # Run migrations if needed
+                            from .database import (
+                                migrate_database_duplicates,
+                                migrate_reexports_for_crossrefs,
+                            )
 
                             await migrate_database_duplicates(db_path)
+                            await migrate_reexports_for_crossrefs(db_path)
                 except Exception as e:
                     logger.error(f"Error checking database: {e}")
                     await init_database(db_path)
@@ -1925,9 +1965,45 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
                 # Download rustdoc (with compression support)
                 logger.info(f"Downloading rustdoc for {crate_name}@{resolved_version}")
-                compressed_content, download_url = await download_rustdoc(
-                    session, crate_name, resolved_version, rustdoc_url
-                )
+
+                # Try to download with the specific version first
+                try:
+                    compressed_content, download_url = await download_rustdoc(
+                        session, crate_name, resolved_version, rustdoc_url
+                    )
+                except Exception as e:
+                    # Only fall back to latest if this specific version doesn't have rustdoc JSON
+                    # Check for the specific exception type that indicates version unavailability
+                    is_version_not_found = (
+                        e.__class__.__name__ == "RustdocVersionNotFoundError"
+                        or "RustdocVersionNotFoundError" in str(type(e))
+                    )
+                    
+                    if (
+                        is_version_not_found
+                        and version != "latest"
+                        and not is_stdlib_crate(crate_name)
+                    ):
+                        logger.warning(
+                            f"Rustdoc JSON not available for {crate_name}@{resolved_version} "
+                            f"(likely published before rustdoc JSON support), "
+                            f"falling back to latest version"
+                        )
+                        # Resolve latest version URL
+                        latest_version, latest_url = await resolve_version(
+                            session, crate_name, "latest"
+                        )
+                        logger.info(f"Trying with latest version: {latest_version}")
+
+                        # Try downloading with latest version
+                        compressed_content, download_url = await download_rustdoc(
+                            session, crate_name, latest_version, latest_url
+                        )
+                        # Update resolved_version for logging purposes
+                        resolved_version = latest_version
+                    else:
+                        # Re-raise for other errors or if already tried latest
+                        raise
 
                 # Decompress content
                 logger.info("Decompressing rustdoc content")
@@ -1942,6 +2018,7 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 items = []
                 modules = {}
                 reexports = []
+                crossrefs = []
                 async for item in parse_rustdoc_items_streaming(json_content):
                     # Check for special modules marker
                     if "_modules" in item:
@@ -1949,6 +2026,9 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     # Check for re-export items
                     elif "_reexport" in item:
                         reexports.append(item["_reexport"])
+                    # Check for cross-reference items
+                    elif "_crossref" in item:
+                        crossrefs.append(item["_crossref"])
                     else:
                         items.append(item)
 
@@ -1967,6 +2047,25 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 if reexports:
                     await store_reexports(db_path, crate_id, reexports)
                     logger.info(f"Stored {len(reexports)} re-export mappings")
+
+                # Store cross-references
+                if crossrefs:
+                    # Convert crossrefs to reexports format with link_type='crossref'
+                    crossref_data = []
+                    for crossref in crossrefs:
+                        crossref_data.append(
+                            {
+                                "alias_path": crossref["source_path"],
+                                "actual_path": crossref["target_path"],
+                                "is_glob": False,
+                                "link_text": crossref["link_text"],
+                                "link_type": "crossref",
+                                "target_item_id": crossref.get("target_item_id"),
+                                "confidence_score": crossref.get("confidence", 1.0),
+                            }
+                        )
+                    await store_reexports(db_path, crate_id, crossref_data)
+                    logger.info(f"Stored {len(crossrefs)} cross-reference mappings")
 
                 # Transform items to chunks
                 chunks = []

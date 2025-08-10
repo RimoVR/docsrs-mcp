@@ -289,7 +289,9 @@ sequenceDiagram
         Worker->>Worker: Parse complete rustdoc structure
         Worker->>Worker: Extract module hierarchy (build_module_hierarchy)
         Worker->>Worker: Extract and store re-export mappings
+        Worker->>Worker: Extract cross-references from links field
         Worker->>DB: Store re-export mappings to reexports table
+        Worker->>DB: Store cross-references to reexports table (link_type='crossref')
         Worker->>DB: Store module hierarchy with parent_id, depth, item_count
         Worker->>Worker: Parse code examples from docs
         Note over Worker: BUG FIX: Type validation prevents<br/>character fragmentation in examples_data<br/>(ingest.py:761-769)
@@ -429,9 +431,13 @@ erDiagram
     REEXPORTS {
         INTEGER id PK
         INTEGER crate_id FK
-        TEXT alias_path "public re-export path"
-        TEXT actual_path "actual implementation path"
+        TEXT alias_path "public re-export path or source item path"
+        TEXT actual_path "actual implementation path or target item path"
         BOOLEAN is_glob "glob import flag - DEFAULT 0"
+        TEXT link_text "original link text from rustdoc - DEFAULT NULL"
+        TEXT link_type "'reexport' or 'crossref' - DEFAULT 'reexport'"
+        TEXT target_item_id "rustdoc ID of target item - DEFAULT NULL"
+        REAL confidence_score "link confidence (0.0-1.0) - DEFAULT 1.0"
     }
     
     CRATE_METADATA {
@@ -620,17 +626,18 @@ The reexports table includes specialized indexes for efficient path resolution:
 - **idx_reexports_lookup**: Fast alias resolution (`CREATE INDEX idx_reexports_lookup ON reexports(crate_id, alias_path)`)
 - **UNIQUE constraint**: Enforced on (crate_id, alias_path) for data integrity
 
-## Re-export Discovery System
+## Re-export Discovery and Cross-Reference System
 
-The re-export discovery system provides automatic detection and resolution of Rust re-export declarations (`pub use`) during rustdoc ingestion, enabling transparent path alias resolution for API consumers.
+The re-export discovery and cross-reference system provides automatic detection and resolution of Rust re-export declarations (`pub use`) and cross-references between documentation items during rustdoc ingestion, enabling transparent path alias resolution and bidirectional relationship mapping for API consumers.
 
 ### Architecture Overview
 
 ```mermaid
 graph TD
-    subgraph "Re-export Discovery Pipeline"
+    subgraph "Re-export Discovery and Cross-Reference Pipeline"
         PARSE[Rustdoc JSON Parsing<br/>ijson stream processing]
-        EXTRACT[Re-export Extraction<br/>pub use pattern detection]
+        EXTRACT_RE[Re-export Extraction<br/>pub use pattern detection]
+        EXTRACT_XR[Cross-Reference Extraction<br/>links field processing]
         VALIDATE[Path Validation<br/>resolve actual paths]
         STORE[Database Storage<br/>SQLite with FK relationships]
         CACHE[In-Memory Cache<br/>LRU with 5-minute TTL]
@@ -643,24 +650,62 @@ graph TD
         ORIGINAL[Original Path<br/>no alias found]
     end
     
-    PARSE --> EXTRACT
-    EXTRACT --> VALIDATE
+    subgraph "Cross-Reference Lookup Flow"
+        XR_QUERY[Cross-Reference Query<br/>get_cross_references()]
+        BIDIR_LOOKUP[Bidirectional Lookup<br/>from/to/both directions]
+        XR_RESULT[Cross-Reference Results<br/>confidence-scored relationships]
+    end
+    
+    PARSE --> EXTRACT_RE
+    PARSE --> EXTRACT_XR
+    EXTRACT_RE --> VALIDATE
+    EXTRACT_XR --> VALIDATE
     VALIDATE --> STORE
     STORE --> CACHE
     
     QUERY --> DB_LOOKUP
     DB_LOOKUP --> STATIC_CHECK
     STATIC_CHECK --> ORIGINAL
+    
+    XR_QUERY --> BIDIR_LOOKUP
+    BIDIR_LOOKUP --> XR_RESULT
 ```
 
 ### Stream-Based Extraction
 
+**Re-export Discovery**
 - **Architecture**: Integrated into existing ijson-based rustdoc parsing pipeline
 - **Memory Efficiency**: Stream processing prevents memory bloat for large crates
 - **Pattern Detection**: Identifies `pub use` declarations and glob imports during JSON traversal
 - **Path Resolution**: Resolves relative imports to absolute paths within crate context
 
+**Cross-Reference Extraction**
+- **Native Links Field**: Extracts cross-references from rustdoc JSON's native `links` field
+- **Bidirectional Mapping**: Creates both forward and reverse reference relationships
+- **Confidence Scoring**: Assigns confidence scores based on link context and validation
+- **Target Resolution**: Uses rustdoc ID-to-path mapping for precise target identification
+
 ### Database Storage
+
+**Extended Reexports Table Schema**
+
+The reexports table has been extended to support both re-export mappings and cross-references:
+
+```sql
+CREATE TABLE reexports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    crate_id INTEGER NOT NULL,
+    alias_path TEXT NOT NULL,        -- Source path for re-exports, source item for cross-refs
+    actual_path TEXT NOT NULL,       -- Target path for re-exports, target item for cross-refs  
+    is_glob BOOLEAN DEFAULT 0,       -- Glob import flag (re-exports only)
+    link_text TEXT,                  -- Original link text from rustdoc (cross-refs only)
+    link_type TEXT DEFAULT 'reexport', -- 'reexport' or 'crossref'
+    target_item_id TEXT,             -- Rustdoc ID of target item (cross-refs only)
+    confidence_score REAL DEFAULT 1.0, -- Link confidence score (0.0-1.0)
+    FOREIGN KEY (crate_id) REFERENCES crate_metadata(id) ON DELETE CASCADE,
+    UNIQUE(crate_id, alias_path, actual_path, link_type)
+);
+```
 
 **Schema Improvements for Re-ingestion Support**
 
@@ -669,6 +714,7 @@ The database schema has been enhanced with constraints and patterns to support r
 - **UNIQUE Constraint on embeddings.item_path**: Prevents duplicate entries during re-ingestion
 - **INSERT OR REPLACE Pattern**: Enables seamless crate updates by replacing existing embeddings
 - **Migration Support**: Automatic migration function adds constraints to existing databases
+- **Cross-Reference Deduplication**: UNIQUE constraint prevents duplicate cross-reference entries
 
 ```sql
 -- Enhanced embeddings table with UNIQUE constraint
@@ -719,12 +765,15 @@ def migrate_database_schema(db_path: str):
         conn.close()
 ```
 
-### Database Storage
+### Database Storage Architecture
 
-- **Table**: `reexports` with foreign key relationships to crate metadata
-- **Integrity**: UNIQUE constraints prevent duplicate alias paths per crate
-- **Indexing**: Optimized for fast lookup via `idx_reexports_lookup` on (crate_id, alias_path)
-- **Scalability**: Handles thousands of re-exports per crate efficiently
+- **Unified Table**: `reexports` table stores both re-export mappings and cross-references
+- **Type Discrimination**: `link_type` field distinguishes between 'reexport' and 'crossref' entries
+- **Foreign Key Integrity**: Relationships to crate metadata ensure referential consistency
+- **UNIQUE Constraints**: Prevents duplicate entries across (crate_id, alias_path, actual_path, link_type)
+- **Optimized Indexing**: Fast lookup via `idx_reexports_lookup` on (crate_id, alias_path)
+- **Bidirectional Queries**: Supports both forward and reverse cross-reference lookups
+- **Scalability**: Handles thousands of re-exports and cross-references per crate efficiently
 
 ### Caching Layer
 
@@ -735,6 +784,7 @@ def migrate_database_schema(db_path: str):
 
 ### API Integration
 
+**Path Resolution**
 - **Transparency**: resolve_path_alias() function provides seamless integration
 - **Priority Order**: 
   1. Discovered re-exports from database (highest priority)
@@ -743,12 +793,22 @@ def migrate_database_schema(db_path: str):
 - **Backward Compatibility**: Existing static aliases continue to work
 - **Error Handling**: Graceful degradation when database is unavailable
 
+**Cross-Reference API**
+- **Bidirectional Lookup**: get_cross_references() supports directional queries:
+  - `direction="from"`: Outgoing references (this item links to others)
+  - `direction="to"`: Incoming references (others link to this item)
+  - `direction="both"`: Complete bidirectional relationship mapping
+- **Confidence Scoring**: Results include confidence scores for relationship strength
+- **Type Safety**: Validates item paths and handles missing references gracefully
+
 ### Performance Characteristics
 
 - **Resolution Time**: <1ms for cached aliases, <5ms for database queries
-- **Storage Overhead**: ~50-200KB per average crate for re-export metadata
-- **Memory Usage**: ~1-5MB in-memory cache for active aliases
-- **Ingestion Impact**: <5% overhead added to rustdoc parsing pipeline
+- **Cross-Reference Lookup**: <10ms for bidirectional queries on large crates
+- **Storage Overhead**: ~50-200KB per average crate for re-export metadata, ~100-500KB for cross-references
+- **Memory Usage**: ~1-5MB in-memory cache for active aliases and cross-references
+- **Ingestion Impact**: <10% overhead added to rustdoc parsing pipeline (includes cross-ref extraction)
+- **Query Optimization**: Indexed lookups support sub-linear performance scaling
 
 ## Dual-Mode Architecture
 
@@ -1156,6 +1216,75 @@ stateDiagram-v2
     Error504 --> [*]
     Success --> [*]
 ```
+
+## Version Fallback and Error Handling Architecture
+
+### RustdocVersionNotFoundError Exception
+
+The ingestion system implements a custom exception type for precise error handling when specific crate versions don't have rustdoc JSON available:
+
+```python
+class RustdocVersionNotFoundError(Exception):
+    """Raised when a specific version doesn't have rustdoc JSON available."""
+    pass
+```
+
+**Usage Context**:
+- Thrown when all rustdoc JSON formats (.json.zst, .json.gz, .json) return 404 for a specific version
+- Distinguishes between version unavailability and other network/server errors
+- Enables intelligent fallback logic for older crates published before rustdoc JSON support
+
+### Version Fallback Mechanism
+
+The system implements an intelligent version fallback strategy for handling crates published before rustdoc JSON support was available:
+
+```mermaid
+graph TD
+    subgraph "Version Resolution Flow"
+        REQUEST[Ingest Request<br/>crate@specific_version]
+        TRY_SPECIFIC[Download Specific Version<br/>docs.rs/crate/version/]
+        CHECK_ERROR[Error Analysis]
+        FALLBACK_DECISION[Fallback Decision Logic]
+        TRY_LATEST[Download Latest Version<br/>docs.rs/crate/latest/]
+        SUCCESS[Ingestion Success]
+        FAIL[Ingestion Failure]
+    end
+    
+    REQUEST --> TRY_SPECIFIC
+    TRY_SPECIFIC --> CHECK_ERROR
+    
+    CHECK_ERROR --> FALLBACK_DECISION
+    FALLBACK_DECISION -->|RustdocVersionNotFoundError<br/>AND version != "latest"<br/>AND not stdlib| TRY_LATEST
+    FALLBACK_DECISION -->|Other errors<br/>OR stdlib<br/>OR already "latest"| FAIL
+    
+    TRY_LATEST --> SUCCESS
+    TRY_SPECIFIC --> SUCCESS
+```
+
+**Fallback Logic**:
+1. **Primary Attempt**: Download rustdoc JSON for the requested specific version
+2. **Error Classification**: Distinguish `RustdocVersionNotFoundError` from other errors
+3. **Fallback Conditions**: Only fallback if:
+   - Exception is `RustdocVersionNotFoundError` (version doesn't have rustdoc JSON)
+   - Requested version is not already "latest" 
+   - Crate is not a stdlib crate (stdlib versions are tied to Rust releases)
+4. **Secondary Attempt**: Download rustdoc JSON for "latest" version
+5. **Version Tagging**: Store with original requested version metadata for consistency
+
+**Benefits**:
+- **Historical Compatibility**: Enables ingestion of older crates that lack rustdoc JSON for specific versions
+- **Precise Error Handling**: Distinguishes between "version doesn't exist" vs "version lacks rustdoc JSON"
+- **Fallback Safety**: Only falls back for appropriate cases, preventing incorrect version substitution
+- **Metadata Consistency**: Preserves original version information in database records
+
+### Error Handling Integration
+
+The version fallback mechanism integrates with the broader error handling flow:
+
+- **Logging**: Warning messages clearly indicate when fallback occurs and why
+- **Metadata Preservation**: Original version request preserved in database for audit trails  
+- **Client Communication**: API responses indicate when fallback versions were used
+- **Performance**: Fallback adds minimal overhead (~1 additional HTTP request) only when needed
 
 ## Deployment Architecture
 

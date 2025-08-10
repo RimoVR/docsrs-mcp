@@ -306,7 +306,8 @@ async def resolve_path_alias(
 
             # Load from database if not cached
             if reexports is None:
-                reexports = await get_discovered_reexports(db_path, crate_name)
+                # Include cross-references in the resolution
+                reexports = await get_discovered_reexports(db_path, crate_name, include_crossrefs=True)
 
                 # Cache the results
                 if reexports:
