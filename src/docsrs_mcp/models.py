@@ -7,7 +7,8 @@ strict validation with `extra="forbid"` to prevent injection attacks.
 """
 
 import unicodedata
-from typing import Any, Literal
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -1198,3 +1199,136 @@ class StartPreIngestionResponse(BaseModel):
     )
 
     model_config = ConfigDict(extra="forbid")
+
+# ============================================================
+# Version Diff Models - For comparing crate versions
+# ============================================================
+
+class ChangeCategory(str, Enum):
+    """Categories of changes between versions."""
+    BREAKING = "breaking"
+    DEPRECATED = "deprecated"
+    ADDED = "added"
+    REMOVED = "removed"
+    MODIFIED = "modified"
+    
+class ItemKind(str, Enum):
+    """Types of Rust items that can be compared."""
+    FUNCTION = "function"
+    STRUCT = "struct"
+    ENUM = "enum"
+    TRAIT = "trait"
+    TYPE_ALIAS = "type"
+    CONST = "const"
+    STATIC = "static"
+    MODULE = "module"
+    MACRO = "macro"
+    IMPL = "impl"
+    
+class ChangeType(str, Enum):
+    """Types of changes that can occur."""
+    ADDED = "added"
+    REMOVED = "removed"
+    MODIFIED = "modified"
+    MOVED = "moved"
+    DEPRECATED = "deprecated"
+    
+class Severity(str, Enum):
+    """Severity levels for changes."""
+    BREAKING = "breaking"
+    MAJOR = "major"
+    MINOR = "minor"
+    PATCH = "patch"
+    
+class ItemSignature(BaseModel):
+    """Represents the signature of a Rust item."""
+    raw_signature: str
+    generics: Optional[str] = None
+    parameters: Optional[List[str]] = None
+    return_type: Optional[str] = None
+    visibility: str = "public"
+    deprecated: bool = False
+    deprecation_note: Optional[str] = None
+    
+class ChangeDetails(BaseModel):
+    """Detailed information about a change."""
+    before: Optional[ItemSignature] = None
+    after: Optional[ItemSignature] = None
+    semantic_changes: List[str] = Field(default_factory=list)
+    documentation_changes: bool = False
+    
+class ItemChange(BaseModel):
+    """Represents a single item change between versions."""
+    path: str = Field(..., description="Full path to the item (e.g., 'tokio::spawn')")
+    kind: ItemKind
+    change_type: ChangeType
+    severity: Severity
+    details: ChangeDetails
+    module_path: Optional[str] = None
+    
+class MigrationHint(BaseModel):
+    """Suggestion for migrating code to handle a breaking change."""
+    affected_path: str
+    issue: str
+    suggested_fix: str
+    severity: Severity
+    example_before: Optional[str] = None
+    example_after: Optional[str] = None
+    
+class DiffSummary(BaseModel):
+    """Summary statistics of the diff."""
+    total_changes: int = 0
+    breaking_changes: int = 0
+    deprecated_items: int = 0
+    added_items: int = 0
+    removed_items: int = 0
+    modified_items: int = 0
+    migration_hints_available: int = 0
+    
+class CompareVersionsRequest(BaseModel):
+    """Request to compare two versions of a crate."""
+    crate_name: str = Field(..., description="Name of the Rust crate")
+    version_a: str = Field(..., description="First version to compare")
+    version_b: str = Field(..., description="Second version to compare")
+    include_unchanged: bool = Field(default=False, description="Include unchanged items in response")
+    categories: List[ChangeCategory] = Field(
+        default=[
+            ChangeCategory.BREAKING,
+            ChangeCategory.DEPRECATED,
+            ChangeCategory.ADDED,
+            ChangeCategory.REMOVED,
+            ChangeCategory.MODIFIED
+        ],
+        description="Categories of changes to include"
+    )
+    max_results: int = Field(default=1000, ge=1, le=5000, description="Maximum number of changes to return")
+    
+    @field_validator("crate_name")
+    @classmethod
+    def validate_crate_name(cls, v: str) -> str:
+        """Validate crate name format."""
+        from .validation import validate_crate_name
+        return validate_crate_name(v)
+    
+    @field_validator("version_a", "version_b")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        """Validate version string format."""
+        from .validation import validate_version_string
+        return validate_version_string(v)
+    
+class VersionDiffResponse(BaseModel):
+    """Response containing the diff between two versions."""
+    crate_name: str
+    version_a: str
+    version_b: str
+    summary: DiffSummary
+    changes: Dict[str, List[ItemChange]] = Field(default_factory=dict)
+    migration_hints: List[MigrationHint] = Field(default_factory=list)
+    computation_time_ms: Optional[float] = None
+    cached: bool = False
+    
+    class Config:
+        json_encoders = {
+            Enum: lambda v: v.value
+        }

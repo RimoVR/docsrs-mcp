@@ -810,6 +810,101 @@ def migrate_database_schema(db_path: str):
 - **Ingestion Impact**: <10% overhead added to rustdoc parsing pipeline (includes cross-ref extraction)
 - **Query Optimization**: Indexed lookups support sub-linear performance scaling
 
+## Version Diff System Architecture
+
+### Overview
+The version diff system provides semantic comparison of documentation changes between crate versions, optimized for Rust coding agents to understand API evolution and breaking changes.
+
+### Core Components
+
+#### VersionDiffEngine
+- **Purpose**: Central engine for comparing documentation between two crate versions
+- **Caching Strategy**: LRU cache with configurable size limits for performance
+- **Performance**: Sub-500ms for cached comparisons, 10-30s for initial ingestion
+- **Change Detection**: Hash-based comparison for efficient identification of modifications
+
+#### RustBreakingChangeDetector 
+- **Semver Analysis**: Identifies breaking changes according to Rust semver guidelines
+- **Change Categories**: 
+  - `added`: New items introduced
+  - `removed`: Items that were deleted (potential breaking change)
+  - `modified`: Items with signature or behavior changes
+  - `deprecated`: Items marked as deprecated
+- **Migration Hints**: Generates contextual guidance for handling breaking changes
+
+### Architecture Diagram
+
+```mermaid
+graph TD
+    A[compare_versions MCP Tool] --> B[VersionDiffEngine]
+    B --> C[Version Resolution]
+    B --> D[Documentation Extraction]
+    B --> E[Change Detection]
+    B --> F[RustBreakingChangeDetector]
+    
+    C --> G[Crate Version A Database]
+    C --> H[Crate Version B Database]
+    
+    D --> I[Hash Generation]
+    E --> I
+    E --> J[Diff Calculation]
+    
+    F --> K[Semver Analysis]
+    F --> L[Migration Hints]
+    
+    J --> M[Categorized Changes]
+    K --> M
+    L --> M
+    
+    M --> N[JSON Response]
+```
+
+### Data Flow
+
+1. **Version Resolution**: Resolve version strings to specific crate versions
+2. **Documentation Extraction**: Extract documentation from ingested databases for both versions
+3. **Hash-Based Comparison**: Generate content hashes for efficient change detection
+4. **Diff Calculation**: Identify added, removed, modified, and deprecated items
+5. **Semver Analysis**: Analyze changes for breaking change potential
+6. **Migration Hints**: Generate actionable guidance for developers
+7. **Response Generation**: Format results as structured JSON for MCP consumption
+
+### Performance Characteristics
+
+| Operation | Performance Target | Implementation |
+|-----------|-------------------|----------------|
+| Cached Comparison | <500ms | LRU cache with hash keys |
+| Initial Ingestion | 10-30s | Concurrent processing |
+| Memory Usage | <1GB | Streaming processing |
+| Cache Eviction | LRU-based | Configurable size limits |
+
+### Integration Points
+
+#### MCP Tool Endpoint
+- **Endpoint**: `/mcp/tools/compare_versions`
+- **Parameters**: `crate_name`, `version_a`, `version_b`
+- **Response**: Structured diff with categorized changes and migration hints
+- **Error Handling**: Graceful fallback for missing versions
+
+#### REST API Access
+- **Mode**: Available in both MCP and REST modes
+- **Authentication**: None required (read-only operation)
+- **Rate Limiting**: Subject to standard API rate limits
+
+### Tested Implementations
+
+Successfully validated with real-world crates:
+- **serde**: Major version transitions with breaking changes
+- **once_cell**: API evolution and deprecation patterns  
+- **anyhow**: Error handling pattern changes
+
+### Design Decisions
+
+- **Hash-Based Detection**: Chosen over AST comparison for performance
+- **LRU Caching**: Balances memory usage with response time requirements
+- **Semver Compliance**: Follows Rust RFC 1105 semver guidelines
+- **JSON Response Format**: Optimized for programmatic consumption by coding agents
+
 ## Dual-Mode Architecture
 
 ```mermaid

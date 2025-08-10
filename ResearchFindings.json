@@ -874,6 +874,58 @@
         "primary": ["Model Context Protocol specification", "OpenAI Platform Documentation on Structured Outputs"],
         "industry": "AI agent documentation best practices"
       }
+    },
+    "version_diff": {
+      "semantic_comparison": {
+        "purpose": "Compare documentation changes between crate versions for Rust coding agents",
+        "optimization": "Hash-based comparison for efficient change detection",
+        "performance": "Sub-500ms for cached comparisons, 10-30s for initial ingestion",
+        "target_audience": "Rust coding agents understanding API evolution"
+      },
+      "breaking_change_detection": {
+        "framework": "Rust RFC 1105 semver guidelines compliance",
+        "categories": {
+          "added": "New items introduced (non-breaking)",
+          "removed": "Items deleted (potential breaking change)", 
+          "modified": "Items with signature or behavior changes",
+          "deprecated": "Items marked as deprecated"
+        },
+        "migration_hints": "Contextual guidance for handling breaking changes",
+        "semver_analysis": "Automatic breaking change identification"
+      },
+      "implementation": {
+        "engine": "VersionDiffEngine with LRU caching",
+        "detector": "RustBreakingChangeDetector for semver analysis", 
+        "endpoint": "/mcp/tools/compare_versions accessible via REST API and MCP",
+        "caching_strategy": "LRU cache with configurable size limits"
+      },
+      "performance_characteristics": {
+        "cached_comparison": "<500ms response time",
+        "initial_ingestion": "10-30s for version processing",
+        "memory_usage": "<1GB with streaming processing",
+        "cache_eviction": "LRU-based with configurable limits"
+      },
+      "tested_implementations": {
+        "validation_crates": ["serde", "once_cell", "anyhow"],
+        "test_scenarios": {
+          "serde": "Major version transitions with breaking changes",
+          "once_cell": "API evolution and deprecation patterns",
+          "anyhow": "Error handling pattern changes"
+        },
+        "success_criteria": "Accurate breaking change detection and migration guidance"
+      },
+      "design_decisions": {
+        "hash_vs_ast": "Hash-based detection chosen over AST comparison for performance",
+        "caching_strategy": "LRU caching balances memory usage with response time",
+        "semver_compliance": "Follows Rust RFC 1105 semver guidelines",
+        "response_format": "JSON optimized for programmatic consumption by coding agents"
+      },
+      "integration_patterns": {
+        "mcp_tool": "Native MCP tool endpoint with structured parameters",
+        "rest_api": "Available in both MCP and REST modes",
+        "error_handling": "Graceful fallback for missing versions",
+        "rate_limiting": "Subject to standard API rate limits"
+      }
     }
   },
   "recommendations": {

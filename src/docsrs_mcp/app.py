@@ -31,6 +31,7 @@ from .ingest import get_embedding_model, ingest_crate
 from .middleware import limiter, rate_limit_handler
 from .models import (
     CodeExample,
+    CompareVersionsRequest,
     CrateModule,
     GetCrateSummaryRequest,
     GetCrateSummaryResponse,
@@ -47,6 +48,7 @@ from .models import (
     SearchResult,
     StartPreIngestionRequest,
     StartPreIngestionResponse,
+    VersionDiffResponse,
 )
 from .popular_crates import (
     _ingestion_scheduler,
@@ -660,6 +662,68 @@ async def get_mcp_manifest(request: Request):
                     "**After Cache Clear**: Rebuild cache after maintenance or cleanup",
                     "**Performance Optimization**: Ensure sub-100ms responses for common queries",
                     "**AI Agent Workflows**: Eliminate wait times for frequently accessed documentation",
+                ],
+            ),
+            MCPTool(
+                name="compare_versions",
+                description="Compare two versions of a crate for API changes and breaking changes",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "crate_name": {
+                            "type": "string",
+                            "description": "Name of the Rust crate to compare",
+                        },
+                        "version_a": {
+                            "type": "string",
+                            "description": "First version to compare",
+                        },
+                        "version_b": {
+                            "type": "string",
+                            "description": "Second version to compare",
+                        },
+                        "include_unchanged": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Include unchanged items in response",
+                        },
+                        "categories": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["breaking", "deprecated", "added", "removed", "modified"],
+                            },
+                            "default": ["breaking", "deprecated", "added", "removed", "modified"],
+                            "description": "Categories of changes to include",
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "default": 1000,
+                            "minimum": 1,
+                            "maximum": 5000,
+                            "description": "Maximum number of changes to return",
+                        },
+                    },
+                    "required": ["crate_name", "version_a", "version_b"],
+                },
+                tutorial=(
+                    "Semantic diff between crate versions optimized for coding agents.\n"
+                    "Detects breaking changes per Rust semver. Generates migration hints.\n"
+                    "Categories: breaking/added/removed/modified/deprecated. LRU cached.\n"
+                    "Returns structured JSON with change details and severity levels.\n"
+                    "Perfect for automated dependency updates and API migration."
+                ),
+                examples=[
+                    "Basic: compare_versions(crate_name='serde', version_a='1.0.196', version_b='1.0.197')",
+                    "Breaking only: compare_versions(crate_name='tokio', version_a='1.34.0', version_b='1.35.0', categories=['breaking'])",
+                    "Full diff: compare_versions(crate_name='actix-web', version_a='4.4.0', version_b='4.5.0', max_results=5000)",
+                ],
+                use_cases=[
+                    "Understanding API evolution between releases",
+                    "Detecting breaking changes before upgrading",
+                    "Generating migration guides for code updates",
+                    "Tracking deprecations and new features",
+                    "Assisting with dependency version management",
                 ],
             ),
         ],
@@ -1367,6 +1431,57 @@ async def start_pre_ingestion_tool(
         logger.error(f"Failed to start pre-ingestion: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to start pre-ingestion: {str(e)}"
+        ) from e
+
+
+@app.post(
+    "/mcp/tools/compare_versions",
+    tags=["tools"],
+    summary="Compare Versions",
+    response_description="Version diff with breaking changes and migration hints",
+    operation_id="compareVersions",
+)
+@limiter.limit("30/second")
+async def compare_versions(
+    request: Request, params: CompareVersionsRequest
+) -> VersionDiffResponse:
+    """
+    Compare two versions of a crate for API changes.
+    
+    Performs semantic diff between two crate versions, identifying breaking changes,
+    deprecations, and providing migration hints. Optimized for Rust coding agents
+    to understand API evolution and assist with code migration.
+    
+    **Features**:
+    - Detects breaking changes according to Rust semver rules
+    - Provides migration hints for breaking changes
+    - Categorizes changes (added, removed, modified, deprecated)
+    - Caches results for improved performance
+    """
+    try:
+        # Import here to avoid circular dependency
+        from .version_diff import get_diff_engine
+        
+        # Get or create the diff engine
+        engine = get_diff_engine()
+        
+        # Perform comparison
+        result = await engine.compare_versions(params)
+        
+        return result
+        
+    except FileNotFoundError as e:
+        # One or both versions don't exist
+        logger.error(f"Version not found for comparison: {e}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Version not found: {str(e)}. Ensure both versions exist.",
+        ) from e
+    except Exception as e:
+        logger.error(f"Error comparing versions: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compare versions: {str(e)}",
         ) from e
 
 

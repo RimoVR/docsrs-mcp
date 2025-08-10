@@ -1640,6 +1640,186 @@ async def search_example_embeddings(
         return results
 
 
+# ============================================================
+# Version Diff Database Functions
+# ============================================================
+
+async def get_all_items_for_version(
+    db_path: Path,
+    include_content: bool = False,
+    include_examples: bool = False,
+) -> dict[str, dict]:
+    """Get all items from a specific version's database for comparison.
+    
+    Args:
+        db_path: Path to the version's database
+        include_content: Whether to include full documentation content
+        include_examples: Whether to include code examples
+        
+    Returns:
+        Dictionary mapping item_path to item data
+    """
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+    
+    items = {}
+    
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Build query based on what to include
+        columns = ["item_path", "header", "item_type", "signature", "visibility", "deprecated"]
+        if include_content:
+            columns.append("content")
+        if include_examples:
+            columns.append("examples")
+        
+        # Add generic parameters and trait bounds for better comparison
+        columns.extend(["generic_params", "trait_bounds"])
+        
+        query = f"SELECT {', '.join(columns)} FROM embeddings"
+        
+        cursor = await db.execute(query)
+        async for row in cursor:
+            # Build item dict from row
+            item_data = {
+                "item_path": row[0],
+                "header": row[1],
+                "item_type": row[2],
+                "signature": row[3],
+                "visibility": row[4],
+                "deprecated": bool(row[5]),
+                "generic_params": row[-2],  # second to last
+                "trait_bounds": row[-1],     # last
+            }
+            
+            # Add optional fields
+            idx = 6
+            if include_content:
+                item_data["content"] = row[idx]
+                idx += 1
+            if include_examples:
+                item_data["examples"] = row[idx]
+                
+            items[row[0]] = item_data  # Use item_path as key
+            
+    return items
+
+
+async def get_item_signatures_batch(
+    db_path: Path,
+    item_paths: list[str],
+) -> dict[str, dict]:
+    """Get signatures for a batch of items efficiently.
+    
+    Args:
+        db_path: Path to the database
+        item_paths: List of item paths to retrieve
+        
+    Returns:
+        Dictionary mapping item_path to signature data
+    """
+    if not db_path.exists():
+        return {}
+        
+    if not item_paths:
+        return {}
+    
+    signatures = {}
+    
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Use parameterized query with IN clause
+        placeholders = ",".join(["?"] * len(item_paths))
+        query = f"""
+            SELECT 
+                item_path, 
+                signature, 
+                item_type, 
+                visibility,
+                deprecated,
+                generic_params,
+                trait_bounds
+            FROM embeddings 
+            WHERE item_path IN ({placeholders})
+        """
+        
+        cursor = await db.execute(query, item_paths)
+        async for row in cursor:
+            signatures[row[0]] = {
+                "signature": row[1],
+                "item_type": row[2],
+                "visibility": row[3],
+                "deprecated": bool(row[4]),
+                "generic_params": row[5],
+                "trait_bounds": row[6],
+            }
+            
+    return signatures
+
+
+async def get_module_items(
+    db_path: Path,
+    module_path: str,
+) -> list[dict]:
+    """Get all items within a specific module.
+    
+    Args:
+        db_path: Path to the database
+        module_path: Module path to query (e.g., 'tokio::sync')
+        
+    Returns:
+        List of items in the module with their metadata
+    """
+    if not db_path.exists():
+        return []
+    
+    items = []
+    
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Match items that start with the module path
+        query = """
+            SELECT 
+                item_path,
+                item_type,
+                signature,
+                visibility,
+                deprecated
+            FROM embeddings
+            WHERE item_path LIKE ? || '::%'
+            ORDER BY item_path
+        """
+        
+        cursor = await db.execute(query, (module_path,))
+        async for row in cursor:
+            items.append({
+                "item_path": row[0],
+                "item_type": row[1],
+                "signature": row[2],
+                "visibility": row[3],
+                "deprecated": bool(row[4]),
+            })
+            
+    return items
+
+
+async def compute_item_hash(item_data: dict) -> str:
+    """Compute a hash for an item to detect changes.
+    
+    Uses signature, visibility, deprecated status, and generics for comparison.
+    """
+    import hashlib
+    
+    # Create a stable string representation for hashing
+    hash_parts = [
+        str(item_data.get("signature", "")),
+        str(item_data.get("visibility", "public")),
+        str(item_data.get("deprecated", False)),
+        str(item_data.get("generic_params", "")),
+        str(item_data.get("trait_bounds", "")),
+    ]
+    
+    hash_string = "|".join(hash_parts)
+    return hashlib.sha256(hash_string.encode()).hexdigest()[:16]
+
+
 async def get_all_item_paths(db_path: Path) -> list[str]:
     """Get all item paths from the database for fuzzy matching.
 
