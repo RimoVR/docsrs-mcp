@@ -614,7 +614,8 @@
         "Use ORT_ENABLE_EXTENDED for balanced performance without layout overhead",
         "Model quantization (fp32 to int8) reduces memory by 4x",
         "Request-scoped dependency caching in FastAPI avoids recomputation",
-        "Adaptive batch sizing based on memory monitoring prevents OOM"
+        "Adaptive batch sizing based on memory monitoring prevents OOM",
+        "Token optimization: analyze baseline metrics first, use soft validation over hard errors"
       ],
       "entries": [
         {
@@ -715,6 +716,23 @@
           "dateDiscovered": "2025-08-09",
           "relatedFiles": ["src/docsrs_mcp/ingest.py"],
           "measuredImpact": "50% reduction in database insertions and embedding calculations"
+        },
+        {
+          "issue": "Token optimization analysis of MCP tool tutorials",
+          "discovery": "Current MCP tool tutorials were already well-optimized (all under 200 tokens)",
+          "lesson": "Always analyze baseline metrics before optimization",
+          "solution": "Truncate text to 100k chars before tokenization to prevent tiktoken stack overflow",
+          "context": "Token efficiency optimization for MCP tools and documentation",
+          "implementation": [
+            "Use 5 chars per token as upper bound for validation",
+            "Implement soft validation (warnings) rather than hard errors for token limits",
+            "Create specific tests for token efficiency across all MCP tools"
+          ],
+          "optimizationStrategy": "Character limit approximation prevents expensive tokenization on oversized content while maintaining accurate token counts for normal content",
+          "dateDiscovered": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "tests/test_token_efficiency.py"],
+          "measuredImpact": "Prevented stack overflow errors while maintaining token optimization accuracy",
+          "preventionPattern": "Always establish baseline metrics before implementing optimization strategies"
         }
       ]
     },

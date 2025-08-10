@@ -5,8 +5,11 @@ This module provides common validation functions used across multiple
 request models to ensure consistency and reduce code duplication.
 """
 
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Error message templates (precompiled for performance)
 ERROR_TEMPLATES = {
@@ -586,6 +589,69 @@ def validate_optional_path(value: Any, field_name: str = "path") -> str | None:
                     ]
                 ),
             )
+        )
+
+    return value
+
+
+def count_tokens(text: str, encoding: str = "cl100k_base") -> int:
+    """
+    Count tokens in text using tiktoken.
+
+    Args:
+        text: The text to count tokens for
+        encoding: The encoding to use (default: cl100k_base for GPT-4)
+
+    Returns:
+        Number of tokens in the text
+    """
+    try:
+        import tiktoken
+
+        # Truncate very long text before tokenization to avoid stack overflow
+        if len(text) > 100000:
+            text = text[:100000]
+            logger.warning("Text truncated to 100k chars for token counting")
+
+        enc = tiktoken.get_encoding(encoding)
+        return len(enc.encode(text))
+    except Exception as e:
+        # Fallback to character estimation (1 token ≈ 4 chars)
+        logger.warning(f"Token counting failed, using character estimation: {e}")
+        return len(text) // 4
+
+
+def validate_tutorial_tokens(
+    value: str | None, max_tokens: int = 200
+) -> str | None:
+    """
+    Validate that tutorial text doesn't exceed token limit.
+
+    Args:
+        value: The tutorial text to validate
+        max_tokens: Maximum allowed tokens (default: 200)
+
+    Returns:
+        The validated tutorial text
+    """
+    if value is None:
+        return None
+
+    if not value.strip():
+        return None
+
+    # Check character limit first (rough approximation)
+    if len(value) > max_tokens * 5:  # Assuming ~5 chars per token as upper bound
+        logger.warning(
+            f"Tutorial exceeds character limit ({len(value)} chars, "
+            f"expected <{max_tokens * 5})"
+        )
+
+    # Check actual token count
+    token_count = count_tokens(value)
+    if token_count > max_tokens:
+        logger.warning(
+            f"Tutorial exceeds token limit: {token_count} tokens (max: {max_tokens})"
         )
 
     return value

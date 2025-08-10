@@ -49,7 +49,8 @@
         "uvicorn": "0.27.1",
         "ijson": "3.4.0",
         "pygments": "2.19.2",
-        "slowapi": "0.1.10"
+        "slowapi": "0.1.10",
+        "tiktoken": "0.11.0"
       },
       "perf_metrics": {
         "sqlite_vec_query": "<100ms for 1M+ vectors",
@@ -807,6 +808,52 @@
         "patterns": {"org": "Group related patterns", "progression": "Simple→advanced", "errors": "Common conditions", "practices": "Optimal usage"}
       }
     },
+    "token_optimization": {
+      "counting_libraries": {
+        "tiktoken": {
+          "ver": "0.11.0",
+          "purpose": "Standard OpenAI token counting library",
+          "encoding": "cl100k_base for GPT-4 models",
+          "performance_warning": "Stack overflow risk with >100k character inputs",
+          "best_practice": "Truncate text before tokenization to avoid performance issues"
+        },
+        "character_estimation": {
+          "fallback_ratio": "1 token ≈ 4 characters",
+          "accuracy": "Approximate - varies by language and content type",
+          "use_case": "Quick estimation when tiktoken unavailable"
+        }
+      },
+      "optimization_strategies": {
+        "writing_patterns": {
+          "bullet_points": "Reduce token count vs paragraph format",
+          "technical_abbreviations": "Use standard abbreviations when clear",
+          "imperative_voice": "More concise than descriptive prose"
+        },
+        "content_structuring": {
+          "hierarchical": "Use headers and sections for scanability",
+          "key_information_first": "Front-load critical details",
+          "eliminate_redundancy": "Remove repeated information"
+        }
+      },
+      "mcp_manifest_issues": {
+        "token_overflow": {
+          "range": "23K-93K tokens for large responses",
+          "cause": "Extensive tool manifests with detailed schemas",
+          "mitigation": "Optimize tool descriptions and parameter documentation"
+        },
+        "best_practices": {
+          "description_length": "50-125 characters per tool description",
+          "parameter_docs": "20-80 characters per parameter",
+          "tutorial_limits": "200-token limit per tutorial section"
+        }
+      },
+      "performance_considerations": {
+        "tiktoken_limitations": "Memory and CPU intensive for large inputs",
+        "preprocessing": "Apply truncation before token counting",
+        "caching": "Cache token counts for frequently processed content",
+        "monitoring": "Track token usage to identify optimization opportunities"
+      }
+    },
     "mcp_documentation": {
       "protocol_principles": {
         "api_design": "Token-efficient, self-documenting APIs with JSON schemas",
@@ -840,7 +887,9 @@
       "p2: Adding UNIQUE constraints requires 12-step rebuild",
       "p2: Use ijson #{ijson} with yajl2_c backend for #{ijson_speedup}",
       "p2: Use tree-sitter for #{treesitter_speedup} code extraction",
-      "p2: Maintain strong asyncio task references"
+      "p2: Maintain strong asyncio task references",
+      "p2: Truncate text inputs before tiktoken processing to prevent stack overflow",
+      "p2: Monitor MCP manifest token usage to prevent 23K-93K token overflow"
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",
@@ -881,7 +930,12 @@
       "Apply fuzzy normalization in Pydantic field validators for query preprocessing",
       "Use regex-based word boundary matching for spelling normalization",
       "Configure dynamic fetch_k with 1.5x multiplier when MMR is enabled",
-      "Maintain <500ms P95 latency with all ranking optimizations enabled"
+      "Maintain <500ms P95 latency with all ranking optimizations enabled",
+      "Use tiktoken 0.11.0 with cl100k_base encoding for accurate GPT-4 token counting",
+      "Apply 1 token ≈ 4 characters estimation as fallback for quick calculations",
+      "Implement text truncation before tiktoken processing to prevent performance issues",
+      "Use bullet points and imperative voice for token-efficient documentation",
+      "Cache token counts for frequently processed content to improve performance"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",

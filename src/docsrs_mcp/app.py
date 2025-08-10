@@ -642,25 +642,11 @@ async def get_mcp_manifest(request: Request):
                     },
                 },
                 tutorial=(
-                    "The pre-ingestion system caches popular Rust crates to eliminate cold-start latency.\n\n"
-                    "**How it works:**\n"
-                    "1. Fetches the list of most-downloaded crates from crates.io\n"
-                    "2. Downloads and processes them in parallel (configurable concurrency)\n"
-                    "3. Builds search indices and caches documentation\n"
-                    "4. Runs in background without blocking other operations\n\n"
-                    "**Monitoring:**\n"
-                    "- Check `/health` for overall system status\n"
-                    "- Use `/health/pre-ingestion` for detailed progress\n"
-                    "- Look for 'pre_ingestion' section showing processed/total counts\n\n"
-                    "**Performance Impact:**\n"
-                    "- Popular crates respond in <100ms after pre-ingestion\n"
-                    "- System remains responsive during pre-ingestion\n"
-                    "- Memory usage increases gradually as crates are cached\n\n"
-                    "**Best Practices:**\n"
-                    "- Start pre-ingestion during low-traffic periods\n"
-                    "- Monitor memory usage via health endpoints\n"
-                    "- Allow 5-10 minutes for full completion\n"
-                    "- Use force=true sparingly to avoid redundant work"
+                    "Pre-caches popular crates to eliminate cold-start latency.\n\n"
+                    "**Process:** Fetches crates.io list → parallel download → index build → background run\n\n"
+                    "**Monitor:** `/health` (status), `/health/pre-ingestion` (progress)\n\n"
+                    "**Impact:** <100ms response after caching, gradual memory increase\n\n"
+                    "**Tips:** Run during low traffic, allow 5-10min, use force=true to restart"
                 ),
                 examples=[
                     "start_pre_ingestion()",

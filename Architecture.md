@@ -2825,6 +2825,120 @@ The MCP manifest schema has been updated to use anyOf patterns for numeric param
 
 This ensures compatibility with various MCP client implementations that may serialize parameters differently while maintaining strict type safety and validation.
 
+## Token Optimization
+
+### Token Counting Utilities
+
+The system implements comprehensive token optimization utilities in the validation module to ensure efficient context usage across the application:
+
+```mermaid
+graph TB
+    subgraph "Token Optimization System"
+        TIKTOKEN[tiktoken Library<br/>GPT-4 compatible encoding<br/>cl100k_base default]
+        COUNT_FUNC[count_tokens() Function<br/>Text tokenization with fallback]
+        CHAR_TRUNC[Character Truncation<br/>100k character limit<br/>Stack overflow prevention]
+        VALIDATE_FUNC[validate_tutorial_tokens() Function<br/>Tutorial content validation<br/>200 token limit]
+    end
+    
+    subgraph "Fallback Strategy"
+        TIKTOKEN_FAIL[tiktoken Import/Execution Failure]
+        CHAR_EST[Character Estimation<br/>1 token ≈ 4 characters]
+        LOGGING[Warning Logging<br/>Fallback notifications]
+    end
+    
+    subgraph "Tutorial Validation Pipeline"
+        TUTORIAL_INPUT[Tutorial Content Input]
+        CHAR_CHECK[Character Limit Check<br/>5 chars per token upper bound]
+        TOKEN_COUNT[Actual Token Counting<br/>tiktoken or fallback]
+        LIMIT_CHECK[200 Token Limit Validation]
+        WARNING[Warning Logging<br/>Limit exceeded notifications]
+    end
+    
+    TIKTOKEN --> COUNT_FUNC
+    COUNT_FUNC --> CHAR_TRUNC
+    COUNT_FUNC --> VALIDATE_FUNC
+    
+    COUNT_FUNC -.->|Import/Runtime Error| TIKTOKEN_FAIL
+    TIKTOKEN_FAIL --> CHAR_EST
+    CHAR_EST --> LOGGING
+    
+    TUTORIAL_INPUT --> CHAR_CHECK
+    CHAR_CHECK --> TOKEN_COUNT
+    TOKEN_COUNT --> LIMIT_CHECK
+    LIMIT_CHECK --> WARNING
+    
+    TOKEN_COUNT --> COUNT_FUNC
+```
+
+### Core Token Optimization Functions
+
+**count_tokens(text: str, encoding: str = "cl100k_base") -> int**
+- Utilizes tiktoken library with GPT-4 compatible cl100k_base encoding
+- Implements character truncation (100k limit) before tokenization to prevent stack overflow
+- Provides robust fallback to character estimation (1 token ≈ 4 characters) on tiktoken failures
+- Includes comprehensive error handling with warning logging
+
+**validate_tutorial_tokens(value: str | None, max_tokens: int = 200) -> str | None**
+- Validates tutorial content against strict 200-token limit
+- Implements two-stage validation: character estimation followed by precise token counting
+- Handles None values gracefully for optional tutorial fields
+- Provides detailed warning logging when limits are exceeded
+- Returns validated content or None for empty/whitespace-only input
+
+### Token Optimization Architecture
+
+```mermaid
+graph LR
+    subgraph "Input Processing"
+        TEXT_INPUT[Text Input<br/>Tutorial/Content strings]
+        NULL_CHECK[None/Empty Validation<br/>Early return optimization]
+        CHAR_LIMIT[Character Limit Check<br/>100k truncation safety]
+    end
+    
+    subgraph "Token Counting Engine"
+        TIKTOKEN_ENC[tiktoken Encoding<br/>cl100k_base for GPT-4]
+        ENCODE_TOKENS[Token Encoding<br/>Precise count generation]
+        FALLBACK_EST[Fallback Estimation<br/>Character-based approximation]
+    end
+    
+    subgraph "Validation & Limits"
+        TUTORIAL_LIMIT[Tutorial Token Limit<br/>200 tokens maximum]
+        CHAR_ESTIMATE[Character Estimation<br/>5 chars/token upper bound]
+        WARNING_LOG[Warning Logging<br/>Limit violation notifications]
+    end
+    
+    TEXT_INPUT --> NULL_CHECK
+    NULL_CHECK --> CHAR_LIMIT
+    CHAR_LIMIT --> TIKTOKEN_ENC
+    
+    TIKTOKEN_ENC --> ENCODE_TOKENS
+    TIKTOKEN_ENC -.->|Import/Runtime Error| FALLBACK_EST
+    
+    ENCODE_TOKENS --> TUTORIAL_LIMIT
+    FALLBACK_EST --> TUTORIAL_LIMIT
+    TUTORIAL_LIMIT --> CHAR_ESTIMATE
+    CHAR_ESTIMATE --> WARNING_LOG
+```
+
+### Performance Characteristics
+
+- **Token Counting Performance**: tiktoken encoding optimized for batch processing
+- **Memory Safety**: 100k character truncation prevents stack overflow during tokenization
+- **Graceful Degradation**: Character-based estimation fallback ensures system reliability
+- **Tutorial Validation**: 200-token limit ensures optimal context efficiency for MCP tool documentation
+- **Error Resilience**: Comprehensive exception handling prevents validation failures from breaking application flow
+
+### Integration Points
+
+The token optimization system integrates with several key components:
+
+1. **MCP Tool Documentation**: Tutorial field validation ensures token budget compliance
+2. **Content Generation**: Smart snippet extraction uses token counting for optimal context usage
+3. **Validation Pipeline**: Centralized token utilities support consistent token management across request models
+4. **Error Handling**: Token limit violations generate informative warnings without breaking functionality
+
+This token optimization architecture ensures efficient context usage while maintaining system reliability through robust fallback mechanisms and comprehensive error handling.
+
 ## Security Model
 
 ```mermaid
