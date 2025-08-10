@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from . import config as app_config
 from .validation import validate_crate_name, validate_rust_path, validate_version_string
 
 
@@ -267,7 +268,12 @@ class SearchItemsRequest(BaseModel):
         # e.g., "serialise" -> "serialize", "colour" -> "color"
         query = cls._apply_fuzzy_normalization(query)
 
-        # Step 8: Final validation after normalization
+        # Step 8: Rust-specific term expansion
+        # Expand common Rust abbreviations to improve search coverage
+        # e.g., "async" -> "async asynchronous", "impl" -> "impl implementation"
+        query = cls._expand_rust_terms(query)
+
+        # Step 9: Final validation after normalization
         if len(query) < 1:
             raise ValueError(
                 "Query cannot be empty after normalization. "
@@ -301,6 +307,19 @@ class SearchItemsRequest(BaseModel):
             "defence": "defense",
             "licence": "license",
             "practise": "practice",
+            # Additional programming-specific variations
+            "analyse": "analyze",
+            "tokenise": "tokenize",
+            "randomise": "randomize",
+            "maximise": "maximize",
+            "minimise": "minimize",
+            "visualise": "visualize",
+            "utilise": "utilize",
+            "customise": "customize",
+            "prioritise": "prioritize",
+            "standardise": "standardize",
+            "summarise": "summarize",
+            "parallelise": "parallelize",
         }
 
         # Apply replacements for whole words only (avoid partial replacements)
@@ -322,6 +341,42 @@ class SearchItemsRequest(BaseModel):
                 normalized_words.append(word)
 
         return " ".join(normalized_words)
+
+    @classmethod
+    def _expand_rust_terms(cls, query: str) -> str:
+        """
+        Expand common Rust abbreviations and terms for better search coverage.
+
+        This improves search by including both abbreviated and full forms
+        of common Rust terminology.
+        """
+        # Use term expansions from config
+        expansions = app_config.RUST_TERM_EXPANSIONS
+
+        # Split query into words
+        words = query.split()
+        expanded_terms = []
+
+        for word in words:
+            word_lower = word.lower()
+
+            # Check if this word has expansions
+            if word_lower in expansions:
+                # Add all expansion variants (including original)
+                expanded_terms.extend(expansions[word_lower])
+            else:
+                # Keep original word
+                expanded_terms.append(word)
+
+        # Join and deduplicate while preserving order
+        seen = set()
+        result = []
+        for term in expanded_terms:
+            if term not in seen:
+                seen.add(term)
+                result.append(term)
+
+        return " ".join(result)
 
     @field_validator("k", mode="before")
     @classmethod

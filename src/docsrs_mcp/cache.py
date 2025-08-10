@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from .config import (
+    CACHE_ADAPTIVE_TTL_ENABLED,
     CACHE_SIZE,
     CACHE_TTL,
     RANKING_DIVERSITY_LAMBDA,
@@ -25,8 +26,10 @@ class SearchCache:
         """
         self.max_size = max_size
         self.ttl = ttl
+        self.adaptive_ttl_enabled = CACHE_ADAPTIVE_TTL_ENABLED
         self._cache: dict[str, tuple[float, Any]] = {}
         self._access_order: list[str] = []
+        self._hit_count: dict[str, int] = {}  # Track hit counts for popular queries
 
     def _make_key(
         self,
@@ -60,6 +63,83 @@ class SearchCache:
         key_str = "|".join(key_parts)
         return hashlib.md5(key_str.encode()).hexdigest()
 
+    def get_adaptive_ttl(
+        self,
+        query_embedding: list[float],
+        type_filter: str | None = None,
+        crate_filter: str | None = None,
+        module_path: str | None = None,
+        has_examples: bool | None = None,
+        min_doc_length: int | None = None,
+        visibility: str | None = None,
+        deprecated: bool | None = None,
+    ) -> int:
+        """
+        Calculate adaptive TTL based on query complexity and popularity.
+
+        Simple queries get longer TTL, complex queries get shorter TTL.
+        Popular queries get extended TTL based on hit rate.
+
+        Returns:
+            TTL in seconds
+        """
+        if not self.adaptive_ttl_enabled:
+            return self.ttl
+
+        # Calculate query complexity
+        complexity = 0
+
+        # Base complexity from embedding (simple heuristic: more non-zero values = more complex)
+        embedding_complexity = sum(1 for v in query_embedding[:50] if abs(v) > 0.1)
+        complexity += embedding_complexity / 10  # Normalize to 0-5 range
+
+        # Add complexity for each filter
+        if type_filter:
+            complexity += 1
+        if crate_filter:
+            complexity += 1
+        if module_path:
+            complexity += 2  # Module path is more specific
+        if has_examples is not None:
+            complexity += 1
+        if min_doc_length:
+            complexity += 1
+        if visibility:
+            complexity += 1
+        if deprecated is not None:
+            complexity += 1
+
+        # Determine base TTL based on complexity
+        if complexity <= 2:
+            base_ttl = 3600  # 1 hour for simple queries
+        elif complexity <= 5:
+            base_ttl = 1800  # 30 minutes for moderate queries
+        else:
+            base_ttl = 900  # 15 minutes for complex queries
+
+        # Check hit count for popularity adjustment
+        key = self._make_key(
+            query_embedding,
+            0,  # k doesn't matter for key
+            type_filter,
+            crate_filter,
+            module_path,
+            has_examples,
+            min_doc_length,
+            visibility,
+            deprecated,
+        )
+
+        hit_count = self._hit_count.get(key, 0)
+
+        # Extend TTL for popular queries (hit more than 3 times)
+        if hit_count > 3:
+            popularity_multiplier = min(2.0, 1.0 + (hit_count * 0.1))
+            base_ttl = int(base_ttl * popularity_multiplier)
+
+        # Cap at maximum of 2 hours
+        return min(7200, base_ttl)
+
     def get(
         self,
         query_embedding: list[float],
@@ -91,20 +171,31 @@ class SearchCache:
         )
 
         if key in self._cache:
-            timestamp, results = self._cache[key]
+            cache_entry = self._cache[key]
+            # Handle both old (timestamp, results) and new (timestamp, results, ttl) formats
+            if len(cache_entry) == 2:
+                timestamp, results = cache_entry
+                ttl = self.ttl  # Use default TTL for old entries
+            else:
+                timestamp, results, ttl = cache_entry
 
             # Check if entry has expired
-            if time.time() - timestamp > self.ttl:
+            if time.time() - timestamp > ttl:
                 # Remove expired entry
                 del self._cache[key]
                 if key in self._access_order:
                     self._access_order.remove(key)
+                if key in self._hit_count:
+                    del self._hit_count[key]
                 return None
 
             # Move to end (most recently used)
             if key in self._access_order:
                 self._access_order.remove(key)
             self._access_order.append(key)
+
+            # Track hit count for popularity-based TTL
+            self._hit_count[key] = self._hit_count.get(key, 0) + 1
 
             return results
 
@@ -155,9 +246,23 @@ class SearchCache:
             if self._access_order:
                 lru_key = self._access_order.pop(0)
                 del self._cache[lru_key]
+                if lru_key in self._hit_count:
+                    del self._hit_count[lru_key]
 
-        # Store with timestamp
-        self._cache[key] = (time.time(), results)
+        # Calculate adaptive TTL for this query
+        ttl = self.get_adaptive_ttl(
+            query_embedding,
+            type_filter,
+            crate_filter,
+            module_path,
+            has_examples,
+            min_doc_length,
+            visibility,
+            deprecated,
+        )
+
+        # Store with timestamp and adaptive TTL
+        self._cache[key] = (time.time(), results, ttl)
 
         # Update access order
         if key in self._access_order:
@@ -168,6 +273,7 @@ class SearchCache:
         """Clear all cached entries."""
         self._cache.clear()
         self._access_order.clear()
+        self._hit_count.clear()
 
     def get_stats(self) -> dict[str, int]:
         """Get cache statistics."""

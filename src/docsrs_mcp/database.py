@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+import numpy as np
 import sqlite_vec
 import structlog
 
@@ -945,6 +946,7 @@ async def get_module_by_path(db_path: Path, module_path: str) -> dict | None:
 
 def _apply_mmr_diversification(
     ranked_results: list[tuple[float, str, str, str, str]],
+    embeddings: list[np.ndarray],
     k: int,
     lambda_param: float,
 ) -> list[tuple[float, str, str, str]]:
@@ -954,8 +956,11 @@ def _apply_mmr_diversification(
     MMR balances relevance and diversity using the formula:
     MMR = λ * relevance + (1-λ) * diversity
 
+    Enhanced with semantic similarity between embeddings for better diversity.
+
     Args:
         ranked_results: List of (score, path, header, content, item_type) tuples
+        embeddings: List of numpy arrays containing embeddings for each result
         k: Number of results to select
         lambda_param: Balance between relevance (1.0) and diversity (0.0)
 
@@ -967,46 +972,82 @@ def _apply_mmr_diversification(
 
     # Start with the highest scoring result
     selected = []
+    selected_indices = []
     candidates = list(ranked_results)
+    candidate_embeddings = list(embeddings)
 
     # Select first item (highest relevance)
     first_item = candidates.pop(0)
+    first_embedding = candidate_embeddings.pop(0)
     selected.append(first_item[:4])  # Exclude item_type from output
+    selected_indices.append(0)
 
-    # Track selected item types for diversity calculation
+    # Track selected item types and embeddings for diversity calculation
     selected_types = [first_item[4]]
     selected_paths = [first_item[1]]
+    selected_embeddings = [first_embedding]
 
     # Iteratively select remaining items
     while len(selected) < k and candidates:
         best_mmr_score = -1
         best_idx = -1
 
-        for idx, candidate in enumerate(candidates):
+        for idx, (candidate, cand_embedding) in enumerate(
+            zip(candidates, candidate_embeddings, strict=False)
+        ):
             score, path, header, content, item_type = candidate
 
             # Calculate relevance (already computed score)
             relevance = score
 
-            # Calculate diversity based on item type and path similarity
+            # Calculate diversity based on semantic similarity, item type, and path
             diversity = 1.0
 
-            # Penalize same item types
-            type_penalty = selected_types.count(item_type) * 0.2
-            diversity -= min(0.6, type_penalty)
+            # Calculate semantic diversity (average dissimilarity to selected items)
+            semantic_similarities = []
+            for sel_embedding in selected_embeddings:
+                # Cosine similarity between embeddings
+                cos_sim = np.dot(cand_embedding, sel_embedding) / (
+                    np.linalg.norm(cand_embedding) * np.linalg.norm(sel_embedding)
+                )
+                semantic_similarities.append(cos_sim)
 
-            # Penalize similar paths (same module)
+            # Average semantic similarity to selected items
+            avg_semantic_sim = np.mean(semantic_similarities)
+            semantic_diversity = 1.0 - avg_semantic_sim
+
+            # Penalize same item types (reduced weight with semantic similarity)
+            type_penalty = selected_types.count(item_type) * 0.1  # Reduced from 0.2
+            type_diversity = max(0.4, 1.0 - min(0.6, type_penalty))
+
+            # Calculate path diversity with weighted depth consideration
+            path_diversity = 1.0
             for sel_path in selected_paths:
                 # Check if paths share the same module prefix
                 sel_parts = sel_path.split("::")
                 cand_parts = path.split("::")
 
-                # Compare module prefixes
+                # Compare module prefixes with depth weighting
                 if len(sel_parts) > 1 and len(cand_parts) > 1:
-                    if sel_parts[:-1] == cand_parts[:-1]:
-                        # Same module, reduce diversity
-                        diversity -= 0.3
-                        break
+                    common_prefix_len = 0
+                    for sp, cp in zip(sel_parts[:-1], cand_parts[:-1], strict=False):
+                        if sp == cp:
+                            common_prefix_len += 1
+                        else:
+                            break
+
+                    # Weight by depth - deeper common paths are less diverse
+                    if common_prefix_len > 0:
+                        depth_penalty = common_prefix_len * 0.15
+                        path_diversity = min(path_diversity, 1.0 - depth_penalty)
+
+            # Combine diversity factors with configurable weights
+            module_weight = getattr(app_config, "MODULE_DIVERSITY_WEIGHT", 0.15)
+            diversity = (
+                0.5 * semantic_diversity  # Semantic similarity weight
+                + 0.35 * type_diversity  # Type diversity weight
+                + module_weight * path_diversity  # Module diversity weight
+            )
 
             # Ensure diversity stays in [0, 1]
             diversity = max(0.0, min(1.0, diversity))
@@ -1020,9 +1061,11 @@ def _apply_mmr_diversification(
 
         if best_idx >= 0:
             selected_item = candidates.pop(best_idx)
+            selected_embedding = candidate_embeddings.pop(best_idx)
             selected.append(selected_item[:4])  # Exclude item_type from output
             selected_types.append(selected_item[4])
             selected_paths.append(selected_item[1])
+            selected_embeddings.append(selected_embedding)
 
     return selected
 
@@ -1248,7 +1291,8 @@ async def search_embeddings(
                 LENGTH(e.content) as doc_length,
                 e.examples,
                 e.visibility,
-                e.deprecated
+                e.deprecated,
+                e.embedding
             FROM vec_embeddings v
             JOIN embeddings e ON v.rowid = e.id
             WHERE v.embedding MATCH ? AND k = ?
@@ -1290,6 +1334,7 @@ async def search_embeddings(
 
         # Apply enhanced ranking algorithm
         ranked_results = []
+        embeddings = []  # Store embeddings for MMR
         for row in results:
             (
                 distance,
@@ -1301,7 +1346,12 @@ async def search_embeddings(
                 examples,
                 visibility,
                 deprecated,
+                embedding_blob,
             ) = row
+
+            # Deserialize embedding for MMR
+            embedding = np.frombuffer(embedding_blob, dtype=np.float32)
+            embeddings.append(embedding)
 
             # Base vector similarity score
             base_score = 1.0 - distance
@@ -1337,13 +1387,20 @@ async def search_embeddings(
 
             ranked_results.append((final_score, item_path, header, content, item_type))
 
-        # Sort by final score
-        ranked_results.sort(key=lambda x: x[0], reverse=True)
+        # Sort by final score and keep embeddings aligned
+        # Create paired list for sorting
+        paired_results = list(zip(ranked_results, embeddings, strict=False))
+        paired_results.sort(key=lambda x: x[0][0], reverse=True)
+
+        # Unpack sorted results
+        ranked_results = [r for r, _ in paired_results]
+        embeddings = [e for _, e in paired_results]
 
         # Apply MMR diversification if we have enough results
         if len(ranked_results) > k and app_config.RANKING_DIVERSITY_WEIGHT > 0:
             top_results = _apply_mmr_diversification(
                 ranked_results,
+                embeddings,
                 k,
                 app_config.RANKING_DIVERSITY_LAMBDA,
             )

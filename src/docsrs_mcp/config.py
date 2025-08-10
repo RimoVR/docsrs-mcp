@@ -36,6 +36,7 @@ RANKING_EXAMPLES_WEIGHT = float(os.getenv("DOCSRS_RANKING_EXAMPLES_WEIGHT", "0.1
 # MMR Diversification configuration
 RANKING_DIVERSITY_LAMBDA = float(os.getenv("DOCSRS_RANKING_DIVERSITY_LAMBDA", "0.6"))
 RANKING_DIVERSITY_WEIGHT = float(os.getenv("DOCSRS_RANKING_DIVERSITY_WEIGHT", "0.1"))
+MODULE_DIVERSITY_WEIGHT = float(os.getenv("DOCSRS_MODULE_DIVERSITY_WEIGHT", "0.15"))
 
 # Validate that ranking weights sum to approximately 1.0
 _weight_sum = (
@@ -74,6 +75,9 @@ FUZZY_WEIGHTS = {
 # Caching configuration
 CACHE_SIZE = int(os.getenv("DOCSRS_CACHE_SIZE", "1000"))
 CACHE_TTL = int(os.getenv("DOCSRS_CACHE_TTL", "900"))  # 15 minutes in seconds
+CACHE_ADAPTIVE_TTL_ENABLED = (
+    os.getenv("DOCSRS_CACHE_ADAPTIVE_TTL_ENABLED", "true").lower() == "true"
+)
 
 # Batch processing
 EMBEDDING_BATCH_SIZE = int(os.getenv("DOCSRS_EMBEDDING_BATCH_SIZE", "32"))
@@ -116,6 +120,30 @@ DOWNLOAD_CHUNK_SIZE = int(os.getenv("DOCSRS_DOWNLOAD_CHUNK_SIZE", "8192"))
 STDLIB_CRATES = {"std", "core", "alloc", "proc_macro", "test"}
 RUST_CHANNEL_BASE = "https://static.rust-lang.org"
 RUST_VERSION_MANIFEST_URL = f"{RUST_CHANNEL_BASE}/version"
+
+# Rust-specific term expansions for query preprocessing
+RUST_TERM_EXPANSIONS = {
+    "async": ["async", "asynchronous"],
+    "impl": ["impl", "implementation"],
+    "fn": ["fn", "function"],
+    "mut": ["mut", "mutable"],
+    "ref": ["ref", "reference"],
+    "deref": ["deref", "dereference"],
+    "struct": ["struct", "structure"],
+    "enum": ["enum", "enumeration"],
+    "trait": ["trait", "interface"],
+    "mod": ["mod", "module"],
+    "pub": ["pub", "public"],
+    "priv": ["priv", "private"],
+    "const": ["const", "constant"],
+    "static": ["static", "global"],
+    "iter": ["iter", "iterator", "iteration"],
+    "vec": ["vec", "vector"],
+    "str": ["str", "string"],
+    "arc": ["arc", "atomic reference counted"],
+    "rc": ["rc", "reference counted"],
+    "box": ["box", "heap allocated"],
+}
 
 # Server configuration
 PORT = int(os.getenv("DOCSRS_PORT", "8000"))

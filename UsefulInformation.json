@@ -1113,6 +1113,51 @@
           "codeExample": "# Wrong:\nresponse = client.post('/api/endpoint', json={'params': {'crate': 'serde'}})\n\n# Correct:\nresponse = client.post('/api/endpoint', json={'crate': 'serde'})"
         },
         {
+          "error": "MMR tests failing due to incorrect embedding dimensions",
+          "rootCause": "Test mock embeddings don't match expected model dimensions, causing shape mismatches in cosine similarity calculations",
+          "solution": "MMR tests need mock embeddings matching expected dimensions (384 for bge-small-en-v1.5). Use numpy arrays with correct shape for test embedding vectors.",
+          "context": "Testing MMR diversification algorithm with semantic similarity",
+          "implementation": [
+            "Mock embeddings must match production model dimensions (384-dimensional vectors)",
+            "Use np.random.rand(384) or predefined test vectors with correct shape",
+            "Ensure embedding alignment is maintained during test result sorting"
+          ],
+          "pattern": "Match test data dimensions to production model requirements",
+          "dateEncountered": "2025-08-10",
+          "relatedFiles": ["tests/test_database.py", "src/docsrs_mcp/database.py"],
+          "codeExample": "# Correct test embedding setup:\nmock_embeddings = [np.random.rand(384) for _ in range(len(results))]\n# NOT: mock_embeddings = [np.array([0.1, 0.2, 0.3])]  # Wrong dimensions"
+        },
+        {
+          "error": "Function signature changes breaking existing test calls",
+          "rootCause": "When adding new parameters to functions (like embeddings to MMR), existing test calls fail with missing argument errors",
+          "solution": "When changing function signatures, systematically update all test calls. Use grep to find all test invocations before making signature changes.",
+          "context": "Adding embeddings parameter to MMR diversification functions",
+          "implementation": [
+            "Search codebase for function calls before signature changes: grep -r 'function_name(' tests/",
+            "Update all test invocations with new required parameters",
+            "Consider backward compatibility with default parameters when possible"
+          ],
+          "pattern": "Comprehensive test update when changing function signatures",
+          "dateEncountered": "2025-08-10",
+          "relatedFiles": ["tests/", "src/docsrs_mcp/database.py"],
+          "codeExample": "# Before signature change, find all calls:\n# grep -r '_apply_mmr_diversification(' tests/\n# Then update each call with new embeddings parameter"
+        },
+        {
+          "error": "Production testing confusion with server ports and API paths",
+          "rootCause": "Production server testing requires understanding correct port and API path structure",
+          "solution": "Production testing with --mode rest flag starts server on port 8000. API endpoints are under /mcp/tools/ path (e.g., /mcp/tools/search_items). Use curl or HTTP clients with correct base URL.",
+          "context": "Testing MMR and other features in production-like environment",
+          "implementation": [
+            "Start server: uv run docsrs-mcp --mode rest (listens on port 8000)",
+            "API endpoints: http://localhost:8000/mcp/tools/{tool_name}",
+            "Example: curl -X POST http://localhost:8000/mcp/tools/search_items -H 'Content-Type: application/json' -d '{...}'"
+          ],
+          "pattern": "Use correct port and path structure for production API testing",
+          "dateEncountered": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "# Correct production test URL:\ncurl -X POST http://localhost:8000/mcp/tools/search_items -H 'Content-Type: application/json' -d '{\"query\": \"test\", \"k\": 5}'"
+        },
+        {
           "error": "Database unique constraint violation - composite key needed for cross-references",
           "rootCause": "Original UNIQUE constraint on (crate_id, alias_path) was insufficient for cross-references where the same alias can point to multiple actual paths with different link types",
           "solution": "Change unique constraint from UNIQUE(crate_id, alias_path) to UNIQUE(crate_id, alias_path, actual_path, link_type) to allow multiple cross-reference entries for the same alias when they have different targets or types.",
@@ -1930,6 +1975,34 @@
           }
         },
         {
+          "insight": "MMR enhancement requires embedding alignment during result sorting",
+          "context": "Implementing semantic similarity in MMR diversification algorithm",
+          "details": "When adding semantic similarity to MMR, embeddings must be passed alongside results and kept aligned during sorting operations. Use zip/unzip pattern to maintain correspondence between results and their embeddings. Cosine similarity calculation: np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))",
+          "impact": "Prevents misaligned embeddings that would corrupt similarity calculations and result ranking",
+          "dateMeasured": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/database.py"],
+          "metrics": {
+            "alignmentPattern": "zip(results, embeddings) → sort → unzip back to separate lists",
+            "similarityFormula": "np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))",
+            "integrityRequirement": "Embeddings must remain 1:1 aligned with search results",
+            "performanceNote": "Alignment operations add minimal overhead to MMR calculations"
+          }
+        },
+        {
+          "insight": "Query preprocessing with term expansion benefits from order-preserving deduplication",
+          "context": "Implementing British-to-American spelling normalization and term expansion",
+          "details": "Term expansion should preserve original terms while adding expansions. Use set for deduplication but maintain original order. Configure expansions in config.py for maintainability rather than hardcoding in preprocessing logic",
+          "impact": "Maintains query intent while expanding coverage, prevents duplicate terms from affecting relevance scoring",
+          "dateMeasured": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/config.py"],
+          "metrics": {
+            "expansionPattern": "Original terms preserved + normalized variants added",
+            "deduplicationMethod": "Set-based with order preservation",
+            "configurationLocation": "config.py for maintainable expansion rules",
+            "queryIntegrityMaintenance": "Original intent preserved while expanding coverage"
+          }
+        },
+        {
           "insight": "Path caching with 5-minute TTL crucial for fuzzy search performance",
           "context": "Caching strategy optimization for repeated fuzzy path lookups",
           "details": "Caching resolved paths with 5-minute TTL provides ~90% cache hit rate for common path lookups, dramatically reducing database queries. Single database query pattern must be maintained to avoid N+1 query problems when building path datasets for fuzzy matching. TTL balances freshness with performance for path resolution scenarios",
@@ -2160,6 +2233,17 @@
             "Can be extended with additional spelling patterns as needed"
           ],
           "dateAdded": "2025-08-10"
+        },
+        {
+          "pattern": "Adaptive TTL caching",
+          "implementation": "Implement complexity-based TTL with popularity tracking",
+          "description": "Cache TTL should adapt to query complexity and usage patterns for optimal performance",
+          "details": {
+            "simpleQueries": "Low complexity queries → longer TTL (1 hour) for better cache utilization",
+            "complexQueries": "High complexity queries with many filters → shorter TTL (15 minutes) to maintain freshness",
+            "popularityTracking": "Track hit counts for popularity-based TTL extension",
+            "storagePattern": "Store TTL with cache entries: (timestamp, results, ttl) for per-entry control"
+          }
         }
       ]
     },
@@ -2186,6 +2270,20 @@
             "keyStrategy": "Per-crate isolation",
             "tradeoff": "Slight staleness acceptable for 90% cache hit rate",
             "fallbackBehavior": "Direct database lookup on cache miss"
+          }
+        },
+        {
+          "issue": "Adaptive TTL caching implementation for query complexity optimization",
+          "solution": "Implement complexity-based TTL calculation with hit count tracking. Simple queries (low filter count) get longer TTL (1 hour), complex queries get shorter TTL (15 minutes). Track popularity for TTL extension opportunities.",
+          "lesson": "Cache TTL should adapt to query complexity - simple queries benefit from longer caching while complex queries need fresher data. Popularity tracking enables intelligent TTL extension for frequently accessed content.",
+          "context": "Search result caching optimization to balance performance with data freshness",
+          "dateEncountered": "2025-08-10",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/app.py"],
+          "performanceImpact": {
+            "simpleQueryTTL": "1 hour for low complexity queries",
+            "complexQueryTTL": "15 minutes for high filter count queries",
+            "popularityBonus": "Hit count tracking enables TTL extension for popular queries",
+            "storageOverhead": "Minimal - store (timestamp, results, ttl) tuple per cache entry"
           }
         }
       ]
@@ -2519,8 +2617,14 @@
       ],
       "ignorableWarnings": [
         "PLR0912 (too-many-branches): Can be ignored for documentation processing tasks",
-        "PLR0915 (too-many-statements): Can be ignored for documentation processing tasks"
+        "PLR0915 (too-many-statements): Can be ignored for documentation processing tasks and complex algorithms like MMR diversification"
       ],
+      "lintingBestPractices": {
+        "formatCommand": "uv run ruff format",
+        "lintCommand": "uv run ruff check --fix",
+        "acceptableWarnings": "PLR0915 (too many statements) may be acceptable in complex algorithms like MMR diversification with multiple calculation steps",
+        "workflow": "Run formatting before linting to avoid style-related lint errors"
+      },
       "performanceNotes": [
         "10-100x faster than traditional Python tools",
         "Processes entire codebase in milliseconds",
