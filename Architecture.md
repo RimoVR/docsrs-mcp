@@ -805,7 +805,7 @@ graph TD
         SEARCH_DOC[search_documentation<br/>Vector similarity search with type filtering<br/>Input: query text, item_type filter<br/>Output: ranked documentation items with see-also suggestions]
         NAV_MOD[navigate_modules<br/>Module hierarchy navigation<br/>Input: crate, path<br/>Output: module tree structure]
         GET_EX[get_examples<br/>Code example retrieval<br/>Input: item_id or query<br/>Output: relevant code examples]
-        SEARCH_EX[search_examples<br/>Semantic code example search<br/>Input: query, language filter<br/>Output: scored code examples with deduplication]
+        SEARCH_EX[search_examples<br/>Semantic code example search<br/>Smart snippet extraction with fallback<br/>Input: query, language filter<br/>Output: scored code examples with deduplication]
         GET_SIG[get_item_signature<br/>Item signature retrieval<br/>Input: item_path<br/>Output: complete signature]
         INGEST_TOOL[ingest_crate<br/>Manual crate ingestion<br/>Input: crate name/version<br/>Output: ingestion status]
         START_PRE_INGEST[start_pre_ingestion<br/>Start pre-ingestion system<br/>Input: force, concurrency, count<br/>Output: status, message, stats, monitoring]
@@ -1749,6 +1749,46 @@ graph TB
     COMBINE --> NORMALIZE
     NORMALIZE --> RANK
 ```
+
+### Smart Snippet Extraction System
+
+The smart snippet extraction system provides intelligently-bounded content snippets for search results, enhancing readability while maintaining consistent length targets across both search_items and search_examples endpoints.
+
+**Architecture**:
+- **Target Range**: 200-400 character snippets optimized for readability
+- **Progressive Fallback Strategy**: Sentence boundaries → word boundaries → character truncation
+- **Boundary Intelligence**: Preserves semantic coherence by respecting natural text boundaries
+- **Integration Points**: Embedded in both search_documentation and search_examples tools
+- **Performance**: Zero database schema changes - operates on existing content fields
+
+**Fallback Strategy**:
+```mermaid
+graph TD
+    subgraph "Smart Snippet Extraction Flow"
+        CONTENT[Raw Content<br/>Full documentation text]
+        TARGET[Target: 200-400 chars<br/>Optimal readability range]
+        
+        SENTENCE_BOUNDARY[Try Sentence Boundary<br/>Find complete sentences within range]
+        WORD_BOUNDARY[Fallback: Word Boundary<br/>Break at word boundaries if sentences too long]
+        CHAR_TRUNCATE[Final: Character Truncation<br/>Hard limit with ellipsis if needed]
+        
+        RESULT[Smart Snippet<br/>Readable, contextual excerpt]
+    end
+    
+    CONTENT --> TARGET
+    TARGET --> SENTENCE_BOUNDARY
+    SENTENCE_BOUNDARY -->|Sentences too long| WORD_BOUNDARY  
+    WORD_BOUNDARY -->|Words too long| CHAR_TRUNCATE
+    SENTENCE_BOUNDARY -->|Success| RESULT
+    WORD_BOUNDARY -->|Success| RESULT
+    CHAR_TRUNCATE --> RESULT
+```
+
+**Implementation Benefits**:
+- **User Experience**: More readable search result previews without truncated sentences
+- **Consistency**: Uniform snippet lengths improve scan-ability of search results
+- **Efficiency**: No preprocessing required - generated on-demand during search
+- **Backward Compatibility**: Transparent enhancement to existing search functionality
 
 ### Query Preprocessing Pipeline
 
@@ -3170,7 +3210,7 @@ sequenceDiagram
 ```mermaid
 graph TD
     subgraph "Enhanced Search Tools"
-        SEARCH_DOC[search_documentation<br/>• Vector similarity search<br/>• Item type filtering (struct, function, trait, etc)<br/>• Module path filtering with SQL LIKE patterns<br/>• Signature matching<br/>• Tag-based filtering<br/>• See-also suggestions (0.7 similarity threshold, max 5 items)]
+        SEARCH_DOC[search_documentation<br/>• Vector similarity search<br/>• Item type filtering (struct, function, trait, etc)<br/>• Module path filtering with SQL LIKE patterns<br/>• Signature matching<br/>• Tag-based filtering<br/>• Smart snippet extraction (200-400 chars)<br/>• Progressive fallback boundary detection<br/>• See-also suggestions (0.7 similarity threshold, max 5 items)]
         
         NAV_TREE[navigate_modules<br/>• Hierarchical module browsing<br/>• Parent-child relationships<br/>• Module content listing<br/>• Path-based navigation]
         

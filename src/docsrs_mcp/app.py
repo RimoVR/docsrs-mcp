@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -425,7 +426,7 @@ async def get_mcp_manifest(request: Request):
             ),
             MCPTool(
                 name="search_items",
-                description="Search for items in a crate's documentation (including stdlib) using vector similarity",
+                description="Search for items in a crate's documentation (including stdlib) using vector similarity with smart snippets (200-400 chars)",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -481,6 +482,7 @@ async def get_mcp_manifest(request: Request):
                 tutorial=(
                     "Performs semantic search across all crate documentation using embeddings.\n"
                     "Results ranked by relevance using BAAI/bge-small-en-v1.5 model.\n"
+                    "Snippets use smart extraction (200-400 chars) with boundary detection.\n"
                     "Warm searches complete in <50ms. Rate limit: 30 req/sec.\n"
                     "Best for finding functionality when you don't know exact item names."
                 ),
@@ -535,7 +537,7 @@ async def get_mcp_manifest(request: Request):
             ),
             MCPTool(
                 name="search_examples",
-                description="Search for code examples in a crate's documentation with language detection",
+                description="Search for code examples in a crate's documentation with language detection and smart context snippets",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -566,7 +568,7 @@ async def get_mcp_manifest(request: Request):
                 tutorial=(
                     "Searches code examples extracted from crate documentation.\n"
                     "Includes language detection and filtering capabilities.\n"
-                    "Returns runnable code snippets with context.\n"
+                    "Returns runnable code snippets with smart context (200-400 chars).\n"
                     "Perfect for learning implementation patterns."
                 ),
                 examples=[
@@ -685,6 +687,105 @@ async def get_mcp_manifest(request: Request):
     )
 
 
+def extract_smart_snippet(
+    content: str,
+    target_length: int = 300,
+    min_length: int = 200,
+    max_length: int = 400,
+) -> str:
+    """
+    Extract intelligent snippet with context preservation.
+
+    Progressive fallback strategy:
+    1. Try sentence boundaries (optimal)
+    2. Fall back to word boundaries
+    3. Fall back to character truncation (last resort)
+    """
+    if not content:
+        return ""
+
+    # If content is already short, return as-is
+    if len(content) <= min_length:
+        return content
+
+    # If content is just slightly over, return with ellipsis
+    if len(content) <= max_length:
+        return content
+
+    try:
+        # Try to find sentence boundaries
+        # Look for sentence endings: period, exclamation, question mark followed by space
+        sentence_pattern = r"[.!?]\s+"
+        sentences = re.split(sentence_pattern, content)
+
+        # Build snippet from complete sentences
+        snippet = ""
+        for i, sentence in enumerate(sentences):
+            # Add sentence with its ending punctuation back
+            if i < len(sentences) - 1:
+                # Not the last sentence, so it had punctuation
+                test_snippet = snippet + sentence + ". "
+            else:
+                # Last sentence fragment
+                test_snippet = snippet + sentence
+
+            # Check if adding this sentence keeps us in range
+            if len(test_snippet) >= min_length and len(test_snippet) <= max_length:
+                return test_snippet.strip()
+            elif len(test_snippet) > max_length:
+                # This sentence makes it too long
+                if snippet and len(snippet) >= min_length:
+                    # We have enough content already
+                    return snippet.strip() + "..."
+                else:
+                    # Need to truncate this sentence
+                    break
+            else:
+                # Keep building
+                snippet = test_snippet
+
+        # If we have a good snippet from sentences, return it
+        if snippet and len(snippet) >= min_length:
+            return snippet.strip() + "..."
+    except Exception:
+        # Sentence detection failed, continue to word boundaries
+        pass
+
+    try:
+        # Fall back to word boundaries
+        words = content.split()
+        snippet = ""
+
+        for word in words:
+            test_snippet = snippet + (" " if snippet else "") + word
+
+            # Check if adding this word would exceed our target
+            if len(test_snippet) >= target_length:
+                # Check if we can include this word without exceeding max_length
+                if len(test_snippet) + 3 <= max_length:  # +3 for "..."
+                    return test_snippet + "..."
+                elif snippet:
+                    # Previous iteration was good, use that
+                    return snippet + "..."
+                else:
+                    # Single word is too long, need character truncation
+                    break
+            snippet = test_snippet
+
+        # If we processed all words but didn't hit target
+        if snippet and len(snippet) >= min_length:
+            return snippet
+    except Exception:
+        # Word boundary detection failed, continue to character truncation
+        pass
+
+    # Last resort: character truncation
+    if len(content) > max_length:
+        return content[:max_length] + "..."
+    else:
+        return content
+
+
 @app.post(
     "/mcp/tools/get_crate_summary",
     response_model=GetCrateSummaryResponse,
@@ -755,7 +856,7 @@ async def get_crate_summary(request: Request, params: GetCrateSummaryRequest):
     "/mcp/tools/search_items",
     response_model=SearchItemsResponse,
     tags=["tools"],
-    summary="Search Documentation",
+    summary="Search Documentation with Smart Snippets",
     response_description="Ranked search results",
     operation_id="searchItems",
 )
@@ -766,7 +867,8 @@ async def search_items(request: Request, params: SearchItemsRequest):
 
     Performs vector similarity search across all documentation in the specified crate.
     Results are ranked by semantic similarity to the query using BAAI/bge-small-en-v1.5
-    embeddings.
+    embeddings. Snippets use smart extraction (200-400 chars) with intelligent boundary
+    detection for improved readability.
 
     **Performance**: Warm searches typically complete in < 50ms.
     **Rate limit**: 30 requests/second per IP address.
@@ -817,7 +919,7 @@ async def search_items(request: Request, params: SearchItemsRequest):
                 score=score,
                 item_path=item_path,
                 header=header,
-                snippet=content[:200] + "..." if len(content) > 200 else content,
+                snippet=extract_smart_snippet(content),
             )
             # Add suggestions only to the first result to avoid redundancy
             if i == 0 and suggestions:
@@ -902,7 +1004,7 @@ async def get_item_doc(request: Request, params: GetItemDocRequest):
     "/mcp/tools/search_examples",
     response_model=SearchExamplesResponse,
     tags=["tools"],
-    summary="Search Code Examples",
+    summary="Search Code Examples with Smart Context",
     response_description="Code examples from documentation",
     operation_id="searchExamples",
 )
@@ -912,12 +1014,14 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
     Search for code examples in a crate's documentation.
 
     Searches through extracted code examples from documentation and returns
-    matching examples with language detection and metadata.
+    matching examples with language detection and metadata. Context snippets
+    use smart extraction (200-400 chars) with intelligent boundary detection.
 
     **Features**:
     - Language detection for code blocks
     - Filtering by programming language
     - Semantic search across example content
+    - Smart context snippets with boundary detection
     """
     try:
         # Ingest crate if not already done
@@ -1090,7 +1194,9 @@ async def search_examples(request: Request, params: SearchExamplesRequest):
                                     language=example.get("language", "rust"),
                                     detected=example.get("detected", False),
                                     item_path=item_path,
-                                    context=content[:200] if content else None,
+                                    context=extract_smart_snippet(content)
+                                    if content
+                                    else None,
                                     score=score,
                                 )
                             )

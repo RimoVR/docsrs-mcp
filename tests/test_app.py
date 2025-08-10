@@ -7,7 +7,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from docsrs_mcp.app import app
+from docsrs_mcp.app import app, extract_smart_snippet
 from docsrs_mcp.models import ErrorResponse, SearchResult
 
 
@@ -601,3 +601,170 @@ async def test_search_result_score_validation():
                 "snippet": "snippet",
             }
         )
+
+
+def test_extract_smart_snippet_short_content():
+    """Test snippet extraction with content shorter than min_length."""
+    # Content shorter than min_length (200) should be returned as-is
+    short_content = "This is a short description."
+    result = extract_smart_snippet(short_content)
+    assert result == short_content
+
+    # Content exactly at min_length
+    content_200 = "x" * 200
+    result = extract_smart_snippet(content_200)
+    assert result == content_200
+
+
+def test_extract_smart_snippet_sentence_boundaries():
+    """Test snippet extraction with sentence boundary detection."""
+    # Content with clear sentence boundaries
+    content = (
+        "This is the first sentence. This is the second sentence. "
+        "This is the third sentence. This is the fourth sentence. "
+        "This is the fifth sentence. This is the sixth sentence. "
+        "This is the seventh sentence. This is the eighth sentence. "
+        "This is the ninth sentence. This is the tenth sentence."
+    )
+
+    result = extract_smart_snippet(content)
+    # Should extract complete sentences
+    assert result.endswith(".") or result.endswith("...")
+    assert 200 <= len(result) <= 400
+    # Should not cut in the middle of a sentence
+    assert "This is the" in result  # Complete sentence start
+
+    # Test with exclamation and question marks
+    content_mixed = (
+        "What is Rust? Rust is a systems programming language! "
+        "It focuses on safety. How does it achieve this? "
+        "Through its ownership system! The borrow checker ensures memory safety. "
+        "Is it fast? Yes, it's as fast as C++! "
+        "Why use Rust? For safe systems programming."
+    )
+
+    result = extract_smart_snippet(content_mixed)
+    assert 200 <= len(result) <= 400
+    # Should preserve punctuation
+    assert any(char in result for char in ["?", "!", "."])
+
+
+def test_extract_smart_snippet_word_boundaries():
+    """Test snippet extraction falling back to word boundaries."""
+    # Content without clear sentence boundaries (long sentence) - make it longer to force truncation
+    content = (
+        "This is a very long sentence that continues for a while without any "
+        "punctuation marks and keeps going with more words and more content "
+        "that should be truncated at word boundaries when sentence detection "
+        "fails and we need to fall back to word-level truncation to ensure "
+        "that we don't cut words in the middle and maintain readability even "
+        "when dealing with unusual content that lacks proper punctuation and "
+        "continues even further with additional words to ensure we exceed the "
+        "maximum length limit and trigger the truncation logic properly"
+    )
+
+    result = extract_smart_snippet(content)
+    assert 200 <= len(result) <= 403  # +3 for ellipsis
+    # Check if it was truncated (content is > 400 chars)
+    if len(content) > 400:
+        assert result.endswith("...")
+    # The snippet should preserve complete words
+    # Verify that we haven't cut a word in the middle by checking
+    # that the text before ellipsis forms complete words
+    if result.endswith("..."):
+        text_part = result[:-3]
+        # Split into words and verify the last word is complete
+        # by checking it exists in the original content as a complete word
+        words = text_part.split()
+        if words:
+            last_word = words[-1]
+            # Check that this word appears in the original content
+            assert last_word in content.split()
+
+
+def test_extract_smart_snippet_character_truncation():
+    """Test snippet extraction falling back to character truncation."""
+    # Content with a single very long word
+    content = "supercalifragilisticexpialidocious" * 20
+
+    result = extract_smart_snippet(content)
+    assert len(result) <= 400 + 3  # +3 for ellipsis
+    assert result.endswith("...")
+
+
+def test_extract_smart_snippet_empty_content():
+    """Test snippet extraction with empty or None content."""
+    # Empty string
+    result = extract_smart_snippet("")
+    assert result == ""
+
+    # None should be handled gracefully if the function is updated to accept it
+    # For now, test with empty string as the function expects str
+
+
+def test_extract_smart_snippet_unicode_content():
+    """Test snippet extraction with Unicode content."""
+    # Content with Unicode characters
+    content = (
+        "Rust supports Unicode natively. You can use emojis 🦀 in your code. "
+        "International characters like café, naïve, and 中文 are supported. "
+        "This makes Rust great for internationalization. "
+        "The string type in Rust is UTF-8 encoded by default. "
+        "You can work with any language: العربية, ελληνικά, русский, 日本語. "
+        "This is a powerful feature for global applications."
+    )
+
+    result = extract_smart_snippet(content)
+    assert 200 <= len(result) <= 400
+    # Should preserve Unicode characters
+    if "🦀" in result[:400]:
+        assert "🦀" in result
+    if "café" in result[:400]:
+        assert "café" in result
+
+
+def test_extract_smart_snippet_edge_cases():
+    """Test snippet extraction with edge cases."""
+    # Content exactly at max_length
+    content_400 = "x" * 400
+    result = extract_smart_snippet(content_400)
+    assert result == content_400
+
+    # Content just over max_length
+    content_401 = "x" * 401
+    result = extract_smart_snippet(content_401)
+    assert result == "x" * 400 + "..."
+
+    # Content with only whitespace
+    whitespace_content = "   \n\t   "
+    result = extract_smart_snippet(whitespace_content)
+    assert result == whitespace_content
+
+    # Content with repeated periods
+    dots_content = "..." * 100
+    result = extract_smart_snippet(dots_content)
+    assert len(result) <= 400
+
+
+def test_extract_smart_snippet_preserves_context():
+    """Test that snippet extraction preserves meaningful context."""
+    # Technical documentation example
+    content = (
+        "The `tokio::spawn` function is used to spawn asynchronous tasks. "
+        "It takes a future and runs it on the Tokio runtime. "
+        "The spawned task runs concurrently with other tasks. "
+        "You must ensure the future is `Send + 'static`. "
+        "The function returns a `JoinHandle` that can be awaited. "
+        "Error handling is important when working with spawned tasks. "
+        "Tasks can be cancelled by dropping the JoinHandle."
+    )
+
+    result = extract_smart_snippet(content)
+    assert 200 <= len(result) <= 400
+    # Should include complete technical terms
+    assert "`tokio::spawn`" in result or "JoinHandle" in result
+    # Should maintain technical accuracy (not cut in middle of code blocks)
+    if "`" in result:
+        # Count backticks - should be even (paired)
+        backtick_count = result.count("`")
+        assert backtick_count % 2 == 0
