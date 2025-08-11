@@ -53,6 +53,7 @@ def get_adaptive_batch_size(
     base_batch_size: int | None = None,
     min_size: int | None = None,
     max_size: int | None = None,
+    operation_type: str | None = None,
 ) -> int:
     """Calculate adaptive batch size based on available memory.
 
@@ -60,9 +61,10 @@ def get_adaptive_batch_size(
         base_batch_size: Base batch size to adapt from (default: EMBEDDING_BATCH_SIZE)
         min_size: Minimum batch size (default: MIN_BATCH_SIZE)
         max_size: Maximum batch size (default: MAX_BATCH_SIZE)
+        operation_type: Type of operation ("embedding", "database", "validation", etc.)
 
     Returns:
-        Adapted batch size based on memory pressure.
+        Adapted batch size based on memory pressure and operation type.
     """
     if base_batch_size is None:
         base_batch_size = EMBEDDING_BATCH_SIZE
@@ -105,7 +107,22 @@ def get_adaptive_batch_size(
         return batch_size
     else:
         # Normal range - use base batch size
-        return base_batch_size
+        batch_size = base_batch_size
+
+    # Apply operation-specific limits
+    if operation_type:
+        if operation_type == "embedding":
+            # Memory-intensive embeddings, cap at 32
+            batch_size = min(batch_size, 32)
+        elif operation_type == "database":
+            # SQLite parameter limit
+            batch_size = min(batch_size, 999)
+        elif operation_type == "validation":
+            # Validation is lightweight, can use full size
+            pass
+        # Add more operation types as needed
+
+    return batch_size
 
 
 def trigger_gc_if_needed(force: bool = False) -> bool:
@@ -144,6 +161,10 @@ def log_memory_status(context: str = "") -> None:
 
 class MemoryMonitor:
     """Context manager for monitoring memory usage during operations."""
+
+    # Class-level memory history for trend analysis
+    _memory_history: list[float] = []
+    _history_window_size: int = 10
 
     def __init__(self, operation_name: str, log_level: int = logging.DEBUG):
         """Initialize memory monitor.
@@ -187,6 +208,44 @@ class MemoryMonitor:
             f"Process RSS delta: {process_delta:+.1f}MB",
         )
 
+        # Update memory history for trend analysis
+        current_memory_percent = psutil.virtual_memory().percent
+        self._memory_history.append(current_memory_percent)
+        if len(self._memory_history) > self._history_window_size:
+            self._memory_history.pop(0)
+
+        # Calculate memory trend
+        trend = self._calculate_memory_trend()
+        if trend > 5:
+            logger.warning(
+                f"Memory usage trending up rapidly (trend: {trend:.1f}%/operation)"
+            )
+
         # Trigger GC if significant memory was used
         if process_delta > 100:  # More than 100MB increase
             trigger_gc_if_needed(force=True)
+
+    @classmethod
+    def _calculate_memory_trend(cls) -> float:
+        """Calculate memory usage trend.
+
+        Returns:
+            Average memory change per operation (positive = increasing).
+        """
+        if len(cls._memory_history) < 2:
+            return 0.0
+
+        changes = []
+        for i in range(1, len(cls._memory_history)):
+            changes.append(cls._memory_history[i] - cls._memory_history[i - 1])
+
+        return sum(changes) / len(changes) if changes else 0.0
+
+    @classmethod
+    def get_memory_trend(cls) -> float:
+        """Get current memory trend for external use.
+
+        Returns:
+            Current memory trend value.
+        """
+        return cls._calculate_memory_trend()

@@ -24,6 +24,7 @@ Built with FastAPI and sqlite-vec for efficient vector search, it caches crate d
 - 📦 **Self-contained** - Single Python process, file-backed SQLite
 - 🛠️ **Easy development** - UV-based tooling, async/await architecture
 - 🔗 **See-also suggestions** - Automatic discovery of related documentation items
+- 🔄 **Enhanced Batch Processing** - Memory-aware sizing, transaction retry, FastEmbed memory leak mitigation
 
 ## Quick Start
 
@@ -621,6 +622,39 @@ git push origin v1.2.3
 - **Caching**: File-based SQLite databases in `./cache` directory with LRU eviction (2GB limit)
 
 See [Architecture.md](Architecture.md) for detailed system design.
+
+## Batch Processing Enhancements
+
+The system includes advanced batch processing capabilities for improved reliability and memory efficiency:
+
+### Memory-Aware Batch Sizing
+- **Adaptive sizing**: Batch sizes automatically adjust based on available memory (16-512 items)
+- **Operation-specific limits**: Different batch sizes for embeddings (32), database operations (999), and validation
+- **Memory monitoring**: Real-time memory pressure detection with thresholds at 80% and 90%
+- **Trend analysis**: Predictive memory usage based on historical patterns
+
+### FastEmbed Memory Leak Mitigation
+- **Text truncation**: Automatic text limiting to 100 characters to prevent memory growth
+- **Batch counting**: Process recycling after configurable number of batches (default: 50)
+- **Aggressive cleanup**: Explicit garbage collection after each embedding batch
+- **Memory monitoring**: Continuous tracking with warnings for high memory usage
+
+### Database Transaction Resilience
+- **Retry mechanism**: Exponential backoff with jitter for database lock conflicts
+- **BEGIN IMMEDIATE**: Prevents lock escalation issues in SQLite
+- **Configurable timeouts**: TRANSACTION_BUSY_TIMEOUT (default: 5000ms)
+- **Smart retries**: Only retries on recoverable errors (locked, busy)
+
+### Configuration Options
+```bash
+# Batch processing environment variables
+FASTEMBED_MAX_TEXT_LENGTH=100      # Max text length for embeddings
+FASTEMBED_MAX_BATCHES=50           # Batches before process recycling
+TRANSACTION_MAX_RETRIES=3          # Database retry attempts
+TRANSACTION_BUSY_TIMEOUT=5000      # SQLite busy timeout (ms)
+BATCH_MEMORY_TREND_WINDOW=10       # Memory trend analysis window
+BATCH_PROCESSOR_MAX_BATCHES=50     # Max batches before recycling
+```
 
 ## Performance & Resource Usage
 

@@ -3,6 +3,8 @@
 import asyncio
 import functools
 import logging
+import os
+import random
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -87,6 +89,138 @@ def performance_timer(operation_name: str):
             return sync_wrapper
 
     return decorator
+
+
+class RetryableTransaction:
+    """Decorator for retryable database transactions with exponential backoff and jitter.
+
+    Implements exponential backoff with full jitter to prevent thundering herd problem
+    when multiple processes encounter database locks simultaneously.
+    """
+
+    def __init__(
+        self,
+        max_retries: int = 3,
+        base_delay: float = 0.1,
+        max_delay: float = 5.0,
+        jitter: bool = True,
+    ):
+        """Initialize retry configuration.
+
+        Args:
+            max_retries: Maximum number of retry attempts
+            base_delay: Base delay in seconds for exponential backoff
+            max_delay: Maximum delay in seconds (cap for exponential growth)
+            jitter: Whether to add random jitter to delays
+        """
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.jitter = jitter
+
+    def __call__(self, func: Callable) -> Callable:
+        """Make the class callable as a decorator."""
+
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+
+            for attempt in range(self.max_retries + 1):
+                try:
+                    return await func(*args, **kwargs)
+                except (aiosqlite.OperationalError, aiosqlite.DatabaseError) as e:
+                    last_exception = e
+                    error_msg = str(e).lower()
+
+                    # Check if error is retryable
+                    if any(
+                        msg in error_msg
+                        for msg in ["locked", "busy", "database is locked"]
+                    ):
+                        if attempt < self.max_retries:
+                            # Calculate delay with exponential backoff
+                            delay = min(self.base_delay * (2**attempt), self.max_delay)
+
+                            # Add jitter to prevent thundering herd
+                            if self.jitter:
+                                delay = random.uniform(0, delay)
+
+                            logger.warning(
+                                f"Database locked on attempt {attempt + 1}/{self.max_retries + 1}, "
+                                f"retrying in {delay:.3f}s: {e}"
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+
+                    # Non-retryable error, raise immediately
+                    logger.error(f"Non-retryable database error: {e}")
+                    raise
+                except Exception as e:
+                    # Non-database error, don't retry
+                    logger.error(f"Unexpected error in transaction: {e}")
+                    raise
+
+            # All retries exhausted
+            logger.error(
+                f"Transaction failed after {self.max_retries + 1} attempts: {last_exception}"
+            )
+            raise last_exception
+
+        return wrapper
+
+
+async def execute_with_retry(
+    conn: aiosqlite.Connection,
+    query: str,
+    params: tuple | None = None,
+    use_immediate: bool = True,
+) -> aiosqlite.Cursor:
+    """Execute a query with retry logic and BEGIN IMMEDIATE for write operations.
+
+    Args:
+        conn: Database connection
+        query: SQL query to execute
+        params: Query parameters
+        use_immediate: Whether to use BEGIN IMMEDIATE for write operations
+
+    Returns:
+        Query cursor
+    """
+    # Get configured values from environment
+    max_retries = int(os.environ.get("TRANSACTION_MAX_RETRIES", "3"))
+    busy_timeout = int(os.environ.get("TRANSACTION_BUSY_TIMEOUT", "5000"))
+
+    # Set busy timeout on connection
+    await conn.execute(f"PRAGMA busy_timeout = {busy_timeout}")
+
+    # Determine if this is a write operation
+    is_write = any(
+        query.strip().upper().startswith(cmd)
+        for cmd in ["INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER"]
+    )
+
+    @RetryableTransaction(max_retries=max_retries)
+    async def _execute():
+        if is_write and use_immediate:
+            # Use BEGIN IMMEDIATE to avoid lock upgrades
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                if params:
+                    cursor = await conn.execute(query, params)
+                else:
+                    cursor = await conn.execute(query)
+                await conn.commit()
+                return cursor
+            except Exception:
+                await conn.rollback()
+                raise
+        # Read operation or explicit transaction management
+        elif params:
+            return await conn.execute(query, params)
+        else:
+            return await conn.execute(query)
+
+    return await _execute()
 
 
 async def get_db_path(crate_name: str, version: str) -> Path:
@@ -1644,39 +1778,47 @@ async def search_example_embeddings(
 # Version Diff Database Functions
 # ============================================================
 
+
 async def get_all_items_for_version(
     db_path: Path,
     include_content: bool = False,
     include_examples: bool = False,
 ) -> dict[str, dict]:
     """Get all items from a specific version's database for comparison.
-    
+
     Args:
         db_path: Path to the version's database
         include_content: Whether to include full documentation content
         include_examples: Whether to include code examples
-        
+
     Returns:
         Dictionary mapping item_path to item data
     """
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
-    
+
     items = {}
-    
+
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         # Build query based on what to include
-        columns = ["item_path", "header", "item_type", "signature", "visibility", "deprecated"]
+        columns = [
+            "item_path",
+            "header",
+            "item_type",
+            "signature",
+            "visibility",
+            "deprecated",
+        ]
         if include_content:
             columns.append("content")
         if include_examples:
             columns.append("examples")
-        
+
         # Add generic parameters and trait bounds for better comparison
         columns.extend(["generic_params", "trait_bounds"])
-        
+
         query = f"SELECT {', '.join(columns)} FROM embeddings"
-        
+
         cursor = await db.execute(query)
         async for row in cursor:
             # Build item dict from row
@@ -1688,9 +1830,9 @@ async def get_all_items_for_version(
                 "visibility": row[4],
                 "deprecated": bool(row[5]),
                 "generic_params": row[-2],  # second to last
-                "trait_bounds": row[-1],     # last
+                "trait_bounds": row[-1],  # last
             }
-            
+
             # Add optional fields
             idx = 6
             if include_content:
@@ -1698,9 +1840,9 @@ async def get_all_items_for_version(
                 idx += 1
             if include_examples:
                 item_data["examples"] = row[idx]
-                
+
             items[row[0]] = item_data  # Use item_path as key
-            
+
     return items
 
 
@@ -1709,22 +1851,22 @@ async def get_item_signatures_batch(
     item_paths: list[str],
 ) -> dict[str, dict]:
     """Get signatures for a batch of items efficiently.
-    
+
     Args:
         db_path: Path to the database
         item_paths: List of item paths to retrieve
-        
+
     Returns:
         Dictionary mapping item_path to signature data
     """
     if not db_path.exists():
         return {}
-        
+
     if not item_paths:
         return {}
-    
+
     signatures = {}
-    
+
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         # Use parameterized query with IN clause
         placeholders = ",".join(["?"] * len(item_paths))
@@ -1740,7 +1882,7 @@ async def get_item_signatures_batch(
             FROM embeddings 
             WHERE item_path IN ({placeholders})
         """
-        
+
         cursor = await db.execute(query, item_paths)
         async for row in cursor:
             signatures[row[0]] = {
@@ -1751,7 +1893,7 @@ async def get_item_signatures_batch(
                 "generic_params": row[5],
                 "trait_bounds": row[6],
             }
-            
+
     return signatures
 
 
@@ -1760,19 +1902,19 @@ async def get_module_items(
     module_path: str,
 ) -> list[dict]:
     """Get all items within a specific module.
-    
+
     Args:
         db_path: Path to the database
         module_path: Module path to query (e.g., 'tokio::sync')
-        
+
     Returns:
         List of items in the module with their metadata
     """
     if not db_path.exists():
         return []
-    
+
     items = []
-    
+
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         # Match items that start with the module path
         query = """
@@ -1786,27 +1928,29 @@ async def get_module_items(
             WHERE item_path LIKE ? || '::%'
             ORDER BY item_path
         """
-        
+
         cursor = await db.execute(query, (module_path,))
         async for row in cursor:
-            items.append({
-                "item_path": row[0],
-                "item_type": row[1],
-                "signature": row[2],
-                "visibility": row[3],
-                "deprecated": bool(row[4]),
-            })
-            
+            items.append(
+                {
+                    "item_path": row[0],
+                    "item_type": row[1],
+                    "signature": row[2],
+                    "visibility": row[3],
+                    "deprecated": bool(row[4]),
+                }
+            )
+
     return items
 
 
 async def compute_item_hash(item_data: dict) -> str:
     """Compute a hash for an item to detect changes.
-    
+
     Uses signature, visibility, deprecated status, and generics for comparison.
     """
     import hashlib
-    
+
     # Create a stable string representation for hashing
     hash_parts = [
         str(item_data.get("signature", "")),
@@ -1815,7 +1959,7 @@ async def compute_item_hash(item_data: dict) -> str:
         str(item_data.get("generic_params", "")),
         str(item_data.get("trait_bounds", "")),
     ]
-    
+
     hash_string = "|".join(hash_parts)
     return hashlib.sha256(hash_string.encode()).hexdigest()[:16]
 

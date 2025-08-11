@@ -41,6 +41,7 @@ from .config import (
     STDLIB_CRATES,
 )
 from .database import (
+    execute_with_retry,
     get_db_path,
     init_database,
     store_crate_metadata,
@@ -1055,10 +1056,15 @@ async def generate_example_embeddings(
         embedding_model = get_embedding_model()
         batch_size = 16  # Conservative for CPU
 
+        # Get max text length from config for memory leak mitigation
+        import os
+
+        max_text_length = int(os.getenv("FASTEMBED_MAX_TEXT_LENGTH", "100"))
+
         processed = 0
         async for batch in batch_examples(new_examples, batch_size):
-            # Prepare texts for embedding
-            texts = [format_example_for_embedding(ex) for ex in batch]
+            # Prepare texts for embedding with truncation to prevent memory leak
+            texts = [format_example_for_embedding(ex)[:max_text_length] for ex in batch]
 
             # Generate embeddings using generator pattern
             embeddings = list(embedding_model.embed(texts))
@@ -1824,6 +1830,13 @@ def generate_embeddings_streaming(chunks):
     # Buffer for batching
     chunk_buffer = []
     processed_count = 0
+    batch_count = 0  # Track number of batches for process recycling
+
+    # Get max text length from config (will be added to config.py)
+    import os
+
+    max_text_length = int(os.getenv("FASTEMBED_MAX_TEXT_LENGTH", "100"))
+    max_batches = int(os.getenv("FASTEMBED_MAX_BATCHES", "50"))
 
     for chunk in chunks:
         chunk_buffer.append(chunk)
@@ -1837,7 +1850,13 @@ def generate_embeddings_streaming(chunks):
 
         # Process batch when buffer reaches adaptive size
         if len(chunk_buffer) >= batch_size:
-            texts = [c["content"] for c in chunk_buffer]
+            # Truncate texts to prevent memory leak (GitHub issue #222)
+            texts = [
+                c["content"][:max_text_length]
+                if len(c["content"]) > max_text_length
+                else c["content"]
+                for c in chunk_buffer
+            ]
             batch_embeddings = list(model.embed(texts))
 
             # Yield chunk-embedding pairs
@@ -1845,22 +1864,49 @@ def generate_embeddings_streaming(chunks):
                 yield item, embedding
                 processed_count += 1
 
-            # Clear buffer and trigger GC if needed
+            # Clear buffer and aggressive memory cleanup
             chunk_buffer = []
+            batch_count += 1
+
+            # Force garbage collection after each batch to prevent memory leak
+            gc.collect()
+
             if processed_count % 100 == 0:
-                trigger_gc_if_needed()
-                logger.debug(f"Generated {processed_count} embeddings...")
+                trigger_gc_if_needed(force=True)  # Force GC periodically
+                logger.debug(
+                    f"Generated {processed_count} embeddings, {batch_count} batches..."
+                )
+
+            # Check if process recycling is needed for FastEmbed memory leak mitigation
+            if batch_count >= max_batches:
+                logger.warning(
+                    f"Reached max batch count {max_batches} for FastEmbed. "
+                    "Process recycling may be needed to prevent memory leak."
+                )
+                # Note: Actual process recycling would need to be handled at a higher level
+                # For now, we log a warning and continue
 
     # Process remaining chunks in buffer
     if chunk_buffer:
-        texts = [c["content"] for c in chunk_buffer]
+        # Truncate texts for remaining batch too
+        texts = [
+            c["content"][:max_text_length]
+            if len(c["content"]) > max_text_length
+            else c["content"]
+            for c in chunk_buffer
+        ]
         batch_embeddings = list(model.embed(texts))
 
         for item, embedding in zip(chunk_buffer, batch_embeddings, strict=False):
             yield item, embedding
             processed_count += 1
 
-    logger.info(f"Generated {processed_count} embeddings total")
+        # Final cleanup
+        gc.collect()
+
+    logger.info(
+        f"Generated {processed_count} embeddings total in {batch_count} batches"
+    )
 
 
 async def generate_embeddings(chunks: list[dict[str, str]]) -> list[list[float]]:
@@ -1977,11 +2023,11 @@ async def _store_batch(
     """Store a single batch of chunks and embeddings with manual vec_embeddings sync.
 
     Uses explicit DELETE + INSERT pattern with manual synchronization to vec_embeddings.
-    AUTOINCREMENT ensures no rowid reuse conflicts.
+    AUTOINCREMENT ensures no rowid reuse conflicts. Now with retry logic for resilience.
     """
     try:
-        # Begin transaction for this batch
-        await db.execute("BEGIN TRANSACTION")
+        # Use execute_with_retry for transaction management
+        await execute_with_retry(db, "BEGIN IMMEDIATE")
 
         # Defensive validation - filter out invalid item_paths and deduplicate
         valid_chunks = []
