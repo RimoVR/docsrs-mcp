@@ -10,7 +10,14 @@ import unicodedata
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from . import config as app_config
 from .validation import validate_crate_name, validate_rust_path, validate_version_string
@@ -56,10 +63,52 @@ class MCPTool(BaseModel):
     use_cases: list[str] | None = Field(
         None,
         description="Common use cases for this tool",
-        json_schema_extra={"maxItems": 3},
+        json_schema_extra={"maxItems": 5},  # Increased to match actual usage
     )
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("use_cases", "examples", mode="before")
+    @classmethod
+    def validate_string_arrays(
+        cls, v: Any, info: ValidationInfo
+    ) -> list[str] | None:
+        """Validate string arrays with length constraints."""
+        if v is None:
+            return None
+
+        # Handle string input (split by newlines or commas)
+        if isinstance(v, str):
+            v = [
+                item.strip() for item in v.replace("\n", ",").split(",") if item.strip()
+            ]
+
+        # Ensure list type
+        if not isinstance(v, list):
+            v = [v]
+
+        # Validate constraints
+        field_name = info.field_name
+        max_items = 5 if field_name == "use_cases" else 3
+        max_length = 200  # Reasonable limit for individual strings
+
+        if len(v) > max_items:
+            raise ValueError(
+                f"{field_name} cannot exceed {max_items} items (got {len(v)})"
+            )
+
+        # Validate and truncate individual strings
+        validated = []
+        for i, item in enumerate(v):
+            item_str = str(item).strip()
+            if len(item_str) > max_length:
+                # Truncate at word boundary with ellipsis
+                truncated = item_str[: max_length - 3].rsplit(" ", 1)[0] + "..."
+                validated.append(truncated)
+            else:
+                validated.append(item_str)
+
+        return validated if validated else None
 
 
 class MCPResource(BaseModel):

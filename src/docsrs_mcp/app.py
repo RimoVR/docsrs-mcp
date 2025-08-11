@@ -652,8 +652,7 @@ async def get_mcp_manifest(request: Request):
                 ),
                 examples=[
                     "start_pre_ingestion()",
-                    "start_pre_ingestion(force=true)",
-                    "start_pre_ingestion(concurrency=5)",
+                    "start_pre_ingestion(force=true, concurrency=5)",
                     "start_pre_ingestion(count=200, concurrency=5)",
                 ],
                 use_cases=[
