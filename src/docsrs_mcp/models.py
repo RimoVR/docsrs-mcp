@@ -70,9 +70,7 @@ class MCPTool(BaseModel):
 
     @field_validator("use_cases", "examples", mode="before")
     @classmethod
-    def validate_string_arrays(
-        cls, v: Any, info: ValidationInfo
-    ) -> list[str] | None:
+    def validate_string_arrays(cls, v: Any, info: ValidationInfo) -> list[str] | None:
         """Validate string arrays with length constraints."""
         if v is None:
             return None
@@ -1255,6 +1253,101 @@ class StartPreIngestionResponse(BaseModel):
             "detailed_status": "/health/pre-ingestion",
         },
         description="Endpoints for monitoring pre-ingestion progress",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# ============================================================
+# Cargo File Ingestion Models
+# ============================================================
+
+
+class IngestCargoFileRequest(BaseModel):
+    """Request model for ingesting crates from Cargo files."""
+
+    file_path: str = Field(..., description="Path to Cargo.toml or Cargo.lock file")
+    concurrency: int | None = Field(
+        default=3, ge=1, le=10, description="Number of parallel download workers (1-10)"
+    )
+    skip_existing: bool = Field(
+        default=True, description="Skip already ingested crates"
+    )
+
+    @field_validator("file_path")
+    @classmethod
+    def validate_file_path(cls, v: str) -> str:
+        """Validate and normalize file path."""
+        from pathlib import Path
+
+        path = Path(v).resolve()
+        if not path.exists():
+            raise ValueError(f"File not found: {v}")
+        if path.name not in ["Cargo.toml", "Cargo.lock"]:
+            raise ValueError(f"Must be Cargo.toml or Cargo.lock, got: {path.name}")
+        return str(path)
+
+    @field_validator("concurrency", mode="before")
+    @classmethod
+    def coerce_concurrency(cls, v):
+        """Coerce concurrency to int."""
+        if v is None:
+            return 3
+        from docsrs_mcp.validation import coerce_to_int_with_bounds
+
+        return coerce_to_int_with_bounds(
+            v, "concurrency", min_val=1, max_val=10, examples=[3, 5, 10]
+        )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IngestCargoFileResponse(BaseModel):
+    """Response model for Cargo file ingestion."""
+
+    status: Literal["started", "completed", "failed"] = Field(
+        ..., description="Status of the ingestion operation"
+    )
+    message: str = Field(..., description="Detailed message about the operation")
+    crates_found: int = Field(..., description="Total number of crates found in file")
+    crates_queued: int = Field(..., description="Number of crates queued for ingestion")
+    crates_skipped: int = Field(
+        ..., description="Number of crates skipped (already exist)"
+    )
+    estimated_time_seconds: float | None = Field(
+        default=None, description="Estimated time to complete ingestion"
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# ============================================================
+# Pre-Ingestion Control Models
+# ============================================================
+
+
+class PreIngestionControlRequest(BaseModel):
+    """Request model for pre-ingestion control operations."""
+
+    action: Literal["pause", "resume", "stop"] = Field(
+        ..., description="Control action to perform on the pre-ingestion worker"
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PreIngestionControlResponse(BaseModel):
+    """Response model for pre-ingestion control."""
+
+    status: Literal["success", "failed", "no_change"] = Field(
+        ..., description="Result of the control operation"
+    )
+    message: str = Field(..., description="Detailed message about the operation")
+    worker_state: str | None = Field(
+        default=None, description="Current state of the pre-ingestion worker"
+    )
+    current_stats: dict[str, Any] | None = Field(
+        default=None, description="Current ingestion statistics if available"
     )
 
     model_config = ConfigDict(extra="forbid")

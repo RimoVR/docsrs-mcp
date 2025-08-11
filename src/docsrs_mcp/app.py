@@ -37,10 +37,14 @@ from .models import (
     GetCrateSummaryResponse,
     GetItemDocRequest,
     GetModuleTreeRequest,
+    IngestCargoFileRequest,
+    IngestCargoFileResponse,
     MCPManifest,
     MCPResource,
     MCPTool,
     ModuleTreeNode,
+    PreIngestionControlRequest,
+    PreIngestionControlResponse,
     SearchExamplesRequest,
     SearchExamplesResponse,
     SearchItemsRequest,
@@ -661,6 +665,104 @@ async def get_mcp_manifest(request: Request):
                     "**After Cache Clear**: Rebuild cache after maintenance or cleanup",
                     "**Performance Optimization**: Ensure sub-100ms responses for common queries",
                     "**AI Agent Workflows**: Eliminate wait times for frequently accessed documentation",
+                ],
+            ),
+            MCPTool(
+                name="ingest_cargo_file",
+                description="Ingest Rust crates from a Cargo.toml or Cargo.lock file",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to Cargo.toml or Cargo.lock file",
+                        },
+                        "concurrency": {
+                            "anyOf": [{"type": "integer"}, {"type": "null"}],
+                            "minimum": 1,
+                            "maximum": 10,
+                            "default": 3,
+                            "description": "Number of parallel download workers (1-10)",
+                        },
+                        "skip_existing": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Skip already ingested crates",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+                tutorial=(
+                    "Parse a project's Cargo.toml or Cargo.lock file to automatically ingest all dependencies.\n\n"
+                    "**Cargo.toml**: Ingests dependency specifications with flexible version requirements\n"
+                    "**Cargo.lock**: Ingests exact resolved versions for reproducible builds\n\n"
+                    "**Process:** Parse file → Check cache → Queue new crates → Parallel download\n\n"
+                    "**Performance:** Skips already cached crates, supports concurrent downloads"
+                ),
+                examples=[
+                    {
+                        "description": "Ingest from Cargo.toml",
+                        "code": 'ingest_cargo_file(file_path="/path/to/project/Cargo.toml")',
+                    },
+                    {
+                        "description": "Ingest from Cargo.lock with higher concurrency",
+                        "code": 'ingest_cargo_file(file_path="/path/to/Cargo.lock", concurrency=5)',
+                    },
+                    {
+                        "description": "Force re-ingest all dependencies",
+                        "code": 'ingest_cargo_file(file_path="/path/to/Cargo.toml", skip_existing=false)',
+                    },
+                ],
+                use_cases=[
+                    "**Project Setup**: Quickly cache all dependencies for a Rust project",
+                    "**Workspace Development**: Pre-load documentation for all workspace crates",
+                    "**CI/CD Pipeline**: Ensure dependencies are cached before running analysis",
+                    "**Reproducible Builds**: Use Cargo.lock for exact version matching",
+                    "**Offline Development**: Pre-cache dependencies for offline documentation access",
+                ],
+            ),
+            MCPTool(
+                name="control_pre_ingestion",
+                description="Control the pre-ingestion worker (pause/resume/stop)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["pause", "resume", "stop"],
+                            "description": "Control action to perform",
+                        }
+                    },
+                    "required": ["action"],
+                },
+                tutorial=(
+                    "Control the background pre-ingestion worker without server restart.\n\n"
+                    "**Actions:**\n"
+                    "- `pause`: Temporarily suspend ingestion (preserves queue)\n"
+                    "- `resume`: Continue paused ingestion from where it left off\n"
+                    "- `stop`: Gracefully terminate ingestion (clears queue)\n\n"
+                    "**Use Cases:** Resource management, maintenance windows, priority shifts"
+                ),
+                examples=[
+                    {
+                        "description": "Pause pre-ingestion during high load",
+                        "code": 'control_pre_ingestion(action="pause")',
+                    },
+                    {
+                        "description": "Resume after load decreases",
+                        "code": 'control_pre_ingestion(action="resume")',
+                    },
+                    {
+                        "description": "Stop pre-ingestion completely",
+                        "code": 'control_pre_ingestion(action="stop")',
+                    },
+                ],
+                use_cases=[
+                    "**Resource Management**: Pause during high server load or memory pressure",
+                    "**Maintenance Windows**: Temporarily suspend during backup or updates",
+                    "**Priority Changes**: Stop background work for urgent foreground tasks",
+                    "**Debugging**: Pause to investigate issues without losing progress",
+                    "**Scheduled Operations**: Pause during business hours, resume off-peak",
                 ],
             ),
             MCPTool(
@@ -1443,6 +1545,137 @@ async def start_pre_ingestion_tool(
         raise HTTPException(
             status_code=500, detail=f"Failed to start pre-ingestion: {str(e)}"
         ) from e
+
+
+@app.post(
+    "/mcp/tools/ingest_cargo_file",
+    response_model=IngestCargoFileResponse,
+    tags=["tools"],
+    summary="Ingest crates from Cargo.toml or Cargo.lock file",
+    response_description="Status of the cargo file ingestion",
+    operation_id="ingestCargoFile",
+)
+@limiter.limit("30/second")
+async def mcp_tool_ingest_cargo_file(
+    request: Request, params: IngestCargoFileRequest
+) -> IngestCargoFileResponse:
+    """Ingest crates from a Cargo.toml or Cargo.lock file.
+
+    Parses the specified Cargo file and queues all dependencies for ingestion.
+    Skips crates that are already cached to avoid redundant downloads.
+    """
+    from pathlib import Path
+
+    from .cargo import extract_crates_from_cargo
+    from .popular_crates import check_crate_exists, queue_for_ingestion
+
+    try:
+        # Parse the Cargo file
+        file_path = Path(params.file_path)
+        crates = extract_crates_from_cargo(file_path)
+
+        if not crates:
+            return IngestCargoFileResponse(
+                status="completed",
+                message=f"No dependencies found in {file_path.name}",
+                crates_found=0,
+                crates_queued=0,
+                crates_skipped=0,
+            )
+
+        # Check which crates already exist
+        crates_to_ingest = []
+        crates_skipped = 0
+
+        if params.skip_existing:
+            for crate_spec in crates:
+                if not await check_crate_exists(crate_spec):
+                    crates_to_ingest.append(crate_spec)
+                else:
+                    crates_skipped += 1
+        else:
+            crates_to_ingest = crates
+
+        # Queue for ingestion
+        if crates_to_ingest:
+            await queue_for_ingestion(
+                crates_to_ingest, concurrency=params.concurrency or 3
+            )
+            estimated_time = (
+                len(crates_to_ingest) * 2.0 / (params.concurrency or 3)
+            )  # Rough estimate
+        else:
+            estimated_time = 0
+
+        return IngestCargoFileResponse(
+            status="started" if crates_to_ingest else "completed",
+            message=f"Queued {len(crates_to_ingest)} crates from {file_path.name}",
+            crates_found=len(crates),
+            crates_queued=len(crates_to_ingest),
+            crates_skipped=crates_skipped,
+            estimated_time_seconds=estimated_time,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to ingest Cargo file: {e}")
+        return IngestCargoFileResponse(
+            status="failed",
+            message=str(e),
+            crates_found=0,
+            crates_queued=0,
+            crates_skipped=0,
+        )
+
+
+@app.post(
+    "/mcp/tools/control_pre_ingestion",
+    response_model=PreIngestionControlResponse,
+    tags=["tools"],
+    summary="Control pre-ingestion worker",
+    response_description="Result of the control operation",
+    operation_id="controlPreIngestion",
+)
+@limiter.limit("30/second")
+async def mcp_tool_control_pre_ingestion(
+    request: Request, params: PreIngestionControlRequest
+) -> PreIngestionControlResponse:
+    """Control the pre-ingestion worker (pause/resume/stop).
+
+    Allows runtime control of the background pre-ingestion process without
+    requiring server restart.
+    """
+    from .popular_crates import _ingestion_scheduler, _pre_ingestion_worker
+
+    if not _pre_ingestion_worker:
+        return PreIngestionControlResponse(
+            status="failed",
+            message="Pre-ingestion worker not initialized. Start pre-ingestion first.",
+            worker_state=None,
+        )
+
+    success = False
+    if params.action == "pause":
+        success = await _pre_ingestion_worker.pause()
+    elif params.action == "resume":
+        success = await _pre_ingestion_worker.resume()
+    elif params.action == "stop":
+        success = await _pre_ingestion_worker.stop()
+
+    # Get current stats
+    current_stats = None
+    if _ingestion_scheduler:
+        current_stats = await _ingestion_scheduler.get_ingestion_stats()
+    elif _pre_ingestion_worker:
+        current_stats = _pre_ingestion_worker.get_ingestion_stats()
+
+    return PreIngestionControlResponse(
+        status="success" if success else "no_change",
+        message=f"Worker {params.action} {'successful' if success else 'had no effect'}",
+        worker_state=str(_pre_ingestion_worker._state.value)
+        if _pre_ingestion_worker
+        else None,
+        current_stats=current_stats,
+    )
 
 
 @app.post(

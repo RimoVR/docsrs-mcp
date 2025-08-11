@@ -11,6 +11,7 @@ import tempfile
 import time
 from collections import deque
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,16 @@ from .ingest import ingest_crate
 from .models import PopularCrate
 
 logger = logging.getLogger(__name__)
+
+
+class WorkerState(Enum):
+    """Worker state enumeration for pre-ingestion control."""
+
+    IDLE = "idle"
+    RUNNING = "running"
+    PAUSED = "paused"
+    STOPPING = "stopping"
+    ERROR = "error"
 
 
 async def fetch_current_stable_version(crate_name: str) -> str | None:
@@ -488,6 +499,14 @@ class PreIngestionWorker:
         )  # Rolling window of completed crates
         self.current_crate = None  # Currently processing crate name
 
+        # State management for runtime control
+        self._state = WorkerState.IDLE
+        self._pause_event = asyncio.Event()
+        self._pause_event.set()  # Not paused by default
+        self._task_refs = (
+            set()
+        )  # Strong references to prevent GC  # Currently processing crate name
+
     async def start(self):
         """Start pre-ingestion in background (non-blocking)."""
         logger.info("Starting background pre-ingestion of popular crates")
@@ -496,9 +515,49 @@ class PreIngestionWorker:
         # Create background task for the main runner
         asyncio.create_task(self._run())
 
+    async def pause(self) -> bool:
+        """Pause the worker."""
+        if self._state == WorkerState.RUNNING:
+            self._state = WorkerState.PAUSED
+            self._pause_event.clear()
+            logger.info("Pre-ingestion worker paused")
+            return True
+        return False
+
+    async def resume(self) -> bool:
+        """Resume the worker."""
+        if self._state == WorkerState.PAUSED:
+            self._state = WorkerState.RUNNING
+            self._pause_event.set()
+            logger.info("Pre-ingestion worker resumed")
+            return True
+        return False
+
+    async def stop(self) -> bool:
+        """Stop the worker gracefully."""
+        if self._state in [WorkerState.RUNNING, WorkerState.PAUSED]:
+            self._state = WorkerState.STOPPING
+            self._pause_event.set()  # Unpause if paused
+
+            # Cancel all worker tasks
+            for task in self._workers:
+                task.cancel()
+
+            # Wait for cancellation with timeout
+            if self._workers:
+                await asyncio.gather(*self._workers, return_exceptions=True)
+
+            self._state = WorkerState.IDLE
+            logger.info("Pre-ingestion worker stopped")
+            return True
+        return False
+
     async def _run(self):
         """Main runner that coordinates pre-ingestion with priority processing."""
         try:
+            # Set state to running
+            self._state = WorkerState.RUNNING
+
             # Get list of popular crates with metadata for priority processing
             crates_with_metadata = await self.manager.get_popular_crates_with_metadata()
             self.stats["total"] = len(crates_with_metadata)
@@ -523,12 +582,19 @@ class PreIngestionWorker:
             for i in range(self._adaptive_concurrency):
                 worker = asyncio.create_task(self._ingest_worker(i))
                 self._workers.append(worker)
+                # Store strong reference to prevent GC
+                self._task_refs.add(worker)
+                worker.add_done_callback(self._task_refs.discard)
 
             # Start progress monitor
             self._monitor_task = asyncio.create_task(self._monitor_progress())
+            self._task_refs.add(self._monitor_task)
+            self._monitor_task.add_done_callback(self._task_refs.discard)
 
             # Start memory monitor
             self._memory_monitor_task = asyncio.create_task(self._monitor_memory())
+            self._task_refs.add(self._memory_monitor_task)
+            self._memory_monitor_task.add_done_callback(self._task_refs.discard)
 
             # Wait for all crates to be processed
             await self.queue.join()
@@ -544,9 +610,12 @@ class PreIngestionWorker:
 
         except Exception as e:
             logger.error(f"Error in pre-ingestion runner: {e}")
+            self._state = WorkerState.ERROR
         finally:
             # Cleanup
             await self.manager.close()
+            if self._state != WorkerState.ERROR:
+                self._state = WorkerState.IDLE
 
     async def _ingest_worker(self, worker_id: int):
         """Worker that processes crates from priority queue."""
@@ -554,6 +623,13 @@ class PreIngestionWorker:
 
         while True:
             try:
+                # Wait if paused
+                await self._pause_event.wait()
+
+                # Check if stopping
+                if self._state == WorkerState.STOPPING:
+                    break
+
                 # Get next crate from priority queue (with timeout for graceful shutdown)
                 try:
                     priority, crate_name = await asyncio.wait_for(
@@ -1077,6 +1153,74 @@ _pre_ingestion_worker: PreIngestionWorker | None = None
 _ingestion_scheduler: IngestionScheduler | None = None
 
 
+def parse_crate_spec(crate_spec: str) -> tuple[str, str]:
+    """Parse a crate@version spec into name and version.
+
+    Args:
+        crate_spec: String in format "crate@version" or just "crate"
+
+    Returns:
+        Tuple of (crate_name, version) where version is "latest" if not specified
+    """
+    parts = crate_spec.split("@", 1)
+    crate_name = parts[0]
+    version = parts[1] if len(parts) > 1 else "latest"
+    return crate_name, version
+
+
+async def check_crate_exists(crate_spec: str) -> bool:
+    """Check if a crate@version is already ingested.
+
+    Args:
+        crate_spec: String in format "crate@version"
+
+    Returns:
+        True if the crate is already cached, False otherwise
+    """
+    from .config import CACHE_DIR
+    import re
+
+    try:
+        name, version = parse_crate_spec(crate_spec)
+        # Sanitize crate name for filesystem
+        safe_crate = re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+        cache_path = CACHE_DIR / safe_crate / f"{version}.db"
+        return cache_path.exists()
+    except Exception as e:
+        logger.debug(f"Error checking crate existence: {e}")
+        return False
+
+
+async def queue_for_ingestion(crate_specs: list[str], concurrency: int = 3):
+    """Queue crates for ingestion with specified concurrency.
+
+    Args:
+        crate_specs: List of crate@version strings
+        concurrency: Number of parallel workers
+    """
+    global _pre_ingestion_worker, _popular_crates_manager, _ingestion_scheduler
+
+    # Initialize if needed
+    if not _popular_crates_manager:
+        _popular_crates_manager = PopularCratesManager()
+
+    # We don't need the scheduler for manual ingestion
+    # Just ensure we have a worker to process the queue
+
+    if not _pre_ingestion_worker:
+        _pre_ingestion_worker = PreIngestionWorker(manager=_popular_crates_manager)
+        # Start worker with strong reference to prevent GC
+        task = asyncio.create_task(_pre_ingestion_worker.start())
+        _pre_ingestion_worker._task_refs.add(task)
+        task.add_done_callback(_pre_ingestion_worker._task_refs.discard)
+
+    # Queue the crates
+    for crate_spec in crate_specs:
+        # Extract priority (use 0 for manual ingestion)
+        priority = 0
+        await _pre_ingestion_worker.queue.put((priority, crate_spec))
+
+
 async def start_pre_ingestion() -> tuple[
     PopularCratesManager | None, PreIngestionWorker | None
 ]:
@@ -1088,25 +1232,42 @@ async def start_pre_ingestion() -> tuple[
         return None, None
 
     try:
-        _popular_crates_manager = PopularCratesManager()
-        _pre_ingestion_worker = PreIngestionWorker(_popular_crates_manager)
+        # Check if worker already exists and is running
+        if (
+            _pre_ingestion_worker
+            and _pre_ingestion_worker._state == WorkerState.RUNNING
+        ):
+            logger.info(
+                "Pre-ingestion worker already running, returning existing instances"
+            )
+            return _popular_crates_manager, _pre_ingestion_worker
+
+        # Create new instances if needed
+        if not _popular_crates_manager:
+            _popular_crates_manager = PopularCratesManager()
+
+        if not _pre_ingestion_worker:
+            _pre_ingestion_worker = PreIngestionWorker(_popular_crates_manager)
 
         # Start the worker
         await _pre_ingestion_worker.start()
 
         # Create and start the scheduler if enabled
         if config.SCHEDULER_ENABLED:
-            _ingestion_scheduler = IngestionScheduler(
-                _popular_crates_manager, _pre_ingestion_worker
-            )
-            await _ingestion_scheduler.start()
+            if not _ingestion_scheduler:
+                _ingestion_scheduler = IngestionScheduler(
+                    _popular_crates_manager, _pre_ingestion_worker
+                )
+                await _ingestion_scheduler.start()
 
-            # Also start the monitor task
-            monitor_task = asyncio.create_task(_ingestion_scheduler._monitor_schedule())
-            _ingestion_scheduler.background_tasks.add(monitor_task)
-            monitor_task.add_done_callback(
-                _ingestion_scheduler.background_tasks.discard
-            )
+                # Also start the monitor task
+                monitor_task = asyncio.create_task(
+                    _ingestion_scheduler._monitor_schedule()
+                )
+                _ingestion_scheduler.background_tasks.add(monitor_task)
+                monitor_task.add_done_callback(
+                    _ingestion_scheduler.background_tasks.discard
+                )
 
         return _popular_crates_manager, _pre_ingestion_worker
     except Exception as e:
