@@ -2204,6 +2204,7 @@ async def create_stdlib_fallback_documentation(
     # Define common stdlib items for each crate
     stdlib_items = {
         "std": [
+            # Core collection types
             ("std::vec::Vec", "Vec<T> - A contiguous growable array type", "struct"),
             (
                 "std::collections::HashMap",
@@ -2215,6 +2216,32 @@ async def create_stdlib_fallback_documentation(
                 "BTreeMap<K, V> - An ordered map based on a B-Tree",
                 "struct",
             ),
+            (
+                "std::collections::HashSet",
+                "HashSet<T> - A hash set implementation",
+                "struct",
+            ),
+            (
+                "std::collections::BTreeSet",
+                "BTreeSet<T> - An ordered set based on a B-Tree",
+                "struct",
+            ),
+            (
+                "std::collections::VecDeque",
+                "VecDeque<T> - A double-ended queue",
+                "struct",
+            ),
+            (
+                "std::collections::LinkedList",
+                "LinkedList<T> - A doubly-linked list",
+                "struct",
+            ),
+            (
+                "std::collections::BinaryHeap",
+                "BinaryHeap<T> - A priority queue",
+                "struct",
+            ),
+            # Core types
             ("std::option::Option", "Option<T> - Type for optional values", "enum"),
             ("std::result::Result", "Result<T, E> - Type for error handling", "enum"),
             (
@@ -2222,6 +2249,76 @@ async def create_stdlib_fallback_documentation(
                 "String - A growable UTF-8 encoded string",
                 "struct",
             ),
+            (
+                "std::boxed::Box",
+                "Box<T> - A pointer type for heap allocation",
+                "struct",
+            ),
+            # Synchronization primitives
+            (
+                "std::sync::Arc",
+                "Arc<T> - Atomically reference-counted pointer",
+                "struct",
+            ),
+            ("std::sync::Mutex", "Mutex<T> - Mutual exclusion primitive", "struct"),
+            ("std::sync::RwLock", "RwLock<T> - Reader-writer lock", "struct"),
+            ("std::sync::Condvar", "Condvar - Condition variable", "struct"),
+            (
+                "std::sync::Barrier",
+                "Barrier - Thread synchronization barrier",
+                "struct",
+            ),
+            ("std::sync::Once", "Once - One-time initialization", "struct"),
+            (
+                "std::sync::mpsc",
+                "mpsc - Multi-producer, single-consumer channels",
+                "module",
+            ),
+            ("std::sync::atomic", "atomic - Atomic types", "module"),
+            # I/O types
+            ("std::io::Read", "Read - The Read trait for reading bytes", "trait"),
+            ("std::io::Write", "Write - The Write trait for writing bytes", "trait"),
+            ("std::io::BufRead", "BufRead - Buffered reading trait", "trait"),
+            ("std::io::BufReader", "BufReader<R> - Buffered reader", "struct"),
+            ("std::io::BufWriter", "BufWriter<W> - Buffered writer", "struct"),
+            ("std::io::Error", "Error - I/O error type", "struct"),
+            ("std::io::ErrorKind", "ErrorKind - I/O error kinds", "enum"),
+            ("std::io::Stdin", "Stdin - Handle to standard input", "struct"),
+            ("std::io::Stdout", "Stdout - Handle to standard output", "struct"),
+            ("std::io::Stderr", "Stderr - Handle to standard error", "struct"),
+            # File system
+            ("std::fs::File", "File - File handle", "struct"),
+            (
+                "std::fs::OpenOptions",
+                "OpenOptions - Options for opening files",
+                "struct",
+            ),
+            ("std::fs::Metadata", "Metadata - File metadata", "struct"),
+            ("std::fs::DirEntry", "DirEntry - Directory entry", "struct"),
+            ("std::fs::DirBuilder", "DirBuilder - Directory builder", "struct"),
+            # Path types
+            ("std::path::Path", "Path - A slice of a path", "struct"),
+            ("std::path::PathBuf", "PathBuf - An owned, mutable path", "struct"),
+            # Process management
+            ("std::process::Command", "Command - Process builder", "struct"),
+            ("std::process::Child", "Child - Handle to a child process", "struct"),
+            ("std::process::Output", "Output - Process output", "struct"),
+            ("std::process::Stdio", "Stdio - Process I/O configuration", "struct"),
+            # Threading
+            ("std::thread::JoinHandle", "JoinHandle<T> - Thread join handle", "struct"),
+            ("std::thread::ThreadId", "ThreadId - Thread identifier", "struct"),
+            ("std::thread::Builder", "Builder - Thread builder", "struct"),
+            # Error handling
+            ("std::error::Error", "Error - Error trait", "trait"),
+            ("std::panic", "panic - Panic support", "module"),
+            # Common traits
+            (
+                "std::fmt::Display",
+                "Display - Format trait for user-facing output",
+                "trait",
+            ),
+            ("std::fmt::Debug", "Debug - Format trait for debugging", "trait"),
+            # Modules
             ("std::vec", "vec - Vector module", "module"),
             ("std::collections", "collections - Collection types", "module"),
             ("std::io", "io - I/O traits, helpers, and type definitions", "module"),
@@ -2232,16 +2329,58 @@ async def create_stdlib_fallback_documentation(
             ("std::env", "env - Environment inspection and manipulation", "module"),
             ("std::path", "path - Cross-platform path manipulation", "module"),
             ("std::net", "net - Networking primitives", "module"),
+            ("std::time", "time - Time-related functionality", "module"),
+            ("std::fmt", "fmt - Formatting and printing", "module"),
         ],
         "core": [
+            # Core types
             ("core::option::Option", "Option<T> - Type for optional values", "enum"),
             ("core::result::Result", "Result<T, E> - Type for error handling", "enum"),
+            ("core::option::Option::Some", "Some(T) - Contains a value", "variant"),
+            ("core::option::Option::None", "None - No value", "variant"),
+            ("core::result::Result::Ok", "Ok(T) - Success value", "variant"),
+            ("core::result::Result::Err", "Err(E) - Error value", "variant"),
+            # Iterator traits
             (
                 "core::iter::Iterator",
                 "Iterator - Interface for iterating over collections",
                 "trait",
             ),
+            (
+                "core::iter::IntoIterator",
+                "IntoIterator - Conversion into an Iterator",
+                "trait",
+            ),
+            (
+                "core::iter::FromIterator",
+                "FromIterator - Build from an iterator",
+                "trait",
+            ),
+            (
+                "core::iter::DoubleEndedIterator",
+                "DoubleEndedIterator - Iterator with known end",
+                "trait",
+            ),
+            (
+                "core::iter::ExactSizeIterator",
+                "ExactSizeIterator - Iterator with exact length",
+                "trait",
+            ),
+            # Core traits
             ("core::clone::Clone", "Clone - Trait for duplicating values", "trait"),
+            (
+                "core::cmp::PartialEq",
+                "PartialEq - Partial equality comparison",
+                "trait",
+            ),
+            ("core::cmp::Eq", "Eq - Equality comparison", "trait"),
+            ("core::cmp::PartialOrd", "PartialOrd - Partial ordering", "trait"),
+            ("core::cmp::Ord", "Ord - Total ordering", "trait"),
+            ("core::cmp::Ordering", "Ordering - Result of comparison", "enum"),
+            ("core::default::Default", "Default - Default values", "trait"),
+            ("core::hash::Hash", "Hash - Hashable types", "trait"),
+            ("core::hash::Hasher", "Hasher - Hash state", "trait"),
+            # Marker traits
             (
                 "core::marker::Copy",
                 "Copy - Types whose values can be duplicated by copying bits",
@@ -2257,14 +2396,93 @@ async def create_stdlib_fallback_documentation(
                 "Sync - Types for which references can be shared between threads",
                 "trait",
             ),
+            (
+                "core::marker::Sized",
+                "Sized - Types with known size at compile time",
+                "trait",
+            ),
+            (
+                "core::marker::Unpin",
+                "Unpin - Types that can be moved after pinning",
+                "trait",
+            ),
+            (
+                "core::marker::PhantomData",
+                "PhantomData<T> - Zero-sized type marker",
+                "struct",
+            ),
+            # Conversion traits
+            ("core::convert::From", "From - Simple value conversion", "trait"),
+            ("core::convert::Into", "Into - Value conversion", "trait"),
+            ("core::convert::TryFrom", "TryFrom - Fallible conversion", "trait"),
+            ("core::convert::TryInto", "TryInto - Fallible conversion", "trait"),
+            ("core::convert::AsRef", "AsRef - Cheap reference conversion", "trait"),
+            (
+                "core::convert::AsMut",
+                "AsMut - Cheap mutable reference conversion",
+                "trait",
+            ),
+            # Ops traits
+            ("core::ops::Deref", "Deref - Dereference operator", "trait"),
+            ("core::ops::DerefMut", "DerefMut - Mutable dereference", "trait"),
+            ("core::ops::Drop", "Drop - Destructor", "trait"),
+            ("core::ops::Fn", "Fn - Function trait", "trait"),
+            ("core::ops::FnMut", "FnMut - Mutable function trait", "trait"),
+            ("core::ops::FnOnce", "FnOnce - One-time function trait", "trait"),
+            ("core::ops::Range", "Range<T> - Half-open range", "struct"),
+            (
+                "core::ops::RangeInclusive",
+                "RangeInclusive<T> - Inclusive range",
+                "struct",
+            ),
+            # Memory and pointer types
+            (
+                "core::mem::MaybeUninit",
+                "MaybeUninit<T> - Uninitialized memory",
+                "struct",
+            ),
+            (
+                "core::mem::ManuallyDrop",
+                "ManuallyDrop<T> - Wrapper to inhibit drop",
+                "struct",
+            ),
+            ("core::ptr::NonNull", "NonNull<T> - Non-null raw pointer", "struct"),
+            # Cell types
+            ("core::cell::Cell", "Cell<T> - Mutable memory location", "struct"),
+            (
+                "core::cell::RefCell",
+                "RefCell<T> - Mutable memory with dynamic borrowing",
+                "struct",
+            ),
+            (
+                "core::cell::UnsafeCell",
+                "UnsafeCell<T> - Core primitive for interior mutability",
+                "struct",
+            ),
+            # Format traits
+            ("core::fmt::Display", "Display - Format for user-facing output", "trait"),
+            ("core::fmt::Debug", "Debug - Format for debugging", "trait"),
+            ("core::fmt::Binary", "Binary - Binary formatting", "trait"),
+            ("core::fmt::Octal", "Octal - Octal formatting", "trait"),
+            ("core::fmt::LowerHex", "LowerHex - Lowercase hex formatting", "trait"),
+            ("core::fmt::UpperHex", "UpperHex - Uppercase hex formatting", "trait"),
+            # Modules
             ("core::mem", "mem - Memory manipulation", "module"),
             ("core::ptr", "ptr - Raw pointer manipulation", "module"),
             ("core::slice", "slice - Slice primitive", "module"),
             ("core::str", "str - String slice primitive", "module"),
             ("core::option", "option - Optional values", "module"),
             ("core::result", "result - Error handling with Result", "module"),
+            ("core::iter", "iter - Iteration traits", "module"),
+            ("core::ops", "ops - Operator traits", "module"),
+            ("core::cmp", "cmp - Comparison traits", "module"),
+            ("core::convert", "convert - Conversion traits", "module"),
+            ("core::marker", "marker - Marker traits", "module"),
+            ("core::cell", "cell - Shareable mutable containers", "module"),
+            ("core::fmt", "fmt - Formatting traits", "module"),
         ],
         "alloc": [
+            # Core collection types
             ("alloc::vec::Vec", "Vec<T> - A contiguous growable array type", "struct"),
             (
                 "alloc::string::String",
@@ -2282,6 +2500,22 @@ async def create_stdlib_fallback_documentation(
                 "struct",
             ),
             (
+                "alloc::collections::BinaryHeap",
+                "BinaryHeap<T> - A priority queue implemented with a binary heap",
+                "struct",
+            ),
+            (
+                "alloc::collections::LinkedList",
+                "LinkedList<T> - A doubly-linked list",
+                "struct",
+            ),
+            (
+                "alloc::collections::VecDeque",
+                "VecDeque<T> - A double-ended queue",
+                "struct",
+            ),
+            # Smart pointers
+            (
                 "alloc::boxed::Box",
                 "Box<T> - A pointer type for heap allocation",
                 "struct",
@@ -2291,14 +2525,81 @@ async def create_stdlib_fallback_documentation(
                 "Rc<T> - A single-threaded reference-counting pointer",
                 "struct",
             ),
+            ("alloc::rc::Weak", "Weak<T> - A weak reference to an Rc", "struct"),
             (
                 "alloc::sync::Arc",
                 "Arc<T> - Atomically reference-counted pointer",
                 "struct",
             ),
+            ("alloc::sync::Weak", "Weak<T> - A weak reference to an Arc", "struct"),
+            # String types
+            ("alloc::str::FromStr", "FromStr - Parse from string slices", "trait"),
+            ("alloc::string::ToString", "ToString - Convert to String", "trait"),
+            (
+                "alloc::string::FromUtf8Error",
+                "FromUtf8Error - Error for invalid UTF-8",
+                "struct",
+            ),
+            (
+                "alloc::string::FromUtf16Error",
+                "FromUtf16Error - Error for invalid UTF-16",
+                "struct",
+            ),
+            # Allocation traits
+            (
+                "alloc::alloc::GlobalAlloc",
+                "GlobalAlloc - Memory allocator trait",
+                "trait",
+            ),
+            ("alloc::alloc::Layout", "Layout - Memory layout", "struct"),
+            (
+                "alloc::alloc::LayoutError",
+                "LayoutError - Layout computation error",
+                "struct",
+            ),
+            ("alloc::alloc::AllocError", "AllocError - Allocation failure", "struct"),
+            # Format types
+            ("alloc::fmt::format", "format - Format macro internals", "function"),
+            ("alloc::format", "format! - String formatting macro", "macro"),
+            # Vec-specific types
+            ("alloc::vec::Drain", "Drain - Draining iterator for Vec", "struct"),
+            ("alloc::vec::IntoIter", "IntoIter - Consuming iterator for Vec", "struct"),
+            # Slice types
+            (
+                "alloc::slice::from_raw_parts",
+                "from_raw_parts - Create slice from raw parts",
+                "function",
+            ),
+            (
+                "alloc::slice::from_raw_parts_mut",
+                "from_raw_parts_mut - Create mutable slice from raw parts",
+                "function",
+            ),
+            # Cow (Clone on Write)
+            ("alloc::borrow::Cow", "Cow - Clone-on-write smart pointer", "enum"),
+            (
+                "alloc::borrow::ToOwned",
+                "ToOwned - Create owned data from borrowed",
+                "trait",
+            ),
+            # Collection traits
+            (
+                "alloc::collections::TryReserveError",
+                "TryReserveError - Error for failed reserve",
+                "struct",
+            ),
+            # Modules
             ("alloc::vec", "vec - Vector module", "module"),
             ("alloc::collections", "collections - Collection types", "module"),
             ("alloc::boxed", "boxed - Box pointer type", "module"),
+            ("alloc::rc", "rc - Single-threaded reference counting", "module"),
+            ("alloc::sync", "sync - Thread-safe reference counting", "module"),
+            ("alloc::string", "string - UTF-8 string types", "module"),
+            ("alloc::borrow", "borrow - Borrowed and owned values", "module"),
+            ("alloc::fmt", "fmt - Formatting machinery", "module"),
+            ("alloc::slice", "slice - Slice utilities", "module"),
+            ("alloc::str", "str - String utilities", "module"),
+            ("alloc::alloc", "alloc - Memory allocation APIs", "module"),
         ],
         "proc_macro": [
             (
@@ -2639,11 +2940,53 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
             except Exception as e:
                 if is_stdlib_crate(crate_name):
-                    logger.warning(
-                        f"Failed to download {crate_name} rustdoc JSON: {e}\n"
-                        f"Standard library documentation is not available on docs.rs.\n"
-                        f"Falling back to basic stdlib documentation."
-                    )
+                    # Count items for accurate reporting
+                    stdlib_counts = {
+                        "std": 62,  # Updated count after expansion
+                        "core": 68,  # Updated count after expansion
+                        "alloc": 43,  # Updated count after expansion
+                        "proc_macro": 6,
+                        "test": 3,
+                    }
+
+                    tutorial_message = f"""
+================================================================================
+STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
+================================================================================
+
+📚 Status: Using minimal fallback for {crate_name} crate
+   - Currently providing {stdlib_counts.get(crate_name, 1)} common items
+   - Full documentation requires local rust-docs-json component
+
+🚀 Quick Setup for Full Documentation:
+   1. Install nightly toolchain (required):
+      rustup toolchain install nightly
+
+   2. Add rust-docs-json component:
+      rustup component add --toolchain nightly rust-docs-json
+
+   3. Verify installation:
+      ls ~/.rustup/toolchains/nightly-*/lib/rustlib/*/json/
+      (Should show std.json, core.json, alloc.json)
+
+📖 Alternative: Use online documentation
+   - Visit https://doc.rust-lang.org/{crate_name}/ for complete stdlib docs
+   - Note: JSON ingestion from local files not yet supported
+
+⚠️ Limitations:
+   - JSON format is unstable (changes ~2x/month)
+   - Requires nightly toolchain
+   - Local ingestion planned for future release
+
+💡 Tip: The fallback includes common types like Vec, HashMap, Result, Option,
+   Iterator, Arc, Mutex, File, Path, and more. For other items, please refer
+   to online documentation.
+
+🔍 Original error: {e}
+================================================================================
+"""
+                    logger.warning(tutorial_message)
+
                     # Create comprehensive stdlib fallback documentation
                     await create_stdlib_fallback_documentation(
                         db_path, crate_id, crate_name, version, description

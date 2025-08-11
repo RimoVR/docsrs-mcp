@@ -281,6 +281,41 @@
           "affectedLines": ["version_diff.py:416"],
           "codeExample": "# Before (causes AttributeError):\ndef _map_item_type(self, item_type):\n    return ITEM_KIND_MAP.get(item_type, ItemKind.FUNCTION).lower()  # Fails if item_type is None\n\n# After (handles None values correctly):\ndef _map_item_type(self, item_type):\n    if item_type is None:\n        return ItemKind.FUNCTION\n    return ITEM_KIND_MAP.get(item_type, ItemKind.FUNCTION)",
           "pattern": "Defensive None validation before method calls on potentially None values"
+        },
+        {
+          "error": "Stdlib documentation limited to 15-16 items fallback",
+          "rootCause": "Rustdoc JSON not available on docs.rs for stdlib crates (by design). System architecture assumes docs.rs availability for all crates. Fallback mechanism was emergency measure, not designed solution",
+          "context": "Users query stdlib items (std::vec::Vec, core::option::Option, etc.) and only get minimal fallback documentation instead of full docs",
+          "symptoms": [
+            "Queries for stdlib items return minimal documentation",
+            "Only 15-16 predefined items available per stdlib crate",
+            "No guidance provided on how to get complete stdlib documentation"
+          ],
+          "solution": "Expanded fallback to 62 items (std), 68 items (core), 43 items (alloc). Added comprehensive tutorial message with rust-docs-json setup instructions",
+          "implementation": [
+            "Modified ingest.py stdlib_items dictionary with comprehensive item coverage",
+            "Enhanced warning message with detailed tutorial at ingest.py:2641",
+            "Shows alternative documentation sources and setup instructions",
+            "Provides rust-docs-json component installation guide for complete stdlib docs"
+          ],
+          "researchFindings": {
+            "localJsonComponent": "rust-docs-json component available on nightly: 'rustup component add --toolchain nightly rust-docs-json'",
+            "localLocation": "Component provides complete stdlib JSON documentation locally in ~/.rustup/toolchains/*/share/doc/rust/json/",
+            "manualGeneration": "Manual generation possible via Rust repo: 'python x.py doc library -- --output-format=json'",
+            "alternativeSource": "Complete stdlib documentation available through local JSON generation"
+          },
+          "futureSolution": {
+            "architecture": "DocumentationSource abstraction to support multiple doc sources",
+            "capability": "Local JSON ingestion capability",
+            "routing": "Intelligent source routing with quality-based selection",
+            "benefit": "Eliminates root cause of docs.rs dependency for stdlib"
+          },
+          "testing": "Verified expanded items accessible via API, tutorial displays correctly",
+          "pattern": "Graceful degradation with enhanced user guidance when external sources are unavailable",
+          "dateEncountered": "2025-08-11",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"],
+          "affectedLines": ["ingest.py:2641"],
+          "codeExample": "# Expanded stdlib_items dictionary with comprehensive coverage\nstdlib_items = {\n    'std': 62,  # Previously 15-16, now includes Vec, HashMap, Result, etc.\n    'core': 68,  # Expanded core types and traits\n    'alloc': 43  # Memory allocation types\n}\n\n# Enhanced warning with tutorial when stdlib fallback triggered\nif is_stdlib_crate(crate_name):\n    logger.warning(f\"Stdlib documentation limited to fallback items. For complete stdlib docs, install: 'rustup component add --toolchain nightly rust-docs-json'\")\n    # Show coverage limitation and alternatives\n    logger.info(f\"Current fallback provides {len(fallback_items)} items. Local JSON provides complete coverage.\")"
         }
       ]
     },

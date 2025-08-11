@@ -1,0 +1,271 @@
+{
+  "approach_name": "Root Cause Fix - Documentation Source Architecture",
+  "root_cause_identified": {
+    "primary_issue": "Architecture assumes docs.rs rustdoc JSON availability as primary source",
+    "specific_problems": [
+      "Hard-coded docs.rs URL construction in resolve_version() and get_stdlib_url()",
+      "No abstract interface for documentation sources - tight coupling to HTTP endpoints",
+      "Fallback mechanisms are emergency measures, not designed architectural components",
+      "Source extraction exists only as exception handling, not as first-class source",
+      "Binary success/failure model with no source preference or quality metrics",
+      "Stdlib handling requires special-case code rather than source-type routing"
+    ],
+    "architectural_flaws": [
+      "Single ingestion pipeline assumes remote JSON availability",
+      "No source discovery or capability detection mechanisms",
+      "Version resolution tightly coupled to docs.rs redirect patterns",
+      "Documentation extraction not abstracted from source location",
+      "No unified content processing pipeline for different source types"
+    ]
+  },
+  "structural_changes": {
+    "new_abstractions": {
+      "DocumentationSource": {
+        "description": "Abstract base class defining documentation source interface",
+        "methods": [
+          "async detect_availability(crate_name, version) -> SourceCapability",
+          "async resolve_version(crate_name, version) -> ResolvedVersion", 
+          "async extract_documentation(crate_name, version) -> DocumentationSet",
+          "get_source_priority() -> int",
+          "get_source_quality_score(crate_name, version) -> float"
+        ],
+        "implementations": [
+          "DocsRsJsonSource - rustdoc JSON from docs.rs",
+          "DocsRsHtmlSource - HTML scraping from docs.rs", 
+          "CratesIoSource - source code download and parsing",
+          "LocalRustdocSource - local rustdoc generation",
+          "StdlibFallbackSource - hardcoded stdlib documentation"
+        ]
+      },
+      "SourceRouter": {
+        "description": "Orchestrates source selection and fallback chains",
+        "responsibilities": [
+          "Parallel source capability detection",
+          "Source prioritization based on quality and availability",
+          "Automatic fallback chain execution",
+          "Source-specific optimization (caching, retries, etc.)",
+          "Unified error handling and reporting"
+        ]
+      },
+      "DocumentationSet": {
+        "description": "Normalized documentation representation from any source",
+        "fields": [
+          "items: List[DocumentationItem] - extracted documentation items",
+          "modules: Dict[str, ModuleInfo] - module hierarchy",
+          "reexports: List[ReexportMapping] - re-export relationships",
+          "crossrefs: List[CrossReference] - cross-reference links",
+          "metadata: SourceMetadata - extraction quality and source info"
+        ]
+      }
+    },
+    "pipeline_redesign": {
+      "unified_ingestion": {
+        "description": "Single pipeline processing DocumentationSet from any source",
+        "stages": [
+          "Source detection and routing",
+          "Parallel extraction from multiple sources (if beneficial)",
+          "Content validation and quality scoring",  
+          "Normalization to common DocumentationSet format",
+          "Existing embedding and storage pipeline (unchanged)"
+        ]
+      },
+      "source_capability_detection": {
+        "description": "Parallel detection of what sources are available for a crate",
+        "approach": "Concurrent HEAD requests and lightweight checks to determine source availability before full extraction",
+        "caching": "Cache capability results to avoid repeated detection"
+      }
+    }
+  },
+  "refactoring_required": {
+    "ingest_crate_function": {
+      "current_issues": [
+        "Hardcoded docs.rs resolution logic",
+        "Special-case stdlib handling scattered throughout",
+        "Exception-based fallback instead of designed routing",
+        "Tight coupling between version resolution and source extraction"
+      ],
+      "refactor_approach": [
+        "Replace direct docs.rs calls with SourceRouter.route()",
+        "Remove all is_stdlib_crate() special cases from main logic",
+        "Move source-specific logic into DocumentationSource implementations",
+        "Centralize all fallback logic in SourceRouter"
+      ]
+    },
+    "resolve_version_function": {
+      "current_issues": [
+        "Only handles docs.rs redirects",
+        "Returns docs.rs-specific URL patterns",
+        "No abstract version resolution"
+      ],
+      "refactor_approach": [
+        "Move to DocumentationSource.resolve_version() method",
+        "Return abstract ResolvedVersion with source-agnostic metadata",
+        "Each source handles its own version resolution strategy"
+      ]
+    },
+    "source_extraction_integration": {
+      "current_issues": [
+        "Exists only in exception handlers",
+        "No integration with main pipeline",
+        "Duplicate logic for chunk creation and embedding"
+      ],
+      "refactor_approach": [
+        "Elevate CratesIoSourceExtractor to first-class DocumentationSource",
+        "Integrate with unified content processing pipeline",
+        "Remove duplicate chunk transformation logic"
+      ]
+    }
+  },
+  "implementation_steps": {
+    "phase_1_foundation": {
+      "order": 1,
+      "description": "Create abstract interfaces and basic implementations",
+      "tasks": [
+        "Define DocumentationSource abstract base class",
+        "Implement SourceCapability and ResolvedVersion data structures", 
+        "Create DocumentationSet unified format",
+        "Implement DocsRsJsonSource wrapping existing docs.rs logic",
+        "Create basic SourceRouter with single-source routing"
+      ],
+      "validation": "Existing functionality works through new abstractions",
+      "risk_level": "Low - additive changes only"
+    },
+    "phase_2_source_implementations": {
+      "order": 2,
+      "description": "Implement alternative documentation sources",
+      "tasks": [
+        "Elevate CratesIoSourceExtractor to CratesIoSource",
+        "Implement StdlibFallbackSource with comprehensive stdlib data",
+        "Create DocsRsHtmlSource for HTML scraping fallback",
+        "Add parallel capability detection to SourceRouter",
+        "Implement source priority and quality scoring"
+      ],
+      "validation": "Multiple sources work independently through SourceRouter",
+      "risk_level": "Medium - new extraction logic"
+    },
+    "phase_3_routing_logic": {
+      "order": 3, 
+      "description": "Implement intelligent source selection and fallbacks",
+      "tasks": [
+        "Add automatic fallback chain execution",
+        "Implement source-specific caching strategies",
+        "Create quality-based source selection logic",
+        "Add concurrent source detection with timeout handling",
+        "Implement source combination (when beneficial)"
+      ],
+      "validation": "Complex routing scenarios work correctly with performance",
+      "risk_level": "Medium - complex orchestration logic"
+    },
+    "phase_4_pipeline_integration": {
+      "order": 4,
+      "description": "Integrate new architecture into main ingestion pipeline", 
+      "tasks": [
+        "Replace ingest_crate() docs.rs logic with SourceRouter",
+        "Remove all stdlib special-case handling",
+        "Unify content processing pipeline for all sources",
+        "Add source metadata to database storage",
+        "Update error handling to use SourceRouter failures"
+      ],
+      "validation": "All crate types work through unified pipeline",
+      "risk_level": "High - core pipeline changes"
+    },
+    "phase_5_optimization": {
+      "order": 5,
+      "description": "Optimize performance and add advanced features",
+      "tasks": [
+        "Implement intelligent source caching with capability awareness",
+        "Add source performance metrics and dynamic prioritization",
+        "Create hybrid extraction (combine multiple sources)",
+        "Add source-specific retry and timeout strategies",
+        "Implement background source warming and preemptive capability detection"
+      ],
+      "validation": "Performance matches or exceeds current system",
+      "risk_level": "Low - performance optimizations"
+    }
+  },
+  "long_term_benefits": {
+    "architectural_benefits": [
+      "Eliminates entire class of 'source unavailable' issues",
+      "Enables easy addition of new documentation sources (GitHub Pages, custom rustdoc, etc.)",
+      "Provides foundation for multi-source aggregation and quality comparison",
+      "Supports source-specific optimization without affecting other sources",
+      "Creates clear separation of concerns between source acquisition and content processing"
+    ],
+    "stdlib_specific_improvements": [
+      "Stdlib handled through standard source routing, not special cases",
+      "Can easily add local rustdoc generation for stdlib when available",
+      "Supports version-specific stdlib source preferences",
+      "Enables comprehensive stdlib documentation from multiple sources",
+      "Future-proofs against stdlib documentation availability changes"
+    ],
+    "maintainability_gains": [
+      "Source-specific logic isolated in dedicated classes",
+      "New sources require only DocumentationSource implementation",
+      "Centralized routing logic easier to debug and optimize",
+      "Clear abstraction boundaries prevent architectural drift",
+      "Testable components with clear interfaces"
+    ],
+    "user_experience_improvements": [
+      "Higher documentation coverage across all crate types",
+      "Faster documentation availability through parallel source detection",
+      "More resilient to external service outages or changes",
+      "Consistent behavior regardless of documentation source",
+      "Transparent quality improvements as better sources become available"
+    ]
+  },
+  "migration_strategy": {
+    "backward_compatibility": {
+      "approach": "Facade pattern preserving existing ingest_crate() API",
+      "details": [
+        "Existing API calls work unchanged during migration",
+        "Internal routing through new architecture is transparent",
+        "Database schema additions are additive only",
+        "Performance characteristics maintained or improved",
+        "Error behavior preserved where possible"
+      ]
+    },
+    "rollout_phases": {
+      "phase_1_shadow": {
+        "description": "New architecture runs in parallel, results compared",
+        "risk_mitigation": "No behavior changes, pure validation of new system"
+      },
+      "phase_2_selective": {
+        "description": "Route specific crate types (e.g., stdlib) through new system",
+        "risk_mitigation": "Limited blast radius, easy rollback"
+      },
+      "phase_3_full": {
+        "description": "All ingestion through new architecture",
+        "risk_mitigation": "Extensive validation from previous phases"
+      }
+    },
+    "rollback_plan": {
+      "trigger_conditions": [
+        "Performance regression > 20%",
+        "Documentation quality decrease",
+        "Increased error rates in ingestion",
+        "Memory usage increase > 30%"
+      ],
+      "rollback_method": "Feature flag to route through legacy ingest_crate() implementation"
+    }
+  },
+  "technical_specifications": {
+    "performance_requirements": [
+      "Source detection latency < 200ms for cached results",
+      "Parallel source detection complete within 2x single-source time",
+      "Memory usage increase < 15% due to abstraction overhead",
+      "Ingestion throughput maintained within 5% of current performance"
+    ],
+    "quality_metrics": [
+      "Documentation coverage > 95% for stdlib crates",
+      "Source selection accuracy > 98% (chooses best available source)",
+      "Fallback success rate > 99% when any source is available",
+      "Content quality consistency across source types"
+    ],
+    "scalability_considerations": [
+      "Source capability caching to prevent repeated detection overhead",
+      "Asynchronous source detection with configurable concurrency",
+      "Memory-efficient DocumentationSet processing",
+      "Source-specific optimization (connection pooling, compression, etc.)"
+    ]
+  }
+}

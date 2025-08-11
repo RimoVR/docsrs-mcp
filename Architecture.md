@@ -85,7 +85,7 @@ graph LR
             EMBED[FastEmbed<br/>Batch processing<br/>Embeddings warmup during startup<br/>Memory-aware batch operations<br/>Enhanced transaction management]
             LOCK[Per-crate Locks<br/>Prevent duplicates]
             PRIORITY[Priority Queue<br/>On-demand vs pre-ingestion<br/>Request balancing]
-            STDLIBFALLBACK[Standard Library Fallback<br/>create_stdlib_fallback_documentation()<br/>Vec, HashMap, Option, Result coverage<br/>Embedding generation for stdlib types]
+            STDLIBFALLBACK[Standard Library Fallback<br/>create_stdlib_fallback_documentation()<br/>50-68 items per stdlib crate<br/>Comprehensive tutorial message guides users to rust-docs-json setup<br/>Enhanced coverage: std (62), core (68), alloc (43)<br/>Embedding generation for stdlib types]
         end
         
         subgraph "Storage Layer"
@@ -290,7 +290,7 @@ sequenceDiagram
         else Rustdoc Unavailable (stdlib crates)
             DocsRS-->>Worker: 404 or empty response
             Worker->>Worker: create_stdlib_fallback_documentation()
-            Note over Worker: Generate fallback docs for common stdlib types<br/>Vec, HashMap, Option, Result, String, etc.
+            Note over Worker: Generate enhanced fallback docs<br/>50-68 items per stdlib crate with tutorial guidance<br/>std (62), core (68), alloc (43) comprehensive coverage
         end
         Worker->>Worker: Validate item paths with fallback generation
         Worker->>Worker: Parse complete rustdoc structure
@@ -2317,14 +2317,12 @@ All four issues share common architectural anti-patterns:
 
 The `create_stdlib_fallback_documentation()` function in `ingest.py` provides a robust fallback mechanism when rustdoc JSON is unavailable for standard library crates:
 
-- **Common Types Coverage**: Creates documentation entries for frequently used standard library items:
-  - `std::vec::Vec` - Dynamic arrays with comprehensive methods
-  - `std::collections::HashMap` - Hash-based key-value storage
-  - `std::collections::HashSet` - Hash-based unique value collections
-  - `core::option::Option` - Optional value handling with Some/None variants
-  - `core::result::Result` - Error handling with Ok/Err variants
-  - `std::string::String` - Owned UTF-8 string type
-  - `std::io::Error` - I/O operation error handling
+- **Enhanced Coverage**: Now provides 50-68 items per stdlib crate (up from 15-16):
+  - **std crate**: 62 items including Vec, HashMap, String, I/O types, and filesystem operations
+  - **core crate**: 68 items covering Option, Result, traits, and primitive operations
+  - **alloc crate**: 43 items for collections, Box, Rc, Arc, and memory management
+  - **Item categories**: Core collections, synchronization primitives, I/O types, fundamental traits, and essential modules
+- **Tutorial Integration**: Provides comprehensive tutorial message that guides users to proper rust-docs-json setup for complete documentation access
 
 - **Embedding Generation**: Creates semantic embeddings for fallback documentation to enable search functionality
 - **Module Hierarchy**: Stores appropriate module structure for standard library crates (std, core, alloc hierarchies)
@@ -4213,7 +4211,7 @@ sequenceDiagram
         else Rustdoc Unavailable (stdlib crates)
             DocsRS-->>Worker: 404 or empty response  
             Worker->>Worker: create_stdlib_fallback_documentation()
-            Note over Worker: Generate fallback docs for common stdlib types<br/>Vec, HashMap, Option, Result, String, etc.
+            Note over Worker: Generate enhanced fallback docs<br/>50-68 items per stdlib crate with tutorial guidance<br/>std (62), core (68), alloc (43) comprehensive coverage
         end
         
         loop Progressive Processing
