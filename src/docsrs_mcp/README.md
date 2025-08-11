@@ -6,17 +6,25 @@ A high-performance MCP server for querying Rust crate documentation with memory-
 
 This module provides a Model Context Protocol (MCP) server that enables efficient ingestion and querying of Rust crate documentation. The server features memory-optimized streaming processing, adaptive batch sizing, and comprehensive memory monitoring to handle large-scale documentation processing.
 
+## Recent Updates
+
+- **Parameter Validation Enhancement**: Fixed force parameter validation in start_pre_ingestion tool to accept string boolean values
+- **Field Validator Implementation**: All MCP tool boolean parameters now use standardized field validators for string conversion
+- **Enhanced MCP Client Compatibility**: Improved support for diverse MCP client implementations with flexible parameter handling
+
 ## MCP Compatibility
 
 This server provides enhanced MCP (Model Context Protocol) compatibility with flexible parameter type handling:
 
 ### Boolean Parameter Support
 - **Flexible Type Input**: Boolean parameters (`has_examples`, `deprecated`) accept both native boolean values and string representations
+- **Field Validator Implementation**: All boolean parameters use Pydantic field validators for robust string-to-boolean conversion
 - **Automatic Type Conversion**: String values are automatically converted to booleans using the following mappings:
-  - `"true"`, `"1"`, `"yes"` → `true`
-  - `"false"`, `"0"`, `"no"` → `false`
+  - `"true"`, `"1"`, `"yes"`, `"on"` → `true`
+  - `"false"`, `"0"`, `"no"`, `"off"` → `false`
 - **Client Compatibility**: MCP clients can send boolean values in their preferred format without worrying about type mismatches
 - **Backward Compatibility**: Maintains full compatibility with existing MCP clients that send native boolean values
+- **Standard Pattern**: This field validator pattern ensures compatibility with various MCP client implementations
 
 ### Parameter Flexibility
 - **Numeric Parameters**: Parameters like `k` and `min_doc_length` support both integer and string input with automatic conversion

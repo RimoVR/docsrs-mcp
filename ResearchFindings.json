@@ -407,6 +407,15 @@
           "double_validation": "FastMCP + client side",
           "anyof_schema": "MANDATORY pattern for flexibility"
         },
+        "boolean_validation": {
+          "requirement": "field_validator with mode='before' REQUIRED for MCP boolean parameter compatibility",
+          "performance_pattern": "Use fast path with isinstance(v, bool) check first for performance",
+          "accepted_strings": "Standard truthy strings: 'true', '1', 'yes', 'on' (case-insensitive)",
+          "mcp_manifest_status": "MCP manifest anyOf patterns correctly configured, issue was only in Pydantic validation layer",
+          "decorator_order": "field_validator must precede @classmethod decorator",
+          "mode_purpose": "mode='before' processes raw input before Pydantic's type conversion",
+          "default_behavior": "Return False as default for invalid/None inputs maintains consistency"
+        },
         "error_handling": {
           "field_validators": {
             "decorator": "@field_validator(mode='before')",
@@ -1038,7 +1047,8 @@
       "p2: Always check for None before string operations - use (value or '').lower() pattern",
       "p2: Test MCP validation with actual clients, not just unit tests",
       "p2: Implement defensive programming patterns for NoneType handling",
-      "p2: Use field validators with mode='before' for MCP client compatibility"
+      "p2: Use field validators with mode='before' for MCP client compatibility",
+      "p2: Use isinstance(v, bool) fast path in Pydantic boolean validators for MCP parameter compatibility"
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",
@@ -1097,7 +1107,10 @@
       "Implement any(condition for x in items if x is not None) for safe iterations",
       "Test Pydantic validators with actual MCP client data, not synthetic tests",
       "Use Union[str, int, bool] parameters for MCP client type flexibility",
-      "Include parameter path and expected formats in validation error messages"
+      "Include parameter path and expected formats in validation error messages",
+      "Use isinstance(v, bool) fast path followed by string validation in Pydantic boolean validators",
+      "Accept standard truthy strings ('true', '1', 'yes', 'on') case-insensitively for MCP compatibility",
+      "Return False as default for invalid/None inputs in boolean validators for consistency"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",

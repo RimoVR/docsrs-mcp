@@ -621,9 +621,7 @@ def count_tokens(text: str, encoding: str = "cl100k_base") -> int:
         return len(text) // 4
 
 
-def validate_tutorial_tokens(
-    value: str | None, max_tokens: int = 200
-) -> str | None:
+def validate_tutorial_tokens(value: str | None, max_tokens: int = 200) -> str | None:
     """
     Validate that tutorial text doesn't exceed token limit.
 

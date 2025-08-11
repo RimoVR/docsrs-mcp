@@ -1477,15 +1477,20 @@
         "id": "bugfix-preingestion-validation",
         "title": "Fix Pre-ingestion Parameter Validation",
         "description": "Debug and fix parameter validation errors in StartPreIngestionRequest that prevent pre-ingestion initialization",
-        "status": "pending",
+        "status": "completed",
         "priority": "critical",
-        "progress": 0,
+        "progress": 100,
         "dependencies": [],
         "effort": "small",
         "impact": "high",
         "estimatedHours": 4,
         "relatedTasks": [],
-        "roadblocks": []
+        "roadblocks": [],
+        "completionDetails": {
+          "completedAt": "2025-08-11",
+          "implementation": "Added field_validator for force parameter with mode='before' to handle string-to-boolean conversion",
+          "notes": "Added field_validator for force parameter with mode='before' to handle string-to-boolean conversion"
+        }
       },
       {
         "id": "bugfix-stdlib-item-retrieval",

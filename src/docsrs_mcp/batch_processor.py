@@ -18,7 +18,6 @@ class MemoryRecycleRequired(Exception):
     """Raised when process recycling is needed due to memory pressure."""
 
 
-
 class BatchProcessor:
     """
     Core batch processing abstraction with memory-aware sizing and cleanup.

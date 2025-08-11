@@ -2915,6 +2915,7 @@ graph TB
         VERSION_VAL[validate_version_string()<br/>SemVer + latest support]
         PATH_VAL[validate_rust_path()<br/>Module path validation]
         INT_BOUNDS[coerce_to_int_with_bounds()<br/>Type coercion + constraints]
+        BOOL_VAL[Boolean field validation pattern<br/>field_validator(mode='before')<br/>Truthy strings: 'true', '1', 'yes', 'on']
         OPT_PATH[validate_optional_path()<br/>None-safe path validation]
     end
     
@@ -2939,6 +2940,7 @@ graph TB
     VERSION_VAL --> FIELD_VAL
     PATH_VAL --> FIELD_VAL
     INT_BOUNDS --> FIELD_VAL
+    BOOL_VAL --> FIELD_VAL
     OPT_PATH --> FIELD_VAL
     
     FIELD_VAL --> SEARCH_REQ
@@ -3089,6 +3091,13 @@ The `validation.py` module provides centralized validation utilities with perfor
 - Applies path validation only when path is not None
 - Used for optional module path parameters
 
+**Boolean Field Validation Pattern (@field_validator(mode='before'))**
+- Standardized pattern for all boolean parameters in MCP request models
+- Accepts boolean types directly and converts string representations to boolean
+- Truthy string values: `'true'`, `'1'`, `'yes'`, `'on'` (case-insensitive)
+- Follows `validate_include_unchanged` implementation for consistency
+- Required for MCP client compatibility when clients send boolean parameters as strings
+
 #### Performance Optimizations
 
 ```python
@@ -3142,6 +3151,42 @@ def coerce_deprecated_to_bool(cls, v):
             raise ValueError(f"Invalid boolean value: '{v}'")
     return bool(v)
 ```
+
+### Boolean Field Validation Pattern
+
+**Standard Implementation Pattern**
+
+All boolean fields in MCP request models require `field_validator(mode='before')` to handle string inputs from MCP clients. The system implements a standardized boolean validation pattern that ensures consistent handling across all boolean parameters:
+
+```python
+@field_validator("include_unchanged", mode="before")
+@classmethod
+def validate_include_unchanged(cls, v: Any) -> bool:
+    """Validate and coerce include_unchanged to boolean."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.lower() in ("true", "1", "yes", "on")
+    return bool(v)
+```
+
+**Truthy String Values**
+- `'true'` - Standard boolean string representation
+- `'1'` - Numeric boolean representation
+- `'yes'` - Human-readable affirmative
+- `'on'` - Toggle-style representation
+
+**Key Design Principles**
+- **MCP Client Compatibility**: Handles string inputs from MCP clients that may serialize booleans as strings
+- **Case Insensitive**: Uses `.lower()` for consistent string comparison
+- **Fallback Behavior**: Uses Python's `bool()` for non-string, non-boolean inputs
+- **Consistency**: Follows the same pattern as `validate_include_unchanged` implementation for uniform behavior
+
+**Architecture Integration**
+- **mode='before'**: Validates and coerces input before Pydantic's built-in type validation
+- **Type Safety**: Ensures boolean type consistency after validation
+- **Schema Compatibility**: Works with `anyOf` patterns in MCP manifest for dual boolean/string acceptance
+- **Error Handling**: Invalid string values result in `False` through `bool(v)` fallback (for permissive validation) or explicit ValueError (for strict validation)
 
 ### MCP Manifest Schema Patterns
 

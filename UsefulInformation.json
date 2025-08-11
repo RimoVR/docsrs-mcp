@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-11",
+  "lastUpdated": "2025-01-11",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -219,6 +219,17 @@
           "relatedFiles": ["src/docsrs_mcp/validation.py"],
           "codeExample": "ERROR_TEMPLATES = {\n    'invalid_type': '{field} must be {expected_type}. Got: {value}. Examples: {examples}',\n    'out_of_range': '{field} must be {constraint}. Got: {value}. Examples: {examples}'\n}",
           "prevention": "Define error message templates at module level for consistency and reusability"
+        },
+        {
+          "error": "StartPreIngestionRequest force parameter validation fails when MCP clients send boolean as string",
+          "rootCause": "Missing field_validator for force parameter - only concurrency and count had validators",
+          "solution": "Added @field_validator('force', mode='before') following validate_include_unchanged pattern",
+          "context": "MCP clients often send boolean values as strings ('true'/'false') which need conversion",
+          "implementation": "Check isinstance(bool) first for fast path, then convert strings 'true', '1', 'yes', 'on' to True",
+          "pattern": "All boolean fields in MCP request models require field_validator with mode='before'",
+          "dateEncountered": "2025-01-11",
+          "relatedFiles": ["src/docsrs_mcp/models.py"],
+          "codeExample": "@field_validator('force', mode='before')\n@classmethod\ndef validate_force(cls, v: Any) -> bool:\n    if isinstance(v, bool):\n        return v\n    if isinstance(v, str):\n        return v.lower() in ('true', '1', 'yes', 'on')\n    return False"
         },
         {
           "error": "MCP parameter string-to-type conversion compatibility issues",

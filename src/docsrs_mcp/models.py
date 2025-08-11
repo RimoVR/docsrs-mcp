@@ -1143,6 +1143,16 @@ class StartPreIngestionRequest(BaseModel):
         description="Number of crates to pre-ingest (10-500, default: 100)",
     )
 
+    @field_validator("force", mode="before")
+    @classmethod
+    def validate_force(cls, v: Any) -> bool:
+        """Validate and coerce force parameter to boolean."""
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "yes", "on")
+        return False  # default
+
     @field_validator("concurrency", mode="before")
     @classmethod
     def coerce_concurrency_to_int(cls, v):
