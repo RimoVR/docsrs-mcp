@@ -1458,15 +1458,20 @@
         "id": "bugfix-version-comparison-none",
         "title": "Fix Version Comparison NoneType Errors",
         "description": "Add defensive None checks in version_diff.py lines 369, 384, 408 to prevent AttributeError when calling .lower() on joined None values in semantic_changes",
-        "status": "pending",
+        "status": "completed",
         "priority": "critical",
-        "progress": 0,
+        "progress": 100,
         "dependencies": [],
         "effort": "small",
         "impact": "high",
         "estimatedHours": 3,
         "relatedTasks": [],
-        "roadblocks": []
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-11",
+          "implementation": "Added defensive None filtering to all string operations on semantic_changes lists",
+          "notes": "Fixed NoneType errors by adding defensive None filtering to all string operations on semantic_changes lists"
+        }
       },
       {
         "id": "bugfix-preingestion-validation",

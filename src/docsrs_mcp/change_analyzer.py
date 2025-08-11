@@ -189,7 +189,7 @@ class RustBreakingChangeDetector:
         """
         # Check semantic changes for variant additions
         for semantic_change in change.details.semantic_changes:
-            if (
+            if semantic_change is not None and (
                 "variant" in semantic_change.lower()
                 and "added" in semantic_change.lower()
             ):
@@ -207,7 +207,7 @@ class RustBreakingChangeDetector:
         """
         # Check semantic changes for field additions
         for semantic_change in change.details.semantic_changes:
-            if (
+            if semantic_change is not None and (
                 "field" in semantic_change.lower()
                 and "added" in semantic_change.lower()
             ):
@@ -229,7 +229,7 @@ class RustBreakingChangeDetector:
         """
         # Check semantic changes for method additions
         for semantic_change in change.details.semantic_changes:
-            if (
+            if semantic_change is not None and (
                 "method" in semantic_change.lower()
                 and "added" in semantic_change.lower()
             ):
@@ -297,7 +297,11 @@ class MigrationSuggestionGenerator:
 
         elif change.change_type.value == "modified":
             # Signature change
-            if any("signature" in s.lower() for s in change.details.semantic_changes):
+            if any(
+                "signature" in s.lower()
+                for s in change.details.semantic_changes
+                if s is not None
+            ):
                 suggestion["action"] = "update_calls"
                 suggestion["description"] = f"Update all calls to '{change.path}'"
 
@@ -307,13 +311,21 @@ class MigrationSuggestionGenerator:
                     suggestion["hint"] = "Update function calls to match new signature"
 
             # Visibility change
-            elif any("private" in s.lower() for s in change.details.semantic_changes):
+            elif any(
+                "private" in s.lower()
+                for s in change.details.semantic_changes
+                if s is not None
+            ):
                 suggestion["action"] = "find_alternative"
                 suggestion["description"] = f"'{change.path}' is no longer public"
                 suggestion["hint"] = "Find alternative public API or refactor"
 
             # Generic change
-            elif any("generic" in s.lower() for s in change.details.semantic_changes):
+            elif any(
+                "generic" in s.lower()
+                for s in change.details.semantic_changes
+                if s is not None
+            ):
                 suggestion["action"] = "update_types"
                 suggestion["description"] = (
                     f"Update type parameters for '{change.path}'"

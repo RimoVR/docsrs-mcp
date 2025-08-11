@@ -352,9 +352,7 @@ class VersionDiffEngine:
 
         return hints
 
-    async def _create_migration_hint(
-        self, change: ItemChange
-    ) -> MigrationHint | None:
+    async def _create_migration_hint(self, change: ItemChange) -> MigrationHint | None:
         """Create a migration hint for a specific breaking change."""
         if change.change_type == ChangeType.REMOVED:
             return MigrationHint(
@@ -366,7 +364,12 @@ class VersionDiffEngine:
 
         elif change.change_type == ChangeType.MODIFIED:
             # Check for signature changes
-            if "signature changed" in " ".join(change.details.semantic_changes).lower():
+            if (
+                "signature changed"
+                in " ".join(
+                    x for x in change.details.semantic_changes if x is not None
+                ).lower()
+            ):
                 return MigrationHint(
                     affected_path=change.path,
                     issue="Function signature has changed",
@@ -381,7 +384,12 @@ class VersionDiffEngine:
                 )
 
             # Check for visibility changes
-            if "private" in " ".join(change.details.semantic_changes).lower():
+            if (
+                "private"
+                in " ".join(
+                    x for x in change.details.semantic_changes if x is not None
+                ).lower()
+            ):
                 return MigrationHint(
                     affected_path=change.path,
                     issue="Item is no longer publicly accessible",
