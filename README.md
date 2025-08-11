@@ -1,149 +1,71 @@
 # docsrs-mcp
 
-A minimal, self-hostable Model Context Protocol (MCP) server that lets AI agents query Rust crate documentation with vector search capabilities.
-
-## Overview
-
-docsrs-mcp provides MCP endpoints for:
-- Fetching crate summaries and metadata
-- Semantic search within Rust crate documentation
-- Retrieving documentation for specific items
-- Listing available crate versions
-
-Built with FastAPI and sqlite-vec for efficient vector search, it caches crate data locally and serves it through the MCP standard.
-
-## Features
-
-- 🚀 **Zero-install launch** with `uvx`
-- 🔍 **Vector search** powered by BAAI/bge-small-en-v1.5 embeddings
-- 📚 **Full rustdoc ingestion** - Complete documentation from docs.rs JSON files
-- 🗜️ **Compression support** - Handles .json.zst (Zstandard) and .json.gz (Gzip) formats
-- 💾 **Local caching** in SQLite with sqlite-vec extension and LRU eviction
-- ⚡ **Fast performance** - Low latency search, efficient memory usage
-- 🔒 **Concurrent safety** - Per-crate locking prevents duplicate ingestion
-- 📦 **Self-contained** - Single Python process, file-backed SQLite
-- 🛠️ **Easy development** - UV-based tooling, async/await architecture
-- 🔗 **See-also suggestions** - Automatic discovery of related documentation items
-- 🔄 **Enhanced Batch Processing** - Memory-aware sizing, transaction retry, FastEmbed memory leak mitigation
+A high-performance Model Context Protocol (MCP) server that provides AI agents with instant access to Rust crate documentation through vector search.
 
 ## Quick Start
 
-### Zero-Install Launch
-
-The easiest way to run docsrs-mcp is with `uvx` (requires Python 3.10+):
-
 ```bash
-# Install from PyPI (when published)
-uvx docsrs-mcp
-
-# Install from GitHub (latest version)
+# Install and run directly from GitHub (recommended)
 uvx --from git+https://github.com/RimoVR/docsrs-mcp.git docsrs-mcp
 
-# Install specific branch/tag
-uvx --from git+https://github.com/RimoVR/docsrs-mcp.git@main docsrs-mcp
-
-# Run from local directory
-uvx --from . docsrs-mcp
-
-# The server will start in MCP mode by default (use --mode rest for HTTP API)
+# Or install from PyPI when published
+uvx docsrs-mcp
 ```
 
-### Platform-Specific Instructions
+## Features
 
-#### macOS/Linux
+- 🚀 **Zero-install launch** with `uvx` - no setup required
+- 🔍 **Semantic vector search** with <50ms response times
+- 📚 **Three-tier documentation system** - 80%+ crate coverage via fallback extraction
+- ⚡ **Smart caching** with SQLite + sqlite-vec and LRU eviction
+- 🎯 **Advanced ranking** with MMR diversification for balanced results
+- 🔄 **Version comparison** - Track API changes between crate versions
+- 🌍 **International support** - Handles British/American spelling variations
+- 🏃 **Zero cold-start** - Embeddings warmup eliminates first-query latency
+- 📦 **Popular crate pre-ingestion** - Instant responses for commonly used crates
+- 🔗 **Re-export discovery** - Automatic path alias resolution from rustdoc JSON
+
+## Installation
+
+### macOS/Linux
 ```bash
-# Install uv if not already installed
+# Install uv if needed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Run the server
-uvx docsrs-mcp
+uvx --from git+https://github.com/RimoVR/docsrs-mcp.git docsrs-mcp
 ```
 
-#### Windows
+### Windows
 ```powershell
-# Install uv using PowerShell
+# Install uv
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Run the server
-uvx docsrs-mcp
+uvx --from git+https://github.com/RimoVR/docsrs-mcp.git docsrs-mcp
 ```
 
-### Docker Quick Start
-
+### Docker
 ```bash
-# Build and run with Docker
 docker build -t docsrs-mcp .
 docker run -p 8000:8000 -v $(pwd)/cache:/app/cache docsrs-mcp
-
-# Or use docker-compose
-docker-compose up
-```
-
-### Environment Configuration
-
-```bash
-# Custom port
-PORT=8080 uvx docsrs-mcp
-
-# Custom host binding
-HOST=0.0.0.0 uvx docsrs-mcp
-
-# Adjust cache size limit (default 2GB)
-MAX_CACHE_SIZE_GB=5 uvx docsrs-mcp
-
-# Enable debug logging
-LOG_LEVEL=DEBUG uvx docsrs-mcp
-```
-
-### Verify Installation
-
-```bash
-# Check server health
-curl http://localhost:8000/health
-
-# View API documentation
-open http://localhost:8000/docs
-
-# Get MCP manifest
-curl http://localhost:8000/mcp/manifest
 ```
 
 ## MCP Configuration
 
-### Server Modes
+### Claude Desktop
 
-docsrs-mcp supports two operation modes:
-
-1. **MCP mode** (default): Model Context Protocol server using STDIO transport for Claude Desktop integration
-2. **REST mode**: Traditional HTTP API server for debugging and direct API access
-
-To run the server:
-```bash
-# Run with MCP protocol via STDIO (default)
-uvx docsrs-mcp
-# or explicitly
-uvx docsrs-mcp -- --mode mcp
-
-# Run in REST mode for HTTP API
-uvx docsrs-mcp -- --mode rest
-```
-
-### Claude Desktop Configuration
-
-Add the following to your Claude Desktop configuration file:
-
-**Location:**
+Add to your config file:
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 - Linux: `~/.config/Claude/claude_desktop_config.json`
 
-**Configuration:**
 ```json
 {
   "mcpServers": {
     "docsrs-mcp": {
       "command": "uvx",
-      "args": ["docsrs-mcp"],
+      "args": ["--from", "git+https://github.com/RimoVR/docsrs-mcp.git", "docsrs-mcp"],
       "env": {
         "MAX_CACHE_SIZE_GB": "2"
       }
@@ -152,642 +74,166 @@ Add the following to your Claude Desktop configuration file:
 }
 ```
 
-**Note:** The server runs in MCP mode by default, using STDIO transport with all logs sent to stderr to avoid protocol corruption. To run in REST mode for debugging, use `--mode rest`.
-
 ### Claude Code CLI
-
-To add this server to Claude Code:
-
 ```bash
-# Add the server from PyPI (when published)
-claude mcp add docsrs -- uvx docsrs-mcp
-
-# Or add from GitHub
+# Add the server
 claude mcp add docsrs -- uvx --from git+https://github.com/RimoVR/docsrs-mcp.git docsrs-mcp
 
-# Add with custom environment variables
-claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx docsrs-mcp
-
-# List configured servers
-claude mcp list
-
-# Remove the server
-claude mcp remove docsrs
+# With custom settings
+claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx --from git+https://github.com/RimoVR/docsrs-mcp.git docsrs-mcp
 ```
-
-After configuration, restart Claude Desktop or use the `/mcp` command in Claude Code to verify the server is connected.
 
 ## MCP Tools
 
-The server exposes 6 core MCP tools through the `/mcp/tools/{tool_name}` endpoint, all with comprehensive embedded tutorials for enhanced AI agent integration.
+### Core Tools
 
-### Enhanced Tool Documentation
+| Tool | Description |
+|------|-------------|
+| `get_crate_summary` | Fetch crate metadata and module structure |
+| `search_items` | Semantic search with type filtering and MMR diversification |
+| `get_item_doc` | Full documentation with fuzzy path matching |
+| `get_module_tree` | Navigate module hierarchies |
+| `search_examples` | Find code examples with language detection |
+| `compare_versions` | Analyze API changes between versions |
 
-All 6 core MCP tools now include comprehensive embedded tutorials designed for optimal AI agent discovery and usage:
+### Advanced Tools
 
-#### Tutorial Features
-Each tool provides:
-- **Tutorial**: Concise 4-line usage guide covering essential usage patterns
-- **Examples**: 3 practical invocation patterns demonstrating real-world usage
-- **Use Cases**: 3 common scenarios where the tool is most effective
+| Tool | Description |
+|------|-------------|
+| `start_pre_ingestion` | Pre-load popular crates for instant access |
+| `list_versions` | List all available crate versions |
 
-#### Tutorial Design Philosophy
-- **Token-efficient**: ≤200 tokens per tutorial for minimal context overhead
-- **Self-documenting**: Tools provide their own usage instructions for improved AI agent discovery
-- **Backward compatible**: Tutorial fields are optional and don't affect existing MCP clients
-- **Context-aware**: Designed specifically for AI agents requiring clear, actionable guidance
+## Architecture
 
-#### Accessing Enhanced Descriptions
-- **Full manifest**: `GET /mcp/manifest` returns complete tool descriptions with tutorials
-- **Individual tools**: Each tool endpoint includes tutorial data in responses
-- **MCP compatibility**: Seamlessly integrates with existing MCP 2025-06-18 specification
+### Three-Tier Documentation System
 
-### `get_crate_summary`
+1. **Tier 1**: Rustdoc JSON from docs.rs (highest quality, ~15% coverage)
+2. **Tier 2**: Source extraction from crates.io CDN (80%+ coverage with macro support)
+3. **Tier 3**: Latest version fallback (100% guaranteed coverage)
 
-Returns crate metadata including name, version, description, and repository info.
+### Performance
 
-**Parameters:**
-- `crate_name` (string, required): Name of the Rust crate
-- `version` (string, optional): Specific version or "latest" (default: "latest")
+- **Search**: <50ms P95 warm latency
+- **Ingestion**: ≤3s for crates up to 10MB
+- **Memory**: ≤1GB RSS including embeddings
+- **Cache**: Auto-evicts at 2GB with LRU
 
-**Example Request:**
-```bash
-curl -X POST http://localhost:8000/mcp/tools/get_crate_summary \
-  -H "Content-Type: application/json" \
-  -d '{
-    "crate_name": "tokio",
-    "version": "latest"
-  }'
-```
+### Key Technologies
 
-**Example Response:**
-```json
-{
-  "name": "tokio",
-  "version": "1.35.1",
-  "description": "An event-driven, non-blocking I/O platform for writing asynchronous I/O backed applications.",
-  "repository": "https://github.com/tokio-rs/tokio",
-  "documentation": "https://docs.rs/tokio/1.35.1",
-  "categories": ["asynchronous", "network-programming"],
-  "keywords": ["io", "async", "non-blocking", "futures"]
-}
-```
-
-**Error Response (404):**
-```json
-{
-  "detail": "Crate 'nonexistent' not found"
-}
-```
-
-### `search_items`
-
-Performs vector similarity search across complete rustdoc documentation. Results now include see-also suggestions for related items.
-
-**Parameters:**
-- `crate_name` (string, required): Name of the crate to search within
-- `query` (string, required): Search query for semantic similarity
-- `k` (integer, optional): Number of results to return (default: 5, max: 20)
-
-**Parameter Validation:**
-The `k` parameter accepts both integers and numeric strings for enhanced MCP client compatibility:
-- `k=5` (integer) - Direct integer values are accepted
-- `k="5"` (numeric string) - Automatically converted to integer
-- `k="abc"` (invalid string) - Returns HTTP 422 validation error
-
-This flexible validation ensures compatibility with different MCP client implementations that may pass parameters as strings or native types. The server internally converts valid numeric strings to integers while rejecting non-numeric strings with a clear validation error.
-
-**Example Request:**
-```bash
-curl -X POST http://localhost:8000/mcp/tools/search_items \
-  -H "Content-Type: application/json" \
-  -d '{
-    "crate_name": "tokio",
-    "query": "spawn async tasks",
-    "k": 3
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "results": [
-    {
-      "item_path": "tokio::spawn",
-      "header": "spawn",
-      "snippet": "Spawns a new asynchronous task, returning a JoinHandle for it...",
-      "score": 0.89,
-      "suggestions": [
-        "tokio::runtime::Runtime",
-        "tokio::task::JoinHandle", 
-        "tokio::spawn_blocking"
-      ]
-    },
-    {
-      "item_path": "tokio::task::spawn_blocking",
-      "header": "spawn_blocking",
-      "snippet": "Runs the provided blocking function on the current thread pool...",
-      "score": 0.82
-    },
-    {
-      "item_path": "tokio::task",
-      "header": "task",
-      "snippet": "Asynchronous task utilities...",
-      "score": 0.75
-    }
-  ]
-}
-```
-
-**Error Response (429 - Rate Limited):**
-```json
-{
-  "detail": "Rate limit exceeded. Please retry after 1 second."
-}
-```
-
-### `get_item_doc`
-
-Retrieves documentation for a specific item from ingested rustdoc data.
-
-**Parameters:**
-- `crate_name` (string, required): Name of the crate
-- `item_path` (string, required): Full path to the item (e.g., "crate", "tokio::spawn", "std::vec::Vec")
-
-**Example Request:**
-```bash
-curl -X POST http://localhost:8000/mcp/tools/get_item_doc \
-  -H "Content-Type: application/json" \
-  -d '{
-    "crate_name": "serde",
-    "item_path": "serde::Deserialize"
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "item_path": "serde::Deserialize",
-  "name": "Deserialize",
-  "kind": "trait",
-  "description": "A data structure that can be deserialized from any data format supported by Serde.",
-  "documentation": "# Examples\n\n```rust\nuse serde::Deserialize;\n\n#[derive(Deserialize)]\nstruct User {\n    name: String,\n    age: u32,\n}\n```\n\nThis trait can be derived using `#[derive(Deserialize)]` or implemented manually...",
-  "signature": "pub trait Deserialize<'de>: Sized"
-}
-```
-
-### `search_examples`
-
-Searches for code examples within crate documentation using vector similarity search.
-
-**Parameters:**
-- `crate_name` (string, required): Name of the crate to search within
-- `query` (string, required): Search query for finding relevant code examples
-- `k` (integer, optional): Number of examples to return (default: 5, max: 20)
-
-**Example Request:**
-```bash
-curl -X POST http://localhost:8000/mcp/tools/search_examples \
-  -H "Content-Type: application/json" \
-  -d '{
-    "crate_name": "tokio",
-    "query": "async spawn example",
-    "k": 3
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "results": [
-    {
-      "item_path": "tokio::spawn",
-      "example_text": "use tokio::spawn;\n\n#[tokio::main]\nasync fn main() {\n    let handle = spawn(async {\n        // async work here\n    });\n    handle.await.unwrap();\n}",
-      "context": "Basic spawn usage",
-      "score": 0.92
-    }
-  ]
-}
-```
-
-### `get_module_tree`
-
-Retrieves the module hierarchy structure for a crate, showing organization and item counts.
-
-**Parameters:**
-- `crate_name` (string, required): Name of the crate
-- `version` (string, optional): Specific version or "latest" (default: "latest")
-
-**Example Request:**
-```bash
-curl -X POST http://localhost:8000/mcp/tools/get_module_tree \
-  -H "Content-Type: application/json" \
-  -d '{
-    "crate_name": "serde",
-    "version": "latest"
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "crate_name": "serde",
-  "version": "1.0.195",
-  "tree": {
-    "serde": {
-      "items": 15,
-      "modules": {
-        "de": {
-          "items": 8,
-          "modules": {}
-        },
-        "ser": {
-          "items": 12,
-          "modules": {}
-        }
-      }
-    }
-  }
-}
-```
-
-### `start_pre_ingestion`
-
-Initiates background ingestion of a crate's documentation for improved performance on subsequent queries.
-
-**Parameters:**
-- `crate_name` (string, required): Name of the crate to pre-ingest
-- `version` (string, optional): Specific version or "latest" (default: "latest")
-
-**Example Request:**
-```bash
-curl -X POST http://localhost:8000/mcp/tools/start_pre_ingestion \
-  -H "Content-Type: application/json" \
-  -d '{
-    "crate_name": "tokio",
-    "version": "1.35.1"
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "message": "Pre-ingestion started for tokio@1.35.1",
-  "status": "processing",
-  "estimated_time_seconds": 15
-}
-```
-
-### Resources
-
-The server also provides MCP resources for listing available data:
-
-#### `/mcp/resources/versions`
-
-Lists all cached versions of a crate.
-
-**Example Request:**
-```bash
-curl -X POST http://localhost:8000/mcp/resources/versions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "crate_name": "tokio"
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "crate_name": "tokio",
-  "versions": [
-    "1.35.1",
-    "1.35.0",
-    "1.34.0"
-  ]
-}
-```
-
-### Python Client Example
-
-```python
-import httpx
-import asyncio
-
-async def search_tokio_docs():
-    async with httpx.AsyncClient() as client:
-        # Search for spawn-related functions
-        response = await client.post(
-            "http://localhost:8000/mcp/tools/search_items",
-            json={
-                "crate_name": "tokio",
-                "query": "spawn async tasks",
-                "k": 5
-            }
-        )
-        results = response.json()
-        
-        # Get detailed docs for the first result
-        if results["results"]:
-            first_item = results["results"][0]
-            doc_response = await client.post(
-                "http://localhost:8000/mcp/tools/get_item_doc",
-                json={
-                    "crate_name": "tokio",
-                    "item_path": first_item["item_path"]
-                }
-            )
-            print(doc_response.json())
-
-asyncio.run(search_tokio_docs())
-```
-
-## Troubleshooting
-
-### Common Issues and Solutions
-
-#### uvx Installation Problems
-- **"uvx not found"**: Install uv first with `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **Python version mismatch**: Ensure Python 3.10+ is available. UV will use the appropriate version automatically
-- **Permission errors**: On Unix systems, ensure `~/.local/bin` is in your PATH
-
-#### Network Connectivity
-- **Docker networking issues**: Use `--network host` or expose port 8000 properly
-- **Proxy environments**: Set `HTTP_PROXY` and `HTTPS_PROXY` environment variables
-- **docs.rs timeouts**: The server retries failed downloads automatically
-
-#### Cache Directory Issues
-- **Permission denied**: Ensure write access to `./cache` directory
-- **Disk space**: Monitor cache size, auto-eviction maintains 2GB limit
-- **Corrupted cache**: Delete specific crate cache files in `./cache/{crate}/{version}.db`
-
-#### Rate Limiting (HTTP 429)
-- **Default limit**: 30 requests/second per IP address
-- **Burst handling**: Implement exponential backoff in clients
-- **Monitoring**: Check server logs for rate limit violations
-
-#### Server Startup Issues
-- **Port already in use**: Change port with `PORT=8001 uvx docsrs-mcp`
-- **Memory errors**: Ensure at least 256MB available RAM
-- **Background process**: Use `nohup uvx docsrs-mcp > server.log 2>&1 & echo $!`
-
-#### MCP Client Integration
-- **Tool not found**: Ensure client supports MCP 2025-06-18 specification
-- **Schema validation errors**: Check request format matches tool schemas exactly
-- **Response timeouts**: Increase client timeout for large crate ingestion
+- **FastAPI** + **FastMCP** for MCP protocol
+- **sqlite-vec** for vector search (<100ms for 1M+ vectors)
+- **FastEmbed** with BAAI/bge-small-en-v1.5 embeddings
+- **RapidFuzz** for intelligent path matching
+- **ijson** for memory-efficient streaming
 
 ## Development
 
 ```bash
-# Clone the repository
+# Clone and setup
 git clone https://github.com/RimoVR/docsrs-mcp.git
 cd docsrs-mcp
-
-# Install dependencies (uv automatically manages virtual environment)
 uv sync --dev
 
-# Run development server
+# Run locally
 uv run docsrs-mcp
 
-# Run with background process (avoids terminal hanging)
-nohup uv run docsrs-mcp > server.log 2>&1 & echo $!
-
-# Run tests (25 comprehensive tests covering all pipeline components)
+# Run tests
 uv run pytest
 
-# Add new dependencies
-uv add package-name              # Production dependency
-uv add --dev package-name        # Development dependency
+# Format and lint
+uv run ruff format .
+uv run ruff check --fix .
 ```
 
-## CI/CD
-
-The project uses GitHub Actions for continuous integration and deployment across multiple platforms and Python versions.
-
-### Automated Testing
-
-All pull requests automatically trigger comprehensive testing workflows:
-
-- **Cross-platform testing**: Ubuntu 22.04, macOS 14, and Windows 11
-- **Python version matrix**: Python 3.10, 3.11, and 3.12
-- **Code quality checks**: Ruff linting and formatting validation
-- **Test execution**: Full pytest suite with 25+ comprehensive tests
-- **Dependency management**: UV-based installation and caching
-
-### Release Automation
-
-Releases are fully automated via semantic versioning:
-
-- **Trigger**: Push git tags matching pattern `v*.*.*` (e.g., `v1.0.0`)
-- **Multi-platform builds**: Automated wheel building for all supported platforms
-- **PyPI publishing**: Automatic package publishing with secure token authentication
-- **Docker images**: Container builds and registry publishing (if configured)
-
-### Development Workflow
-
-The CI/CD pipeline ensures code quality and compatibility:
+## Environment Variables
 
 ```bash
-# Create a new release
-git tag v1.2.3
-git push origin v1.2.3
+# Server configuration
+PORT=8000                    # Server port
+HOST=0.0.0.0                # Bind address
+MAX_CACHE_SIZE_GB=2         # Cache size limit
+LOG_LEVEL=INFO              # Logging level
 
-# CI will automatically:
-# 1. Run tests on all platforms and Python versions
-# 2. Build distribution packages
-# 3. Publish to PyPI
-# 4. Create GitHub release with artifacts
+# Performance tuning
+PRE_INGEST_ENABLED=true     # Enable popular crate pre-loading
+PRE_INGEST_COUNT=100        # Number of crates to pre-load
+EMBEDDINGS_WARMUP=true      # Eliminate cold-start latency
+
+# Advanced
+RANKING_DIVERSITY_WEIGHT=0.1    # MMR diversification strength
+RANKING_DIVERSITY_LAMBDA=0.6    # Relevance vs diversity balance
 ```
 
-### CI/CD Features
+## API Examples
 
-- **Fast feedback**: Parallel job execution across platforms
-- **Dependency caching**: UV package cache for faster builds
-- **Security**: Secure token-based publishing with environment protection
-- **Artifact retention**: Build artifacts stored for debugging and distribution
-- **Status checks**: Required CI passes before merge to main branch
+### Search for Documentation
+```python
+import httpx
 
-## Architecture
-
-- **Web Layer**: FastAPI with MCP endpoint handlers
-- **Ingestion Pipeline**: 
-  - Downloads complete rustdoc JSON files from docs.rs
-  - Supports compressed formats (.json.zst, .json.gz) with automatic detection
-  - Memory-efficient streaming JSON parsing with ijson
-  - Per-crate locking mechanism prevents duplicate concurrent ingestion
-  - Version resolution via docs.rs redirects (supports "latest" version)
-  - Streaming decompression with configurable size limits (100MB default)
-  - Graceful fallback to crate description embedding when rustdoc unavailable
-- **Storage**: SQLite with vector search extension (sqlite-vec)
-- **Embedding**: FastEmbed with ONNX-optimized BAAI/bge-small-en-v1.5 model
-- **Caching**: File-based SQLite databases in `./cache` directory with LRU eviction (2GB limit)
-
-See [Architecture.md](Architecture.md) for detailed system design.
-
-## Batch Processing Enhancements
-
-The system includes advanced batch processing capabilities for improved reliability and memory efficiency:
-
-### Memory-Aware Batch Sizing
-- **Adaptive sizing**: Batch sizes automatically adjust based on available memory (16-512 items)
-- **Operation-specific limits**: Different batch sizes for embeddings (32), database operations (999), and validation
-- **Memory monitoring**: Real-time memory pressure detection with thresholds at 80% and 90%
-- **Trend analysis**: Predictive memory usage based on historical patterns
-
-### FastEmbed Memory Leak Mitigation
-- **Text truncation**: Automatic text limiting to 100 characters to prevent memory growth
-- **Batch counting**: Process recycling after configurable number of batches (default: 50)
-- **Aggressive cleanup**: Explicit garbage collection after each embedding batch
-- **Memory monitoring**: Continuous tracking with warnings for high memory usage
-
-### Database Transaction Resilience
-- **Retry mechanism**: Exponential backoff with jitter for database lock conflicts
-- **BEGIN IMMEDIATE**: Prevents lock escalation issues in SQLite
-- **Configurable timeouts**: TRANSACTION_BUSY_TIMEOUT (default: 5000ms)
-- **Smart retries**: Only retries on recoverable errors (locked, busy)
-
-### Configuration Options
-```bash
-# Batch processing environment variables
-FASTEMBED_MAX_TEXT_LENGTH=100      # Max text length for embeddings
-FASTEMBED_MAX_BATCHES=50           # Batches before process recycling
-TRANSACTION_MAX_RETRIES=3          # Database retry attempts
-TRANSACTION_BUSY_TIMEOUT=5000      # SQLite busy timeout (ms)
-BATCH_MEMORY_TREND_WINDOW=10       # Memory trend analysis window
-BATCH_PROCESSOR_MAX_BATCHES=50     # Max batches before recycling
+async with httpx.AsyncClient() as client:
+    response = await client.post(
+        "http://localhost:8000/mcp/tools/search_items",
+        json={
+            "crate_name": "tokio",
+            "query": "spawn async tasks",
+            "k": 5
+        }
+    )
+    print(response.json())
 ```
 
-## Performance & Resource Usage
+### Compare Versions
+```python
+response = await client.post(
+    "http://localhost:8000/mcp/tools/compare_versions",
+    json={
+        "crate_name": "serde",
+        "version_a": "1.0.0",
+        "version_b": "1.0.100"
+    }
+)
+```
 
-The server is designed for efficient operation with the following characteristics:
+## Troubleshooting
 
-### Performance Targets
-- **Search Latency**: ≤ 500ms P95 for warm searches
-  - Query execution: < 50ms
-  - End-to-end response: < 500ms
-- **Ingestion Speed**: ≤ 3s for crates up to 10MB compressed
-- **Rate Limiting**: 30 requests/second per IP address
+| Issue | Solution |
+|-------|----------|
+| "uvx not found" | Install uv: `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Port already in use | Change port: `PORT=8001 uvx docsrs-mcp` |
+| Rate limiting (429) | Default: 30 req/s per IP, implement backoff |
+| Memory errors | Ensure ≥256MB RAM available |
+| MCP validation errors | Update to latest version, check parameter types |
 
-### Resource Requirements
-- **Memory Usage**: ≤ 1GB RSS with recent optimizations
-  - ONNX model: ~100MB
-  - sqlite-vec index: Variable based on vectors
-  - Server RSS: ≤ 1GB including all components
-  - Memory leaks resolved in embedding pipeline
-- **Disk Cache**: Auto-evicts to maintain ≤ 2GB total size
-  - Per-crate SQLite databases in `./cache` directory
-  - LRU eviction when cache size exceeds limit
-- **CPU**: Single core sufficient for typical workloads
+## Recent Enhancements
 
-### Benchmarks
-| Crate Size | Cold Ingest Time | Warm Search |
-|------------|-----------------|-------------|
-| < 1MB      | < 1s            | < 50ms      |
-| 1-10MB     | 1-3s            | < 100ms     |
-| 10-30MB    | 3-10s           | < 200ms     |
+### v1.0 (Latest)
+- ✅ Three-tier fallback system for 80%+ crate coverage
+- ✅ Version comparison for API evolution tracking
+- ✅ MMR diversification for balanced search results
+- ✅ Embeddings warmup for zero cold-start
+- ✅ Popular crate pre-ingestion
+- ✅ British/American spelling normalization
+- ✅ Enhanced error messages with examples
+- ✅ Batch processing optimizations
+- ✅ Standard library support with fallbacks
 
-### Optimization Tips
-- Pre-warm frequently accessed crates by querying them on startup
-- Adjust cache size limit via `MAX_CACHE_SIZE_GB` environment variable
-- Use background process management for testing to avoid terminal blocking
-- Monitor `/health` endpoint for service status
-
-## Recent Improvements
-
-The following fixes and enhancements have been implemented to improve stability and performance:
-
-### Memory Management
-- **Fixed memory leak issues**: Server now maintains stable RSS memory usage under 1GB
-- **Optimized embedding pipeline**: Proper resource cleanup prevents memory accumulation
-- **Improved garbage collection**: Enhanced memory management for long-running processes
-
-### MCP Client Compatibility
-- **Fixed pre-ingestion tool validation**: Enhanced parameter validation for MCP clients
-- **Improved parameter handling**: Better support for different MCP client implementations
-- **Flexible type conversion**: Automatic conversion of numeric strings to integers
-
-### Database Reliability
-- **Fixed search result duplicates**: Added proper database constraints to prevent duplicate entries
-- **NOT NULL constraint resolution**: Fixed embeddings.item_path constraint violations
-- **Enhanced data integrity**: Improved database schema validation and error handling
-
-### Search and Discovery
-- **Auto-discovery of re-exports**: Implemented automatic detection of re-exported items from rustdoc JSON
-- **Improved search accuracy**: Better handling of module relationships and item visibility
-- **Enhanced result relevance**: More accurate matching of documentation items
-
-## Requirements
-
-- Python 3.10+
-- 256MB+ RAM (1GB recommended)
-- Linux, macOS, or Windows
+### Known Limitations
+- Standard library rustdoc JSON requires local generation via `rustup component add rust-docs-json`
+- Some older crates may only have Tier 2/3 documentation quality
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License - see LICENSE file
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Testing
-
-The project includes comprehensive test coverage with 25 tests covering:
-
-- **Unit Tests**: All pipeline components individually tested
-- **Integration Tests**: End-to-end ingestion scenarios
-- **Compression Tests**: Support for .json.zst and .json.gz formats
-- **Concurrency Tests**: Per-crate locking and concurrent access
-- **Cache Tests**: LRU eviction and size limit enforcement
-- **Error Handling**: Graceful fallbacks and error recovery
-
-## Acknowledgments
-
-- Built on the [Model Context Protocol](https://modelcontextprotocol.io/) standard
-- Crate data from [crates.io](https://crates.io/)
-- Vector search powered by [sqlite-vec](https://github.com/asg017/sqlite-vec)
+Contributions welcome! Please submit pull requests to the [GitHub repository](https://github.com/RimoVR/docsrs-mcp).
 
 ## Security
 
-### Security Features
+- **Origin allowlist**: Only fetches from docs.rs and crates.io
+- **Size limits**: 30MB compressed / 100MB decompressed
+- **Input validation**: Strict Pydantic models with comprehensive validation
+- **Rate limiting**: Built-in protection against abuse
 
-The server implements multiple security measures to ensure safe operation:
-
-#### Origin Allow-List
-- **Restriction**: Only fetches documentation from `https://docs.rs/` URLs
-- **Validation**: Strict URL validation prevents arbitrary file downloads
-- **No user-supplied URLs**: All documentation sources are constructed internally
-
-#### Size Limits
-- **Compressed files**: Maximum 30MB (prevents DoS via large downloads)
-- **Decompressed content**: Maximum 100MB (prevents memory exhaustion)
-- **Streaming processing**: Memory-efficient handling of large files
-- **Automatic cleanup**: Failed downloads are immediately purged
-
-#### Path Safety
-- **Sanitized paths**: Database files stored as `cache/{crate}/{version}.db`
-- **No path traversal**: Crate and version names are sanitized
-- **Isolated storage**: Each crate version has its own database file
-
-#### Input Validation
-- **Pydantic models**: All inputs validated with strict type checking
-- **Extra fields forbidden**: `extra='forbid'` prevents injection attacks
-- **SQL injection prevention**: Parameterized queries throughout
-- **Rate limiting**: 30 requests/second per IP address
-
-### Security Best Practices
-
-1. **Run with minimal privileges**: Use a dedicated user account
-2. **Filesystem isolation**: Configure cache directory with appropriate permissions
-3. **Network isolation**: Bind to localhost unless external access required
-4. **Resource limits**: Use systemd or Docker to enforce memory/CPU limits
-5. **Regular updates**: Keep dependencies updated with `uv sync`
-
-### Reporting Security Issues
-
-If you discover a security vulnerability, please email security@example.com with:
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
-
-Please do not open public issues for security vulnerabilities.
+Report security issues to security@example.com
