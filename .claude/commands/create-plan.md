@@ -30,6 +30,14 @@ subagents:
       "steps": [
         {
           "id": 1,
+          "name": "Clean Previous Plan",
+          "type": "cleanup",
+          "description": "Delete existing TemporaryPlan.md if it exists to avoid reading stale content",
+          "action": "If TemporaryPlan.md exists, delete it before proceeding",
+          "command": "!rm -f TemporaryPlan.md"
+        },
+        {
+          "id": 2,
           "name": "Task Selection",
           "type": "task_determination",
           "logic": {
@@ -57,14 +65,14 @@ subagents:
           }
         },
         {
-          "id": 2,
+          "id": 3,
           "name": "Create Workflow Todo List",
           "type": "todo_creation",
           "mandatory": true,
           "purpose": "Track this workflow - prevents skipping steps"
         },
         {
-          "id": 3,
+          "id": 4,
           "name": "Concurrent Context Gathering",
           "type": "concurrent_agents",
           "description": "Launch concurrent Task agents to retrieve relevant information from memory files"
@@ -175,7 +183,7 @@ subagents:
     },
 
     "code_analysis": {
-      "step_id": 4,
+      "step_id": 5,
       "name": "Existing Code Analysis",
       "description": "Enhanced with Probe MCP for Deep Code Discovery",
       "purpose": "Discover patterns and prevent duplicate work",
@@ -291,7 +299,7 @@ subagents:
     },
 
     "implementation_sketches": {
-      "step_id": 5,
+      "step_id": 6,
       "name": "Generate Three Implementation Sketches",
       "critical_instruction": "You may not edit or create code or write to files at this point, only research and relay your complete plan back to the main thread",
       "warning": "It's crucial to instruct the Task agents with these instructions (otherwise they'll start implementing on their own)!",

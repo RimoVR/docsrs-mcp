@@ -683,7 +683,7 @@ async def get_mcp_manifest(request: Request):
                             "description": "Second version to compare",
                         },
                         "include_unchanged": {
-                            "type": "boolean",
+                            "anyOf": [{"type": "boolean"}, {"type": "string"}],
                             "default": False,
                             "description": "Include unchanged items in response",
                         },
@@ -691,13 +691,25 @@ async def get_mcp_manifest(request: Request):
                             "type": "array",
                             "items": {
                                 "type": "string",
-                                "enum": ["breaking", "deprecated", "added", "removed", "modified"],
+                                "enum": [
+                                    "breaking",
+                                    "deprecated",
+                                    "added",
+                                    "removed",
+                                    "modified",
+                                ],
                             },
-                            "default": ["breaking", "deprecated", "added", "removed", "modified"],
+                            "default": [
+                                "breaking",
+                                "deprecated",
+                                "added",
+                                "removed",
+                                "modified",
+                            ],
                             "description": "Categories of changes to include",
                         },
                         "max_results": {
-                            "type": "integer",
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "default": 1000,
                             "minimum": 1,
                             "maximum": 5000,
@@ -1447,11 +1459,11 @@ async def compare_versions(
 ) -> VersionDiffResponse:
     """
     Compare two versions of a crate for API changes.
-    
+
     Performs semantic diff between two crate versions, identifying breaking changes,
     deprecations, and providing migration hints. Optimized for Rust coding agents
     to understand API evolution and assist with code migration.
-    
+
     **Features**:
     - Detects breaking changes according to Rust semver rules
     - Provides migration hints for breaking changes
@@ -1461,15 +1473,15 @@ async def compare_versions(
     try:
         # Import here to avoid circular dependency
         from .version_diff import get_diff_engine
-        
+
         # Get or create the diff engine
         engine = get_diff_engine()
-        
+
         # Perform comparison
         result = await engine.compare_versions(params)
-        
+
         return result
-        
+
     except FileNotFoundError as e:
         # One or both versions don't exist
         logger.error(f"Version not found for comparison: {e}")

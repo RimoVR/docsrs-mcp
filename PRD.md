@@ -60,23 +60,37 @@ all through the open MCP tool-calling standard, **without** proprietary services
 
 **🚨 URGENT - BROKEN FUNCTIONALITY:**
 
-1. **searchExamples Character Fragmentation Bug** (CRITICAL - BLOCKING)
+1. **Version Comparison NoneType Errors** (CRITICAL - BLOCKING)
+   - **Problem**: Version comparison operations fail with NoneType errors when handling missing or malformed version data
+   - **Impact**: Core functionality breaks when crates have irregular version metadata, causing server crashes and preventing documentation access
+   - **Root Cause**: Insufficient null checking in version parsing and comparison logic
+   - **Fix Required**: Add comprehensive null validation and defensive programming patterns in version handling code
+
+2. **Pre-ingestion Parameter Validation** (CRITICAL - BLOCKING)
+   - **Problem**: Parameter validation fails during pre-ingestion phase, causing initialization errors
+   - **Impact**: Server startup fails or becomes unstable when pre-ingestion is enabled, preventing deployment in production
+   - **Root Cause**: Missing or incorrect parameter validation logic in pre-ingestion workflow
+   - **Fix Required**: Implement robust parameter validation with clear error messages for pre-ingestion configuration
+
+3. **Standard Library Item Retrieval** (HIGH - CORE FEATURE BROKEN)
+   - **Problem**: Standard library items cannot be retrieved or searched properly
+   - **Impact**: Users cannot access documentation for std library types, severely limiting usefulness for Rust development
+   - **Root Cause**: Standard library handling logic does not account for unique std documentation structure
+   - **Fix Required**: Add specialized handling for standard library documentation retrieval and indexing
+
+4. **MCP Manifest Validation Errors** (HIGH - CLIENT COMPATIBILITY)
+   - **Problem**: MCP manifest fails validation in client implementations, causing tool discovery failures
+   - **Impact**: AI agents cannot properly discover or use tools, breaking the core MCP integration
+   - **Root Cause**: Invalid JSON schema patterns or missing required fields in manifest generation
+   - **Fix Required**: Fix manifest JSON schema to comply with MCP specification and ensure client compatibility
+
+5. **searchExamples Character Fragmentation Bug** (MEDIUM - FEATURE BROKEN)
    - **Problem**: `ingest.py:761` iterates over code example strings as individual characters instead of treating them as complete code blocks
    - **Impact**: searchExamples returns `["[", "{", "\""]` instead of actual code examples
    - **Root Cause**: String iteration in code example processing logic
    - **Fix Required**: Treat code example strings as single entities, not character sequences
 
-2. **MCP Parameter Type Validation** (HIGH)
-   - **Problem**: MCP parameter validation rejects numeric values like `k=2`
-   - **Impact**: Tool calls with numeric parameters fail unexpectedly
-   - **Fix Required**: Add anyOf patterns in MCP manifest for consistent type handling
-
-3. **Pre-ingestion Parameter Synchronization** (MEDIUM)
-   - **Problem**: CLI/MCP mode parameter synchronization issue causing pre-ingestion conflicts
-   - **Impact**: Pre-ingestion settings may not be properly synchronized between CLI and MCP modes
-   - **Fix Required**: Ensure consistent parameter handling across CLI and MCP interfaces
-
-4. **Path Alias Resolution** (MEDIUM)
+6. **Path Alias Resolution** (MEDIUM)
    - **Problem**: Path resolution requires exact module paths, no common aliases supported
    - **Impact**: Users must know precise internal paths (e.g., `serde::de::Deserialize` not `serde::Deserialize`)
    - **Fix Required**: Add path alias mapping for common patterns

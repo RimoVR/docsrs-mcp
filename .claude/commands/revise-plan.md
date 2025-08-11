@@ -319,16 +319,33 @@ subagents:
         "performed_by": "Either YOU directly or via code-linter-formatter agent",
         "subagent_type": "code-linter-formatter",
         "description": "Run quality checks - can use agent or run commands directly",
+        "testing_philosophy": {
+          "principle": "Prefer testing with production code over synthetic test suites when possible",
+          "rationale": "Production code testing validates real-world usage patterns and integration",
+          "approach": [
+            "If the feature/fix is command-line accessible, test it directly with production commands",
+            "For HTTP servers, use --mode rest flag for CLI-callable HTTP mode testing",
+            "Run synthetic test suites as supplementary validation, not primary testing",
+            "Prioritize end-to-end testing with real workflows over unit tests"
+          ],
+          "examples": {
+            "cli_tool": "Test the actual CLI commands with real inputs instead of just unit tests",
+            "http_server": "Use 'uv run docsrs-mcp --mode rest' and test with curl/httpie",
+            "library": "Create small example programs that use the library in realistic ways"
+          }
+        },
         "checks": {
           "rust_components": [
             "!cargo fmt",
             "!cargo clippy -- -D warnings",
-            "!cargo test"
+            "!cargo test",
+            "Test with production code if CLI-accessible"
           ],
           "typescript_react_components": [
             "!npm run lint",
             "!npm run typecheck",
-            "!npm test"
+            "!npm test",
+            "Test with production build if applicable"
           ]
         },
         "requirement": "Address ALL errors and warnings before proceeding"

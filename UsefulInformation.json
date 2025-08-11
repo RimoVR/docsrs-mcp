@@ -149,12 +149,15 @@
         },
         {
           "error": "MCP tool parameter validation failure - Input validation error: '50' is not valid under any of the given schemas",
-          "solution": "Add anyOf patterns to MCP manifest schema like all other tools. Use anyOf: [{'type': 'integer'}, {'type': 'string'}] for numeric parameters and anyOf: [{'type': 'boolean'}, {'type': 'string'}] for boolean parameters to handle string parameters from MCP clients.",
+          "solution": "Successfully fixed by adding anyOf patterns to both include_unchanged and max_results fields in compare_versions tool schema (app.py lines 685-705) and corresponding field validators with mode='before' in CompareVersionsRequest model (models.py lines 1347-1365). Use anyOf: [{'type': 'integer'}, {'type': 'string'}] for numeric parameters and anyOf: [{'type': 'boolean'}, {'type': 'string'}] for boolean parameters to handle string parameters from MCP clients.",
           "context": "MCP clients often send numeric and boolean parameters as strings, causing validation failures when schemas are too restrictive. All MCP tools need anyOf patterns for parameter flexibility.",
           "rootCause": "Missing anyOf schema patterns in MCP manifest prevents JSON Schema validation from passing when MCP clients send string parameters",
+          "status": "RESOLVED",
           "dateEncountered": "2025-08-09",
-          "relatedFiles": ["src/docsrs_mcp/app.py"],
-          "codeExample": "# In get_mcp_manifest() for all numeric/boolean parameters:\n'k': {\n    'type': 'integer',\n    'description': 'Number of results to return',\n    'anyOf': [{'type': 'integer'}, {'type': 'string'}]\n},\n'enabled': {\n    'type': 'boolean',\n    'description': 'Enable feature flag',\n    'anyOf': [{'type': 'boolean'}, {'type': 'string'}]\n}",
+          "dateResolved": "2025-08-11",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "implementation": "For any MCP tool parameters that need to accept both native types and strings, use: 'anyOf': [{'type': 'boolean'}, {'type': 'string'}] in schema and @field_validator with mode='before' in model. This pattern is now consistently applied across all 9 MCP tools.",
+          "codeExample": "# In get_mcp_manifest() for all numeric/boolean parameters:\n'k': {\n    'type': 'integer',\n    'description': 'Number of results to return',\n    'anyOf': [{'type': 'integer'}, {'type': 'string'}]\n},\n'enabled': {\n    'type': 'boolean',\n    'description': 'Enable feature flag',\n    'anyOf': [{'type': 'boolean'}, {'type': 'string'}]\n}\n\n# In models.py with corresponding field validator:\n@field_validator('max_results', mode='before')\n@classmethod\ndef validate_max_results(cls, v):\n    if v is None:\n        return None\n    if isinstance(v, int):\n        return v\n    if isinstance(v, str):\n        try:\n            return int(v.strip())\n        except ValueError:\n            raise ValueError(f'max_results must be integer. Got: {repr(v)[:100]}')\n    raise ValueError(f'max_results must be integer. Got: {type(v).__name__}')",
           "prevention": "Ensure all MCP tools with numeric or boolean parameters have anyOf patterns in manifest schema to handle string conversion"
         },
         {

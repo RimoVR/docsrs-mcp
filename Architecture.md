@@ -1984,6 +1984,242 @@ PATH_ALIASES = {
 - **Performance**: O(1) alias lookup before O(n) fuzzy matching
 - **Extensible**: Alias dictionary can be expanded based on usage patterns
 
+### Known Architectural Issues Requiring Defensive Programming
+
+The following section documents architectural issues identified in four key features that require defensive programming improvements to prevent runtime failures.
+
+#### 1. Version Comparison - VersionDiffEngine NoneType Error Flow
+
+**Location**: `diff_engine.py` in VersionDiffEngine component
+
+**Architectural Issue**:
+The VersionDiffEngine lacks defensive programming against NoneType values in the data flow pipeline, causing AttributeError exceptions when attempting to access properties or methods on None objects.
+
+```mermaid
+graph TD
+    subgraph "VersionDiffEngine Error Flow"
+        REQ[diff_versions Request<br/>crate, version_a, version_b]
+        RESOLVE_A[Resolve Version A<br/>Fetch rustdoc JSON]
+        RESOLVE_B[Resolve Version B<br/>Fetch rustdoc JSON]
+        PARSE_A[Parse JSON A<br/>Extract API surface]
+        PARSE_B[Parse JSON B<br/>Extract API surface]
+        COMPARE[Compare API Surfaces<br/>Detect changes]
+        RESPONSE[Generate Diff Response]
+        
+        ERROR_A[Version A Resolution<br/>Returns None]
+        ERROR_B[Version B Resolution<br/>Returns None]
+        ERROR_PARSE_A[JSON A Parsing<br/>Returns None/Invalid]
+        ERROR_PARSE_B[JSON B Parsing<br/>Returns None/Invalid]
+        CRASH[AttributeError<br/>'NoneType' has no attribute 'X']
+    end
+    
+    REQ --> RESOLVE_A
+    REQ --> RESOLVE_B
+    RESOLVE_A --> PARSE_A
+    RESOLVE_B --> PARSE_B
+    PARSE_A --> COMPARE
+    PARSE_B --> COMPARE
+    COMPARE --> RESPONSE
+    
+    RESOLVE_A -.->|Failure| ERROR_A
+    RESOLVE_B -.->|Failure| ERROR_B
+    PARSE_A -.->|Invalid JSON| ERROR_PARSE_A
+    PARSE_B -.->|Invalid JSON| ERROR_PARSE_B
+    
+    ERROR_A --> CRASH
+    ERROR_B --> CRASH
+    ERROR_PARSE_A --> CRASH
+    ERROR_PARSE_B --> CRASH
+```
+
+**Defensive Programming Gaps**:
+- No null checks after version resolution steps
+- Missing validation of JSON parsing results before property access
+- Absence of early return patterns for invalid states
+- No graceful degradation when one or both versions fail to resolve
+
+**Required Improvements**:
+- Add explicit None checks after each resolution step
+- Implement early validation returns with descriptive error messages
+- Add fallback responses when partial data is available
+- Wrap property access in try-catch blocks with contextual error handling
+
+#### 2. Pre-ingestion System - Parameter Validation Chain Failure
+
+**Location**: `popular_crates.py` in PreIngestionWorker and parameter validation flow
+
+**Architectural Issue**:
+The pre-ingestion system's parameter validation chain lacks proper type checking and validation flow, causing failures when parameters don't match expected types or formats.
+
+```mermaid
+graph TD
+    subgraph "Pre-ingestion Validation Flow"
+        START[Pre-ingestion Start<br/>Batch parameters]
+        CONFIG_PARSE[Parse Configuration<br/>Extract crate list, batch_size]
+        PARAM_VALIDATE[Parameter Validation<br/>Type checking, range validation]
+        WORKER_INIT[Initialize Workers<br/>Create ingestion instances]
+        BATCH_PROCESS[Batch Processing<br/>Process crate groups]
+        SUCCESS[Ingestion Success]
+        
+        CONFIG_ERROR[Configuration Parse<br/>Invalid format/structure]
+        PARAM_ERROR[Parameter Validation<br/>Type mismatch/invalid range]
+        WORKER_ERROR[Worker Initialization<br/>Invalid parameters passed]
+        BATCH_ERROR[Batch Processing<br/>Propagated validation errors]
+        FAILURE[System Failure<br/>Validation chain broken]
+    end
+    
+    START --> CONFIG_PARSE
+    CONFIG_PARSE --> PARAM_VALIDATE
+    PARAM_VALIDATE --> WORKER_INIT
+    WORKER_INIT --> BATCH_PROCESS
+    BATCH_PROCESS --> SUCCESS
+    
+    CONFIG_PARSE -.->|Invalid JSON/YAML| CONFIG_ERROR
+    PARAM_VALIDATE -.->|Type/Range Error| PARAM_ERROR
+    WORKER_INIT -.->|Parameter Error| WORKER_ERROR
+    BATCH_PROCESS -.->|Validation Error| BATCH_ERROR
+    
+    CONFIG_ERROR --> FAILURE
+    PARAM_ERROR --> FAILURE
+    WORKER_ERROR --> FAILURE
+    BATCH_ERROR --> FAILURE
+```
+
+**Defensive Programming Gaps**:
+- Insufficient type validation at configuration parsing stage
+- Missing parameter boundary checks (batch_size, timeout values)
+- No validation cascade - errors propagate without context
+- Lack of parameter sanitization before worker initialization
+
+**Required Improvements**:
+- Add comprehensive type checking with Pydantic models
+- Implement parameter boundary validation with sensible defaults
+- Create validation error aggregation with detailed error context
+- Add parameter sanitization and normalization steps
+
+#### 3. Standard Library Support - Incomplete Path Resolution Architecture
+
+**Location**: Path resolution system in `fuzzy_resolver.py` and standard library handling
+
+**Architectural Issue**:
+The standard library support system has incomplete path resolution architecture, failing to handle edge cases in std library path normalization and resolution patterns.
+
+```mermaid
+graph TD
+    subgraph "Standard Library Path Resolution"
+        STD_REQ[std:: Path Request<br/>e.g., std::collections::HashMap]
+        PATH_NORMALIZE[Path Normalization<br/>Remove std:: prefix handling]
+        ALIAS_CHECK[PATH_ALIASES Lookup<br/>Check static dictionary]
+        STD_RESOLVE[Standard Library Resolution<br/>Map to actual std paths]
+        FALLBACK[Fuzzy Matching Fallback<br/>RapidFuzz processing]
+        RESPONSE[Return Resolved Path]
+        
+        NORM_ERROR[Normalization Error<br/>Invalid std path format]
+        ALIAS_ERROR[Alias Resolution Error<br/>Incomplete alias mapping]
+        STD_ERROR[Standard Library Error<br/>Path not found in std docs]
+        FUZZY_ERROR[Fuzzy Fallback Error<br/>No suitable matches]
+        PATH_FAILURE[Path Resolution Failure<br/>No fallback options]
+    end
+    
+    STD_REQ --> PATH_NORMALIZE
+    PATH_NORMALIZE --> ALIAS_CHECK
+    ALIAS_CHECK --> STD_RESOLVE
+    STD_RESOLVE --> RESPONSE
+    STD_RESOLVE -.->|No direct match| FALLBACK
+    FALLBACK --> RESPONSE
+    
+    PATH_NORMALIZE -.->|Invalid format| NORM_ERROR
+    ALIAS_CHECK -.->|Missing alias| ALIAS_ERROR
+    STD_RESOLVE -.->|Not found| STD_ERROR
+    FALLBACK -.->|No matches| FUZZY_ERROR
+    
+    NORM_ERROR --> PATH_FAILURE
+    ALIAS_ERROR --> PATH_FAILURE
+    STD_ERROR --> PATH_FAILURE
+    FUZZY_ERROR --> PATH_FAILURE
+```
+
+**Defensive Programming Gaps**:
+- Incomplete standard library path mapping coverage
+- Missing error handling for malformed std:: paths
+- No graceful degradation when std library docs are unavailable
+- Insufficient fallback mechanisms for edge case std paths
+
+**Required Improvements**:
+- Expand PATH_ALIASES dictionary with comprehensive std library coverage
+- Add robust path format validation for std:: prefixed paths
+- Implement graceful degradation with informative error responses
+- Create specialized std library path resolution with better heuristics
+
+#### 4. MCP Manifest - Validation Flow Error Propagation
+
+**Location**: MCP manifest generation and validation in FastAPI route handling
+
+**Architectural Issue**:
+The MCP manifest validation flow lacks proper error propagation and recovery mechanisms, causing validation failures to cascade without meaningful error context.
+
+```mermaid
+graph TD
+    subgraph "MCP Manifest Validation Flow"
+        MANIFEST_REQ[MCP Manifest Request<br/>Tool schema generation]
+        SCHEMA_GEN[Schema Generation<br/>Extract Pydantic models]
+        PARAM_EXTRACT[Parameter Extraction<br/>Build JSON schema]
+        VALIDATION[Schema Validation<br/>JSON schema compliance]
+        MANIFEST_BUILD[Manifest Construction<br/>Combine tools + metadata]
+        RESPONSE[Return MCP Manifest]
+        
+        SCHEMA_ERROR[Schema Generation Error<br/>Model extraction failure]
+        PARAM_ERROR[Parameter Extraction Error<br/>Invalid field definitions]
+        VALID_ERROR[Validation Error<br/>JSON schema non-compliance]
+        BUILD_ERROR[Manifest Build Error<br/>Tool integration failure]
+        MANIFEST_FAILURE[Manifest Generation Failure<br/>Error cascade without recovery]
+    end
+    
+    MANIFEST_REQ --> SCHEMA_GEN
+    SCHEMA_GEN --> PARAM_EXTRACT
+    PARAM_EXTRACT --> VALIDATION
+    VALIDATION --> MANIFEST_BUILD
+    MANIFEST_BUILD --> RESPONSE
+    
+    SCHEMA_GEN -.->|Model error| SCHEMA_ERROR
+    PARAM_EXTRACT -.->|Field error| PARAM_ERROR
+    VALIDATION -.->|Schema error| VALID_ERROR
+    MANIFEST_BUILD -.->|Build error| BUILD_ERROR
+    
+    SCHEMA_ERROR --> MANIFEST_FAILURE
+    PARAM_ERROR --> MANIFEST_FAILURE
+    VALID_ERROR --> MANIFEST_FAILURE
+    BUILD_ERROR --> MANIFEST_FAILURE
+```
+
+**Defensive Programming Gaps**:
+- No error isolation between tool schema generations
+- Missing validation checkpoints with recovery options
+- Insufficient error context propagation through the validation chain
+- Lack of partial manifest generation when some tools fail validation
+
+**Required Improvements**:
+- Add per-tool error isolation with individual try-catch blocks
+- Implement validation checkpoints with meaningful error messages
+- Create partial manifest generation capability for failed tools
+- Add comprehensive error context logging throughout the validation flow
+
+#### Architectural Pattern Summary
+
+All four issues share common architectural anti-patterns:
+
+1. **Missing Defensive Programming**: Lack of null checks, type validation, and boundary checking
+2. **Poor Error Propagation**: Errors cascade without context or recovery options
+3. **Insufficient Validation**: Missing validation at critical data flow transitions
+4. **No Graceful Degradation**: Systems fail completely rather than providing partial functionality
+
+**Recommended Defensive Programming Patterns**:
+- Early validation with explicit error returns
+- Comprehensive null/type checking at data flow boundaries
+- Error isolation with contextual logging
+- Graceful degradation with partial functionality when possible
+- Validation checkpoints with meaningful error messages
+
 ## System Components
 
 ### Ingestion Layer Details

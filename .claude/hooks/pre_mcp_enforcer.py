@@ -83,33 +83,59 @@ class MCPUsageEnforcer:
 
         # 1. Check if using search_for_pattern for broad searches
         if self.tool_name == "mcp__serena__search_for_pattern":
-            if pattern and len(pattern) < 5:
-                issues.append("Pattern too short - may cause LSP overload")
-            if not relative_path or relative_path == ".":
-                issues.append("No path restriction - searching entire codebase")
+            # Allow targeted searches with specific patterns or restricted paths
+            if pattern and len(pattern) < 5 and (not relative_path or relative_path == "."):
+                issues.append("Pattern too short without path restriction - may cause LSP overload")
+            # Only flag if BOTH pattern is short AND path is unrestricted
+            elif not pattern and (not relative_path or relative_path == "."):
+                issues.append("No pattern with unrestricted path - too broad")
 
         # 2. Check if using get_symbols_overview on large directories
         if self.tool_name == "mcp__serena__get_symbols_overview":
-            if relative_path == "." or relative_path == "":
-                issues.append("Attempting overview of entire codebase")
+            # Allow overview on specific files, warn only for entire codebase
+            if relative_path in [".", "", "/"]:
+                issues.append("Attempting overview of entire codebase - specify a file or subdirectory")
 
         # 3. Check if find_symbol is too broad
         if self.tool_name == "mcp__serena__find_symbol":
-            if name_path and len(name_path) < 3:
-                issues.append("Symbol name too short - be more specific")
-            if not relative_path:
-                issues.append("No path restriction for symbol search")
+            # Allow short names if path is well-defined
+            if name_path and len(name_path) < 3 and not relative_path:
+                issues.append("Symbol name too short without path restriction - be more specific")
+            # Allow searching without path if symbol name is specific enough
+            elif not name_path or (len(name_path) < 5 and not relative_path):
+                issues.append("Symbol search too broad - provide specific name or path")
 
-        # 4. Check if Probe was used first
+        # 4. Serena is preferred for surgical edits - check context
+        # Allow Serena for:
+        # - Surgical edits (replace_symbol_body, insert_*)
+        # - Targeted searches with specific paths
+        # - Symbol navigation after discovery
+        if self.tool_name in [
+            "mcp__serena__replace_symbol_body",
+            "mcp__serena__insert_after_symbol",
+            "mcp__serena__insert_before_symbol",
+        ]:
+            # These are surgical operations - always allow
+            return True, None
+
+        # 5. Check if Probe was used first for broad searches
         recent_probe = any(
             tool in self.session_history.get("probe_searches", [])[-5:]
             for tool in self.PROBE_TOOLS
         )
-        if not recent_probe and self.tool_name in [
-            "mcp__serena__find_symbol",
-            "mcp__serena__search_for_pattern",
-        ]:
-            issues.append("Consider using Probe first for discovery")
+        
+        # Only require Probe first for broad searches
+        is_broad_search = (
+            (self.tool_name == "mcp__serena__search_for_pattern" and 
+             (not relative_path or relative_path == ".") and
+             (not pattern or len(pattern) < 10)) or
+            (self.tool_name == "mcp__serena__find_symbol" and
+             not relative_path and
+             (not name_path or len(name_path) < 5))
+        )
+        
+        if not recent_probe and is_broad_search:
+            issues.append("For broad searches, use Probe first for discovery")
 
         if issues:
             return False, issues
@@ -131,12 +157,17 @@ class MCPUsageEnforcer:
         suggestions = []
 
         if self.tool_name in self.SERENA_TOOLS:
-            suggestions.append("For broad code searches, use Probe MCP:")
-            suggestions.append("- mcp__probe__search_code: ElasticSearch-like queries")
+            suggestions.append("Serena Usage Guidelines:")
+            suggestions.append("✅ GOOD: Targeted searches with specific paths or patterns")
+            suggestions.append("✅ GOOD: Surgical edits with replace_symbol_body")
+            suggestions.append("✅ GOOD: Symbol navigation after Probe discovery")
+            suggestions.append("")
+            suggestions.append("For broad code discovery, use Probe MCP first:")
+            suggestions.append("- mcp__probe__search_code: Fast ElasticSearch queries")
             suggestions.append("- mcp__probe__query_code: AST pattern matching")
             suggestions.append("- mcp__probe__extract_code: Get full context")
             suggestions.append(
-                "\nUse Serena only after Probe identifies specific targets"
+                "\nWorkflow: Probe (discovery) → Serena (precision edits)"
             )
 
         if self.tool_name in self.EXTERNAL_TOOLS:
@@ -180,9 +211,12 @@ class MCPUsageEnforcer:
                 print(f"  {suggestion}")
 
             print("\nWorkflow Reminder:")
-            print("  1. Start with Probe for discovery (fast, no indexing)")
-            print("  2. Use Serena for precise operations on found symbols")
-            print("  3. Keep Serena searches targeted to avoid LSP crashes")
+            print("  1. Start with Probe for broad discovery (fast, no indexing)")
+            print("  2. Use Serena for:")
+            print("     • Precise operations on found symbols")
+            print("     • Surgical edits of large files")
+            print("     • Targeted searches with specific paths")
+            print("  3. Keep Serena searches scoped to avoid LSP overload")
             print("=" * 50)
 
             self.session_history["warnings"] += 1

@@ -1,9 +1,9 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-10",
-    "compressionVersion": "1.0",
-    "originalTokens": 45200,
+    "lastUpdated": "2025-08-11",
+    "compressionVersion": "1.1",
+    "originalTokens": 47800,
     "legend": {
       "keys": {
         "desc": "description",
@@ -926,6 +926,80 @@
         "error_handling": "Graceful fallback for missing versions",
         "rate_limiting": "Subject to standard API rate limits"
       }
+    },
+    "critical_bugs": {
+      "version_comparison_nonetype": {
+        "desc": "AttributeError when semantic_changes contains None values during string operations",
+        "problem": "semantic_changes.join().lower() fails with NoneType in list",
+        "root_cause": "Version comparison function receives None values from upstream processing",
+        "solution": "Defensive programming with None checks before string operations",
+        "pattern": "(value or '').lower() for safe string operations",
+        "impact": "Runtime crashes during version diff generation",
+        "frequency": "Occurs with specific crate version combinations"
+      },
+      "pre_ingestion_validation": {
+        "desc": "MCP client validation failures despite correct anyOf patterns in schemas", 
+        "problem": "Real MCP clients reject valid requests that pass unit tests",
+        "root_cause": "Discrepancy between FastMCP validation and actual MCP client implementation",
+        "manifestation": "422 Unprocessable Entity responses from MCP protocol layer",
+        "testing_gap": "Unit tests insufficient - require actual MCP client testing",
+        "solution": "Test with real MCP clients, not just synthetic test suites",
+        "validation_patterns": "Double validation creates inconsistent behavior"
+      },
+      "standard_library_support": {
+        "desc": "Incomplete path resolution for Rust standard library functions and types",
+        "problem": "Some std library items not found in documentation searches",
+        "manifestation": "Empty results for valid std library queries",
+        "root_cause": "Path resolution algorithm incomplete for stdlib edge cases",
+        "impact": "Reduced search coverage for fundamental Rust concepts",
+        "workaround": "Manual fallback to latest version resolution"
+      },
+      "mcp_manifest_validation": {
+        "desc": "Validation error patterns in MCP manifest generation and processing",
+        "problem": "Inconsistent validation behavior between development and production",
+        "error_patterns": [
+          "Parameter type coercion failures",
+          "anyOf schema validation mismatches",
+          "Field validator exceptions not properly handled"
+        ],
+        "debugging_challenges": "Error messages lack specificity for troubleshooting",
+        "solution": "Enhanced error reporting with field-specific context"
+      }
+    },
+    "defensive_programming": {
+      "null_safety": {
+        "principle": "Always check for None before string operations",
+        "patterns": {
+          "safe_string_ops": "(value or '').lower() instead of value.lower()",
+          "safe_join": "[x for x in items if x is not None] before join()",
+          "safe_attribute": "getattr(obj, 'attr', default) pattern"
+        },
+        "examples": {
+          "version_comparison": "semantic_changes = [x for x in changes if x] before join",
+          "string_processing": "text = (input_text or '').strip()",
+          "list_operations": "filtered = [item for item in items if item is not None]"
+        }
+      },
+      "validation_best_practices": {
+        "pydantic_v2": {
+          "field_validators": "Use mode='before' for defensive type coercion",
+          "error_handling": "Raise ValueError, not ValidationError in validators",
+          "anyof_patterns": "MANDATORY for MCP compatibility - handle client type inconsistencies",
+          "testing": "Test with actual MCP clients, not just unit tests"
+        },
+        "mcp_protocol": {
+          "parameter_flexibility": "Accept Union[str, int, bool] for all parameters",
+          "client_variations": "Different MCP clients send different type formats",
+          "double_validation": "Handle both FastMCP and client-side validation",
+          "error_context": "Include parameter path and expected formats in errors"
+        }
+      },
+      "sources": {
+        "pydantic_v2_docs": "https://docs.pydantic.dev/latest/concepts/validators/",
+        "mcp_protocol": "https://spec.modelcontextprotocol.io/specification/",
+        "defensive_programming": "Code Complete, 2nd Edition - Steve McConnell",
+        "rust_error_handling": "The Rust Programming Language - Error Handling Chapter"
+      }
     }
   },
   "recommendations": {
@@ -941,7 +1015,11 @@
       "p2: Use tree-sitter for #{treesitter_speedup} code extraction",
       "p2: Maintain strong asyncio task references",
       "p2: Truncate text inputs before tiktoken processing to prevent stack overflow",
-      "p2: Monitor MCP manifest token usage to prevent 23K-93K token overflow"
+      "p2: Monitor MCP manifest token usage to prevent 23K-93K token overflow",
+      "p2: Always check for None before string operations - use (value or '').lower() pattern",
+      "p2: Test MCP validation with actual clients, not just unit tests",
+      "p2: Implement defensive programming patterns for NoneType handling",
+      "p2: Use field validators with mode='before' for MCP client compatibility"
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",
@@ -984,10 +1062,16 @@
       "Configure dynamic fetch_k with 1.5x multiplier when MMR is enabled",
       "Maintain <500ms P95 latency with all ranking optimizations enabled",
       "Use tiktoken 0.11.0 with cl100k_base encoding for accurate GPT-4 token counting",
-      "Apply 1 token ≈ 4 characters estimation as fallback for quick calculations",
+      "Apply 1 token ≈ 4 characters estimation as fallback for quick calculations", 
       "Implement text truncation before tiktoken processing to prevent performance issues",
       "Use bullet points and imperative voice for token-efficient documentation",
-      "Cache token counts for frequently processed content to improve performance"
+      "Cache token counts for frequently processed content to improve performance",
+      "Filter None values from lists before join operations: [x for x in items if x]",
+      "Use (value or '').method() pattern for safe string operations",
+      "Implement getattr(obj, 'attr', default) for safe attribute access",
+      "Test Pydantic validators with actual MCP client data, not synthetic tests",
+      "Use Union[str, int, bool] parameters for MCP client type flexibility",
+      "Include parameter path and expected formats in validation error messages"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",
@@ -1013,10 +1097,10 @@
     }
   },
   "stats": {
-    "original_tokens": 45200,
-    "compressed_tokens_estimate": 15100,
-    "compression_ratio": "66.6%",
-    "token_reduction": 30100,
+    "original_tokens": 47800,
+    "compressed_tokens_estimate": 15900,
+    "compression_ratio": "66.7%",
+    "token_reduction": 31900,
     "preservation": {
       "technical_details": "100%",
       "library_versions": "100%", 

@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-09T16:00:00Z",
+    "lastUpdated": "2025-08-11T16:00:00Z",
     "priorities": [
       "critical",
       "high",
@@ -1453,6 +1453,67 @@
             }
           }
         ]
+      },
+      {
+        "id": "bugfix-version-comparison-none",
+        "title": "Fix Version Comparison NoneType Errors",
+        "description": "Add defensive None checks in version_diff.py lines 369, 384, 408 to prevent AttributeError when calling .lower() on joined None values in semantic_changes",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "small",
+        "impact": "high",
+        "estimatedHours": 3,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "bugfix-preingestion-validation",
+        "title": "Fix Pre-ingestion Parameter Validation",
+        "description": "Debug and fix parameter validation errors in StartPreIngestionRequest that prevent pre-ingestion initialization",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "small",
+        "impact": "high",
+        "estimatedHours": 4,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "bugfix-stdlib-item-retrieval",
+        "title": "Fix Standard Library Item Retrieval",
+        "description": "Complete implementation of std library function/type retrieval - currently only module listing works",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "small",
+        "impact": "high",
+        "estimatedHours": 3,
+        "relatedTasks": [],
+        "roadblocks": []
+      },
+      {
+        "id": "bugfix-mcp-manifest-validation",
+        "title": "Fix MCP Manifest Validation Errors",
+        "description": "Fix output validation errors in MCP manifest generation that prevent proper MCP client integration",
+        "status": "completed",
+        "priority": "critical",
+        "progress": 100,
+        "dependencies": [],
+        "effort": "small",
+        "impact": "high",
+        "estimatedHours": 2,
+        "relatedTasks": [],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-11T12:00:00Z",
+          "implementation": "Fixed by adding anyOf patterns to compare_versions tool schema for include_unchanged and max_results fields. Added field validators with mode='before' for string-to-type coercion.",
+          "notes": "Fixed by adding anyOf patterns to compare_versions tool schema for include_unchanged and max_results fields. Added field validators with mode='before' for string-to-type coercion."
+        }
       }
     ],
     "medium": [
