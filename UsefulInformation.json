@@ -262,6 +262,25 @@
           "dateEncountered": "2025-08-09",
           "relatedFiles": ["src/docsrs_mcp/validation.py"],
           "codeExample": "import re\n\n# Module level - compiled once\nMODULE_PATH_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z_][a-zA-Z0-9_]*)*$')\nERROR_TEMPLATES = {\n    'invalid_path': 'Invalid module path format. Got: {value}. Examples: \"std::collections\", \"serde::de\"'\n}\n\ndef validate_module_path(value: str) -> str:\n    if not MODULE_PATH_PATTERN.match(value):\n        raise ValueError(ERROR_TEMPLATES['invalid_path'].format(value=repr(value)[:100]))\n    return value"
+        },
+        {
+          "error": "AttributeError: 'NoneType' object has no attribute 'lower' in version_diff.py line 416",
+          "context": "Processing item type mapping in _map_item_type method during version comparison operations",
+          "rootCause": "_map_item_type method attempted to call .lower() on None values returned from data structure lookups, causing AttributeError when item_type is None",
+          "solution": "Add defensive None check before string operations, return default ItemKind.FUNCTION for None values",
+          "implementation": [
+            "Add explicit None validation before calling .lower() method",
+            "Return sensible default (ItemKind.FUNCTION) when item_type is None",
+            "Ensure all string method calls are protected with None checks"
+          ],
+          "prevention": "Always validate potentially None values before calling methods, even when dict.get() has a default value - the default might still be None in some cases",
+          "testingCommand": "curl -X POST http://localhost:8000/mcp/tools/compare_versions -H 'Content-Type: application/json' -d '{\"crate_name\": \"serde\", \"version_a\": \"1.0.0\", \"version_b\": \"1.1.0\"}'",
+          "lessonLearned": "dict.get() with a default value doesn't guarantee non-None results - the stored value itself might be None, requiring additional validation",
+          "dateEncountered": "2025-08-11",
+          "relatedFiles": ["src/docsrs_mcp/version_diff.py"],
+          "affectedLines": ["version_diff.py:416"],
+          "codeExample": "# Before (causes AttributeError):\ndef _map_item_type(self, item_type):\n    return ITEM_KIND_MAP.get(item_type, ItemKind.FUNCTION).lower()  # Fails if item_type is None\n\n# After (handles None values correctly):\ndef _map_item_type(self, item_type):\n    if item_type is None:\n        return ItemKind.FUNCTION\n    return ITEM_KIND_MAP.get(item_type, ItemKind.FUNCTION)",
+          "pattern": "Defensive None validation before method calls on potentially None values"
         }
       ]
     },

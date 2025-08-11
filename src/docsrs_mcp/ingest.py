@@ -2516,7 +2516,7 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     compressed_content, download_url = await download_rustdoc(
                         session, crate_name, resolved_version, rustdoc_url
                     )
-                except Exception as e:
+                except Exception:
                     # Only fall back to latest if this specific version doesn't have rustdoc JSON
                     # Check for the specific exception type that indicates version unavailability
                     # is_version_not_found = (

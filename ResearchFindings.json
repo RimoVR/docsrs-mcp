@@ -1002,6 +1002,34 @@
           "list_operations": "filtered = [item for item in items if item is not None]"
         }
       },
+      "none_handling_best_practices": {
+        "comparison_operators": {
+          "pep8_requirement": "Always use 'is None' instead of '== None' for None comparisons",
+          "performance": "'is None' is faster than '== None' - identity vs equality",
+          "reliability": "'is None' prevents unexpected behavior with custom __eq__ methods"
+        },
+        "type_hints": {
+          "nullable_params": "Use Optional[T] or T | None type hints to indicate nullable parameters",
+          "documentation": "Type hints serve as inline documentation for None expectations",
+          "static_analysis": "Enables mypy and other tools to catch None-related errors"
+        },
+        "error_logging": {
+          "context_importance": "Log None-related errors with context using appropriate levels",
+          "warning_level": "Use logging.warning() for recoverable None scenarios with fallback handling",
+          "error_level": "Use logging.error() for critical None scenarios that prevent operation completion",
+          "structured_logging": "Include variable names, expected types, and operation context in log messages"
+        },
+        "dict_operations": {
+          "get_method_risk": "dict.get() can return None unexpectedly when keys are missing",
+          "safe_pattern": "value = data.get('key', default_value) instead of assuming key exists",
+          "validation": "Always validate dict.get() return values before use in operations"
+        },
+        "attribute_prevention": {
+          "common_error": "Defensive programming prevents AttributeError: 'NoneType' object has no attribute",
+          "guard_clauses": "Use early return patterns: if obj is None: return default_value",
+          "safe_chaining": "Use getattr(obj, 'attr', None) for safe attribute access chains"
+        }
+      },
       "none_handling_performance": {
         "key_finding": "List comprehensions with 'is not None' checks are 40% faster than filter() for None filtering",
         "pep8_compliance": "Always use 'is None' and 'is not None' for None comparisons (PEP 8 requirement)",
@@ -1125,7 +1153,12 @@
       "Include parameter path and expected formats in validation error messages",
       "Use isinstance(v, bool) fast path followed by string validation in Pydantic boolean validators",
       "Accept standard truthy strings ('true', '1', 'yes', 'on') case-insensitively for MCP compatibility",
-      "Return False as default for invalid/None inputs in boolean validators for consistency"
+      "Return False as default for invalid/None inputs in boolean validators for consistency",
+      "Use 'is None' instead of '== None' for PEP 8 compliant None comparisons (faster, more reliable)",
+      "Add Optional[T] or T | None type hints to indicate nullable parameters for better documentation",
+      "Log None-related errors with appropriate levels: warning for recoverable, error for critical scenarios",
+      "Validate dict.get() return values before operations as keys may be missing unexpectedly",
+      "Use guard clauses and getattr() patterns to prevent AttributeError: 'NoneType' object has no attribute"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",

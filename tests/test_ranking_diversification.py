@@ -34,9 +34,11 @@ class TestMMRDiversification:
 
         # Create mock embeddings for the results
         embeddings = self._create_mock_embeddings(len(ranked_results))
-        
+
         # Apply MMR with balanced lambda (0.6)
-        results = _apply_mmr_diversification(ranked_results, embeddings, k=3, lambda_param=0.6)
+        results = _apply_mmr_diversification(
+            ranked_results, embeddings, k=3, lambda_param=0.6
+        )
 
         # Should return 3 results
         assert len(results) == 3
@@ -68,9 +70,11 @@ class TestMMRDiversification:
 
         # Create mock embeddings for the results
         embeddings = self._create_mock_embeddings(len(ranked_results))
-        
+
         # High lambda (0.9) should favor relevance
-        results = _apply_mmr_diversification(ranked_results, embeddings, k=3, lambda_param=0.9)
+        results = _apply_mmr_diversification(
+            ranked_results, embeddings, k=3, lambda_param=0.9
+        )
 
         assert len(results) == 3
         # Should mostly follow original ranking
@@ -94,9 +98,11 @@ class TestMMRDiversification:
 
         # Create mock embeddings for the results
         embeddings = self._create_mock_embeddings(len(ranked_results))
-        
+
         # Low lambda (0.3) should favor diversity
-        results = _apply_mmr_diversification(ranked_results, embeddings, k=3, lambda_param=0.3)
+        results = _apply_mmr_diversification(
+            ranked_results, embeddings, k=3, lambda_param=0.3
+        )
 
         assert len(results) == 3
         # First is still highest scoring
@@ -126,9 +132,11 @@ class TestMMRDiversification:
 
         # Create mock embeddings for the results
         embeddings = self._create_mock_embeddings(len(ranked_results))
-        
+
         # With moderate lambda, should diversify across modules
-        results = _apply_mmr_diversification(ranked_results, embeddings, k=3, lambda_param=0.5)
+        results = _apply_mmr_diversification(
+            ranked_results, embeddings, k=3, lambda_param=0.5
+        )
 
         assert len(results) == 3
         result_paths = [r[1] for r in results]
@@ -159,7 +167,9 @@ class TestMMRDiversification:
         ]
 
         embeddings = self._create_mock_embeddings(len(ranked_results))
-        results = _apply_mmr_diversification(ranked_results, embeddings, k=5, lambda_param=0.6)
+        results = _apply_mmr_diversification(
+            ranked_results, embeddings, k=5, lambda_param=0.6
+        )
         assert len(results) == 1
         assert results[0][1] == "std::vec::Vec"
 
@@ -171,7 +181,9 @@ class TestMMRDiversification:
         ]
 
         embeddings = self._create_mock_embeddings(len(ranked_results))
-        results = _apply_mmr_diversification(ranked_results, embeddings, k=5, lambda_param=0.6)
+        results = _apply_mmr_diversification(
+            ranked_results, embeddings, k=5, lambda_param=0.6
+        )
         assert len(results) == 2  # Should return all available
 
     def test_mmr_preserves_content(self):
@@ -183,7 +195,9 @@ class TestMMRDiversification:
         ]
 
         embeddings = self._create_mock_embeddings(len(ranked_results))
-        results = _apply_mmr_diversification(ranked_results, embeddings, k=2, lambda_param=0.6)
+        results = _apply_mmr_diversification(
+            ranked_results, embeddings, k=2, lambda_param=0.6
+        )
 
         # Check that all fields are preserved
         for score, path, header, content in results:
@@ -208,7 +222,7 @@ class TestMMRDiversification:
 
         # Create mock embeddings for the results
         embeddings = self._create_mock_embeddings(len(ranked_results))
-        
+
         # Lambda = 1.0 (pure relevance)
         results_relevance = _apply_mmr_diversification(
             ranked_results, embeddings, k=3, lambda_param=1.0

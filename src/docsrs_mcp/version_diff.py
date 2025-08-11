@@ -399,8 +399,31 @@ class VersionDiffEngine:
 
         return None
 
-    def _map_item_type(self, type_str: str) -> ItemKind:
-        """Map database item type to ItemKind enum."""
+    def _map_item_type(self, type_str: str | None) -> ItemKind:
+        """Map database item type to ItemKind enum with defensive handling.
+
+        Args:
+            type_str: Database item type string, can be None
+
+        Returns:
+            ItemKind enum value, defaults to FUNCTION if type unknown or None
+        """
+        # Defensive None check following codebase patterns
+        if type_str is None:
+            logger.warning("Received None for item_type, using FUNCTION as default")
+            return ItemKind.FUNCTION
+
+        # Additional type safety check
+        if not isinstance(type_str, str):
+            logger.warning(
+                f"Unexpected type for item_type: {type(type_str).__name__}, using FUNCTION as default"
+            )
+            return ItemKind.FUNCTION
+
+        # Normalize string for mapping lookup
+        type_str_normalized = type_str.lower().strip()
+
+        # Map to ItemKind enum
         mapping = {
             "function": ItemKind.FUNCTION,
             "struct": ItemKind.STRUCT,
@@ -413,7 +436,14 @@ class VersionDiffEngine:
             "macro": ItemKind.MACRO,
             "impl": ItemKind.IMPL,
         }
-        return mapping.get(type_str.lower(), ItemKind.FUNCTION)
+
+        result = mapping.get(type_str_normalized, ItemKind.FUNCTION)
+
+        # Log unknown types for monitoring (debug level to avoid spam)
+        if type_str_normalized not in mapping:
+            logger.debug(f"Unknown item type '{type_str}', defaulting to FUNCTION")
+
+        return result
 
 
 # Global engine instance
