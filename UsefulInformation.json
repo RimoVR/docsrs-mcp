@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-01-11",
+  "lastUpdated": "2025-08-11",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -1339,6 +1339,23 @@
           "relatedFiles": ["src/docsrs_mcp/database.py"],
           "performanceNotes": "Bidirectional indexes enable O(log n) lookup performance in both directions without table scans",
           "codeExample": "# Forward lookup (alias -> actual)\nSELECT actual_path FROM cross_references WHERE crate_id = ? AND alias_path = ?\n\n# Reverse lookup (actual -> aliases)\nSELECT alias_path FROM cross_references WHERE crate_id = ? AND actual_path = ?"
+        },
+        {
+          "error": "Standard library items could not be retrieved - only \"crate\" entry was stored",
+          "rootCause": "Standard library rustdoc JSON is not available on docs.rs, causing stdlib queries to return minimal \"crate\" entry instead of item documentation",
+          "solution": "Implemented create_stdlib_fallback_documentation() function that generates basic documentation for common stdlib items when rustdoc JSON is unavailable",
+          "context": "Stdlib documentation ingestion and retrieval for common Rust standard library types",
+          "implementation": [
+            "Create fallback documentation generator for stdlib items",
+            "Provide basic type information and common usage patterns",
+            "Cover essential types like std::vec::Vec, core::option::Option, std::result::Result",
+            "Enable partial stdlib functionality until full rustdoc JSON support is available"
+          ],
+          "pattern": "Graceful degradation with fallback documentation when external sources are unavailable",
+          "dateEncountered": "2025-08-11",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py"],
+          "codeExample": "def create_stdlib_fallback_documentation(item_path: str) -> dict:\n    \"\"\"Generate basic documentation for stdlib items when rustdoc JSON unavailable\"\"\"\n    fallback_docs = {\n        'std::vec::Vec': {\n            'name': 'Vec',\n            'docs': 'A contiguous growable array type.',\n            'kind': 'struct'\n        },\n        'core::option::Option': {\n            'name': 'Option',\n            'docs': 'Type representing an optional value.',\n            'kind': 'enum'\n        }\n    }\n    return fallback_docs.get(item_path, {'name': item_path.split('::')[-1], 'docs': 'Standard library item', 'kind': 'unknown'})",
+          "result": "Enables retrieval of std::vec::Vec, core::option::Option, and other stdlib items with basic documentation until full rustdoc JSON support is available"
         }
       ]
     },

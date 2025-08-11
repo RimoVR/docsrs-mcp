@@ -254,6 +254,12 @@
           "tier1_to_tier2": "RustdocVersionNotFoundError or parsing failure",
           "tier2_to_tier3": "CDN unavailable or extraction timeout",
           "performance": "Sub-500ms search maintained across all tiers"
+        },
+        "stdlib_special_case": {
+          "limitation": "Standard library crates (std, core, alloc, proc_macro, test) bypass tier1",
+          "reason": "Not published on crates.io, docs.rs redirects to doc.rust-lang.org HTML",
+          "fallback_strategy": "Direct tier3 fallback with basic functionality",
+          "user_solution": "rustup component add --toolchain nightly rust-docs-json for complete stdlib JSON"
         }
       }
     },
@@ -349,6 +355,13 @@
           "streaming": "ijson for large files",
           "mem_mgmt": "Chunk processing",
           "caching": "Aggressive - expensive parsing"
+        },
+        "docs_rs_limitations": {
+          "json_unavailable": "Standard library rustdoc JSON NOT available on docs.rs",
+          "redirect_issue": "docs.rs/std URLs redirect to doc.rust-lang.org which serves HTML only",
+          "crates_io_absence": "Stdlib crates (std, core, alloc, proc_macro, test) not published on crates.io",
+          "json_access_method": "rustup component add --toolchain nightly rust-docs-json required",
+          "fallback_implemented": "Basic stdlib functionality provided via fallback mechanism when JSON unavailable"
         }
       },
       "cross_reference_support": {
@@ -1048,7 +1061,9 @@
       "p2: Test MCP validation with actual clients, not just unit tests",
       "p2: Implement defensive programming patterns for NoneType handling",
       "p2: Use field validators with mode='before' for MCP client compatibility",
-      "p2: Use isinstance(v, bool) fast path in Pydantic boolean validators for MCP parameter compatibility"
+      "p2: Use isinstance(v, bool) fast path in Pydantic boolean validators for MCP parameter compatibility",
+      "p2: Standard library rustdoc JSON unavailable on docs.rs - implement fallback for std/core/alloc crates",
+      "p2: Inform users to install rust-docs-json component via rustup for complete stdlib documentation"
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",

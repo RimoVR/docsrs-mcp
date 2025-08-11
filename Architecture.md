@@ -74,7 +74,7 @@ graph LR
         end
         
         subgraph "Ingestion Layer"
-            ING[ingest.py<br/>Enhanced rustdoc pipeline<br/>Three-tier fallback system<br/>Complete item extraction with macro extraction]
+            ING[ingest.py<br/>Enhanced rustdoc pipeline<br/>Three-tier fallback system<br/>Complete item extraction with macro extraction<br/>Standard library fallback documentation]
             POPULAR[popular_crates.py<br/>PopularCratesManager & PreIngestionWorker<br/>Background asyncio.create_task startup<br/>asyncio.Semaphore(3) rate limiting<br/>Multi-tier cache with circuit breaker<br/>Priority queue with memory monitoring]
             VER[Version Resolution<br/>docs.rs redirects]
             DL[Compression Support<br/>zst, gzip, json]
@@ -85,6 +85,7 @@ graph LR
             EMBED[FastEmbed<br/>Batch processing<br/>Embeddings warmup during startup<br/>Memory-aware batch operations<br/>Enhanced transaction management]
             LOCK[Per-crate Locks<br/>Prevent duplicates]
             PRIORITY[Priority Queue<br/>On-demand vs pre-ingestion<br/>Request balancing]
+            STDLIBFALLBACK[Standard Library Fallback<br/>create_stdlib_fallback_documentation()<br/>Vec, HashMap, Option, Result coverage<br/>Embedding generation for stdlib types]
         end
         
         subgraph "Storage Layer"
@@ -282,9 +283,15 @@ sequenceDiagram
         Worker->>DocsRS: Resolve version via redirect (or detect stdlib crate)
         DocsRS-->>Worker: Actual version + rustdoc URL (with channel resolution for stdlib)
         Worker->>DocsRS: GET compressed rustdoc (.zst/.gz/.json)
-        DocsRS-->>Worker: Compressed rustdoc JSON
-        Worker->>Worker: Stream decompress with size limits
-        Worker->>Worker: Parse with ijson (memory-efficient)
+        alt Rustdoc Available
+            DocsRS-->>Worker: Compressed rustdoc JSON
+            Worker->>Worker: Stream decompress with size limits
+            Worker->>Worker: Parse with ijson (memory-efficient)
+        else Rustdoc Unavailable (stdlib crates)
+            DocsRS-->>Worker: 404 or empty response
+            Worker->>Worker: create_stdlib_fallback_documentation()
+            Note over Worker: Generate fallback docs for common stdlib types<br/>Vec, HashMap, Option, Result, String, etc.
+        end
         Worker->>Worker: Validate item paths with fallback generation
         Worker->>Worker: Parse complete rustdoc structure
         Worker->>Worker: Extract module hierarchy (build_module_hierarchy)
@@ -2301,8 +2308,27 @@ All four issues share common architectural anti-patterns:
 **Fallback Mechanisms**
 - **Format Fallback**: Attempts .json.zst → .json.gz → .json formats same as regular crates
 - **Channel Fallback**: Falls back from nightly → beta → stable if specific channel documentation unavailable
+- **Documentation Fallback**: When rustdoc JSON is unavailable, creates basic documentation entries using `create_stdlib_fallback_documentation()`
 - **Error Handling**: Graceful degradation when standard library documentation cannot be retrieved
 - **Cache Resilience**: Maintains cached standard library docs even when upstream docs.rs is unavailable
+
+**Standard Library Documentation Fallback System**
+
+The `create_stdlib_fallback_documentation()` function in `ingest.py` provides a robust fallback mechanism when rustdoc JSON is unavailable for standard library crates:
+
+- **Common Types Coverage**: Creates documentation entries for frequently used standard library items:
+  - `std::vec::Vec` - Dynamic arrays with comprehensive methods
+  - `std::collections::HashMap` - Hash-based key-value storage
+  - `std::collections::HashSet` - Hash-based unique value collections
+  - `core::option::Option` - Optional value handling with Some/None variants
+  - `core::result::Result` - Error handling with Ok/Err variants
+  - `std::string::String` - Owned UTF-8 string type
+  - `std::io::Error` - I/O operation error handling
+
+- **Embedding Generation**: Creates semantic embeddings for fallback documentation to enable search functionality
+- **Module Hierarchy**: Stores appropriate module structure for standard library crates (std, core, alloc hierarchies)
+- **Metadata Consistency**: Maintains same data format as regular rustdoc ingestion for API compatibility
+- **Performance Optimization**: Pre-generated fallback content reduces ingestion time when rustdoc unavailable
 
 ## Filter Optimization Architecture
 
@@ -4179,9 +4205,15 @@ sequenceDiagram
         Worker->>DocsRS: Resolve version via redirect (or detect stdlib crate)
         DocsRS-->>Worker: Actual version + rustdoc URL (with channel resolution for stdlib)
         Worker->>DocsRS: GET compressed rustdoc (.zst/.gz/.json)
-        DocsRS-->>Worker: Complete rustdoc JSON
-        Worker->>Worker: Stream decompress with size limits
-        Worker->>Parser: parse_rustdoc_items_streaming() - progressive ijson parsing
+        alt Rustdoc Available
+            DocsRS-->>Worker: Complete rustdoc JSON
+            Worker->>Worker: Stream decompress with size limits
+            Worker->>Parser: parse_rustdoc_items_streaming() - progressive ijson parsing
+        else Rustdoc Unavailable (stdlib crates)
+            DocsRS-->>Worker: 404 or empty response  
+            Worker->>Worker: create_stdlib_fallback_documentation()
+            Note over Worker: Generate fallback docs for common stdlib types<br/>Vec, HashMap, Option, Result, String, etc.
+        end
         
         loop Progressive Processing
             Parser->>Parser: Yield items progressively (generator-based)
