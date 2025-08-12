@@ -305,8 +305,22 @@ def coerce_to_int_with_bounds(
             )
         )
 
-    # Handle string inputs from MCP clients
+    # Handle string inputs from MCP clients with edge cases
     if isinstance(value, str):
+        # Strip whitespace first
+        value = value.strip()
+
+        # Handle empty strings and null-like values
+        if not value or value.lower() in ("null", "undefined", "none", "nan"):
+            if not examples:
+                examples = [min_val, (min_val + max_val) // 2, max_val]
+            raise ValueError(
+                format_error_message(
+                    "required", field=field_name, examples=format_examples(examples)
+                )
+            )
+
+        # Try to convert to integer
         try:
             value = int(value)
         except ValueError as e:

@@ -55,6 +55,7 @@ from .models import (
     VersionDiffResponse,
 )
 from .popular_crates import (
+    WorkerState,
     _ingestion_scheduler,
     _popular_crates_manager,
     _pre_ingestion_worker,
@@ -260,10 +261,23 @@ async def health_check():
     popular_crates_status = get_popular_crates_status()
     if popular_crates_status and any(popular_crates_status.values()):
         subsystems["pre_ingestion"] = popular_crates_status
-        # Check if pre-ingestion is actively running
-        ingestion_stats = popular_crates_status.get("ingestion_stats", {})
-        if ingestion_stats.get("is_running"):
-            subsystems["pre_ingestion"]["status"] = "active"
+
+        # Check worker state using proper enum comparison
+        if _pre_ingestion_worker:
+            worker_state = _pre_ingestion_worker._state
+            is_running = worker_state == WorkerState.RUNNING
+
+            # Update status based on actual worker state
+            if is_running:
+                subsystems["pre_ingestion"]["status"] = "active"
+            elif worker_state == WorkerState.PAUSED:
+                subsystems["pre_ingestion"]["status"] = "paused"
+            elif worker_state == WorkerState.STOPPED:
+                subsystems["pre_ingestion"]["status"] = "stopped"
+            else:
+                subsystems["pre_ingestion"]["status"] = "idle"
+
+            subsystems["pre_ingestion"]["worker_state"] = worker_state.value
         else:
             subsystems["pre_ingestion"]["status"] = "idle"
 
@@ -350,13 +364,15 @@ async def pre_ingestion_health():
     if not _pre_ingestion_worker:
         return {"status": "not_initialized", "message": "Pre-ingestion is not enabled"}
 
+    # Check worker state using proper enum comparison
+    worker_state = _pre_ingestion_worker._state
+    is_running = worker_state == WorkerState.RUNNING
+
     response = {
         "status": "healthy",
         "worker": {
-            "running": _pre_ingestion_worker._monitor_task is not None
-            and not _pre_ingestion_worker._monitor_task.done()
-            if _pre_ingestion_worker
-            else False,
+            "running": is_running,
+            "state": worker_state.value,
             "stats": _pre_ingestion_worker.get_ingestion_stats()
             if _pre_ingestion_worker
             else {},

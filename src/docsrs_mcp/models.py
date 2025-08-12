@@ -431,7 +431,14 @@ class SearchItemsRequest(BaseModel):
     def coerce_k_to_int(cls, v):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
-            return v
+            return 5  # Default value for SearchItemsRequest
+
+        # Handle empty strings and whitespace edge cases
+        if isinstance(v, str):
+            v = v.strip()
+            if not v or v.lower() in ("null", "undefined", "none"):
+                return 5  # Default for empty/null-like strings
+
         # Use enhanced validation with examples
         from docsrs_mcp.validation import coerce_to_int_with_bounds
 
@@ -1114,7 +1121,14 @@ class SearchExamplesRequest(BaseModel):
     def coerce_k_to_int(cls, v):
         """Convert string numbers to int for MCP client compatibility."""
         if v is None:
-            return 5  # Default value
+            return 5  # Default value for SearchExamplesRequest
+
+        # Handle empty strings and whitespace edge cases
+        if isinstance(v, str):
+            v = v.strip()
+            if not v or v.lower() in ("null", "undefined", "none"):
+                return 5  # Default for empty/null-like strings
+
         # Use enhanced validation with examples
         from docsrs_mcp.validation import coerce_to_int_with_bounds
 
@@ -1197,7 +1211,10 @@ class StartPreIngestionRequest(BaseModel):
         if isinstance(v, bool):
             return v
         if isinstance(v, str):
-            return v.lower() in ("true", "1", "yes", "on")
+            v_lower = v.lower().strip()
+            return v_lower in ("true", "1", "yes", "on", "t", "y")
+        if isinstance(v, (int, float)):
+            return bool(v)
         return False  # default
 
     @field_validator("concurrency", mode="before")

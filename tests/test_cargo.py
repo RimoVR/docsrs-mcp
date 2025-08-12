@@ -208,9 +208,7 @@ class TestVersionResolution:
 
         # Mock crate info responses (simplified resolution uses max_stable_version)
         mock_crate_info = {
-            "serde": {
-                "max_stable_version": "1.0.197"
-            },
+            "serde": {"max_stable_version": "1.0.197"},
             "tokio": {"max_stable_version": "1.35.1"},
         }
 

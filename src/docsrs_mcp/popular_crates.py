@@ -844,19 +844,32 @@ class PreIngestionWorker:
         """Get pre-ingestion statistics for health endpoint with enhanced progress tracking."""
         stats = self.stats.copy()
 
-        # Add progress information
-        processed = stats["success"] + stats["failed"] + stats["skipped"]
-        stats["processed"] = processed
-        stats["remaining"] = stats["total"] - processed if stats["total"] > 0 else 0
-        stats["progress_percent"] = (
-            (processed / stats["total"] * 100) if stats["total"] > 0 else 0
+        # Safe calculation of processed count (ensure non-negative)
+        processed = max(
+            0,
+            stats.get("success", 0) + stats.get("failed", 0) + stats.get("skipped", 0),
         )
+        stats["processed"] = processed
 
-        # Add timing information
+        # Defensive bounds for total and remaining
+        total = max(0, stats.get("total", 0))
+        stats["total"] = total
+        stats["remaining"] = max(0, total - processed)
+
+        # Safe progress percentage (0-100 bounds)
+        if total > 0:
+            progress = processed / total * 100
+            stats["progress_percent"] = min(100.0, max(0.0, progress))
+        else:
+            stats["progress_percent"] = 0.0
+
+        # Add timing information with safe calculations
         if self._start_time:
             elapsed = (datetime.now() - self._start_time).total_seconds()
-            stats["elapsed_seconds"] = elapsed
-            stats["rate_per_second"] = processed / elapsed if elapsed > 0 else 0
+            stats["elapsed_seconds"] = max(0.0, elapsed)
+
+            # Safe rate calculation
+            stats["rate_per_second"] = processed / elapsed if elapsed > 0 else 0.0
 
             # Enhanced ETA calculation based on rolling average
             if self.processing_history and stats["remaining"] > 0:
@@ -864,25 +877,31 @@ class PreIngestionWorker:
                 successful_durations = [
                     h["duration"]
                     for h in self.processing_history
-                    if h.get("status") == "success"
+                    if h.get("status") == "success" and h.get("duration", 0) > 0
                 ]
                 if successful_durations:
                     avg_time = sum(successful_durations) / len(successful_durations)
                     # Account for concurrent processing
-                    effective_rate = (
-                        self._adaptive_concurrency / avg_time if avg_time > 0 else 0
-                    )
-                    eta_seconds = (
-                        stats["remaining"] / effective_rate if effective_rate > 0 else 0
-                    )
-                    stats["eta_seconds"] = int(eta_seconds)
-                    stats["eta_formatted"] = self._format_duration(int(eta_seconds))
-                    stats["avg_processing_time"] = avg_time
-            elif stats["remaining"] > 0 and stats["rate_per_second"] > 0:
+                    if avg_time > 0 and self._adaptive_concurrency > 0:
+                        effective_rate = self._adaptive_concurrency / avg_time
+                        eta_seconds = stats["remaining"] / effective_rate
+                        stats["eta_seconds"] = max(0, int(eta_seconds))
+                        stats["eta_formatted"] = self._format_duration(
+                            max(0, int(eta_seconds))
+                        )
+                        stats["avg_processing_time"] = avg_time
+                    else:
+                        stats["eta_seconds"] = 0
+                        stats["eta_formatted"] = "N/A"
+            elif stats["remaining"] > 0 and stats.get("rate_per_second", 0) > 0:
                 # Fallback to simple calculation if no history
                 eta_seconds = stats["remaining"] / stats["rate_per_second"]
-                stats["eta_seconds"] = int(eta_seconds)
-                stats["eta_formatted"] = self._format_duration(int(eta_seconds))
+                stats["eta_seconds"] = max(0, int(eta_seconds))
+                stats["eta_formatted"] = self._format_duration(max(0, int(eta_seconds)))
+            else:
+                # No ETA available
+                stats["eta_seconds"] = 0
+                stats["eta_formatted"] = "N/A"
 
         # Add current crate details
         stats["current_crate"] = self.current_crate
@@ -898,7 +917,7 @@ class PreIngestionWorker:
                 {
                     "crate": h["crate"],
                     "status": h.get("status", "unknown"),
-                    "duration": round(h.get("duration", 0), 2),
+                    "duration": round(max(0, h.get("duration", 0)), 2),
                 }
                 for h in recent
             ]
