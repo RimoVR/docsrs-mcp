@@ -1286,7 +1286,7 @@ class IngestCargoFileRequest(BaseModel):
         path = Path(v).resolve()
         if not path.exists():
             raise ValueError(f"File not found: {v}")
-        if path.name not in ["Cargo.toml", "Cargo.lock"]:
+        if path.name.lower() not in ["cargo.toml", "cargo.lock"]:
             raise ValueError(f"Must be Cargo.toml or Cargo.lock, got: {path.name}")
         return str(path)
 

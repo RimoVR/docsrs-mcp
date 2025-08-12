@@ -7,6 +7,54 @@
       "description": "Solutions to specific errors encountered during development",
       "entries": [
         {
+          "error": "compareVersions Schema Reference Error - PointerToNowhere for '/components/schemas/ItemChange'",
+          "rootCause": "MCP manifest uses $ref to ChangeCategory enum that doesn't exist in the schema structure. The schema references undefined components.",
+          "solution": "Replace $ref with inline enum array definitions in the MCP manifest schema. Define enum values directly instead of referencing external components.",
+          "context": "MCP manifest schema validation failing on tool parameter definitions",
+          "lesson": "Always validate that $ref paths exist in the actual schema structure before using them in MCP manifests",
+          "pattern": "Use inline enum definitions instead of $ref for simple value constraints",
+          "dateEncountered": "2025-08-12",
+          "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/mcp_tools.py"],
+          "codeExample": "# Instead of:\n\"changeType\": {\"$ref\": \"#/components/schemas/ChangeCategory\"}\n# Use:\n\"changeType\": {\"type\": \"string\", \"enum\": [\"major\", \"minor\", \"patch\", \"prerelease\"]}",
+          "debuggingTechnique": "Use MCP tools to trace schema generation and compare manifest schemas with actual Pydantic model definitions"
+        },
+        {
+          "error": "K Parameter Validation Errors - searchItems and startPreIngestion reject integer parameters",
+          "rootCause": "Despite anyOf patterns in schema, validation order issues persist. Field validators may not be properly coercing parameters to expected types.",
+          "solution": "Ensure field validators exist with coerce_to_int_with_bounds function. Add defensive bounds checking and proper integer coercion in validation chain.",
+          "context": "MCP tool parameter validation failing on numeric inputs that should be valid",
+          "lesson": "anyOf patterns alone are insufficient - explicit field validators are required for type coercion in MCP tools",
+          "pattern": "Implement coerce_to_int_with_bounds validators for all numeric parameters in MCP tools",
+          "dateEncountered": "2025-08-12",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools.py", "src/docsrs_mcp/validators.py"],
+          "codeExample": "@field_validator('k', mode='before')\n@classmethod\ndef coerce_k(cls, v):\n    return coerce_to_int_with_bounds(v, min_val=1, max_val=100)",
+          "debuggingTechnique": "Test with curl to isolate MCP client vs server validation issues"
+        },
+        {
+          "error": "File Path Validation Too Restrictive - Rejects case variations of Cargo.toml",
+          "rootCause": "Exact case-sensitive matching against hardcoded filename patterns. File validation logic uses strict string equality instead of case-insensitive comparison.",
+          "solution": "Use path.name.lower() for case-insensitive comparison when validating common configuration files like Cargo.toml.",
+          "context": "File validation rejecting valid files due to case sensitivity in cross-platform environments",
+          "lesson": "File validation should be case-insensitive for common configuration files to support different naming conventions across platforms",
+          "pattern": "Always use .lower() comparison for configuration file validation",
+          "dateEncountered": "2025-08-12",
+          "relatedFiles": ["src/docsrs_mcp/validators.py", "src/docsrs_mcp/ingest.py"],
+          "codeExample": "# Instead of:\nif path.name == 'Cargo.toml':\n# Use:\nif path.name.lower() == 'cargo.toml':",
+          "debuggingTechnique": "Compare exact path strings and test with various case combinations to identify validation failures"
+        },
+        {
+          "error": "No Partial Ingestion Status - Users can't determine ingestion progress",
+          "rootCause": "Response models lack real-time progress fields. Existing crate_progress data is tracked internally but not exposed to users.",
+          "solution": "Expose existing crate_progress data in health endpoints. Add progress fields to response models for long-running operations.",
+          "context": "Users need visibility into ingestion progress for large crates or when operations are slow",
+          "lesson": "Always expose progress information for long-running operations to improve user experience",
+          "pattern": "Include progress fields in all long-running operation response models",
+          "dateEncountered": "2025-08-12",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "codeExample": "# Add to response model:\n@dataclass\nclass IngestionResponse:\n    status: str\n    progress: Optional[Dict[str, int]] = None  # {crate_name: items_processed}\n    total_crates: Optional[int] = None",
+          "debuggingTechnique": "Monitor internal progress tracking variables and expose them through API endpoints"
+        },
+        {
           "error": "CLI/MCP parameter synchronization issue - MCP mode checking args.pre_ingest directly instead of environment variables",
           "rootCause": "Inconsistent parameter handling between REST and MCP modes. MCP mode was checking args.pre_ingest directly instead of using environment variables",
           "solution": "Unified both modes to use config.PRE_INGEST_ENABLED environment variable. Set environment variables before module imports to ensure configuration visibility across different server modes.",
@@ -316,6 +364,76 @@
           "relatedFiles": ["src/docsrs_mcp/ingest.py"],
           "affectedLines": ["ingest.py:2641"],
           "codeExample": "# Expanded stdlib_items dictionary with comprehensive coverage\nstdlib_items = {\n    'std': 62,  # Previously 15-16, now includes Vec, HashMap, Result, etc.\n    'core': 68,  # Expanded core types and traits\n    'alloc': 43  # Memory allocation types\n}\n\n# Enhanced warning with tutorial when stdlib fallback triggered\nif is_stdlib_crate(crate_name):\n    logger.warning(f\"Stdlib documentation limited to fallback items. For complete stdlib docs, install: 'rustup component add --toolchain nightly rust-docs-json'\")\n    # Show coverage limitation and alternatives\n    logger.info(f\"Current fallback provides {len(fallback_items)} items. Local JSON provides complete coverage.\")"
+        },
+        {
+          "error": "MCP Schema anyOf Pattern Missing for Numeric Parameters",
+          "rootCause": "MCP tools were rejecting integer values for numeric parameters due to missing anyOf patterns in the JSON schema. MCP clients may send numeric values as integers or strings.",
+          "solution": "Add anyOf pattern with both integer and string types for numeric parameters in MCP manifest schema definitions to handle both integer and string inputs from different MCP clients.",
+          "context": "MCP tool parameter validation failing on numeric inputs that should accept both integer and string representations",
+          "implementation": [
+            "Added anyOf pattern with integer and string types in MCP manifest",
+            "Maintained minimum and maximum validation constraints",
+            "Applied to concurrency parameter in ingest_cargo_file tool"
+          ],
+          "lesson": "MCP clients may serialize numeric parameters differently - always use anyOf patterns to accept both integer and string types for numeric parameters",
+          "pattern": "Use anyOf pattern for numeric parameters: {'anyOf': [{'type': 'integer'}, {'type': 'string'}], 'minimum': min_val, 'maximum': max_val}",
+          "dateEncountered": "2025-08-12",
+          "relatedFiles": ["app.py"],
+          "codeExample": "\"concurrency\": {\n    \"anyOf\": [{\"type\": \"integer\"}, {\"type\": \"string\"}],\n    \"minimum\": 1,\n    \"maximum\": 10,\n    \"description\": \"Number of concurrent requests for dependency resolution\"\n}",
+          "debuggingTechnique": "Test MCP tools with both integer and string values to verify schema accepts both formats"
+        },
+        {
+          "error": "Case-Sensitive File Path Validation Rejection",
+          "rootCause": "File path validation was rejecting lowercase 'cargo.toml' when expecting 'Cargo.toml' due to exact case-sensitive string matching against hardcoded patterns.",
+          "solution": "Use case-insensitive comparison for configuration file names by converting to lowercase before comparison to support different naming conventions across platforms.",
+          "context": "Cross-platform file validation where different systems may use different case conventions for configuration files",
+          "implementation": [
+            "Changed from exact case match to case-insensitive comparison",
+            "Applied to both Cargo.toml and Cargo.lock validation",
+            "Updated validation in multiple modules where file path checking occurs"
+          ],
+          "lesson": "Configuration file validation should be case-insensitive to support cross-platform compatibility and different naming conventions",
+          "pattern": "Always use .lower() comparison for configuration file validation: path.name.lower() in ['cargo.toml', 'cargo.lock']",
+          "dateEncountered": "2025-08-12",
+          "relatedFiles": ["models.py", "cargo.py"],
+          "affectedLines": ["models.py:1289", "cargo.py:396-399"],
+          "codeExample": "# Before (case-sensitive):\nif path.name not in [\"Cargo.toml\", \"Cargo.lock\"]:\n    raise ValueError(\"Invalid file\")\n\n# After (case-insensitive):\nif path.name.lower() not in [\"cargo.toml\", \"cargo.lock\"]:\n    raise ValueError(\"Invalid file\")",
+          "debuggingTechnique": "Test with various case combinations to identify validation failures and ensure cross-platform compatibility"
+        },
+        {
+          "error": "Health Endpoint Missing Progress Information",
+          "rootCause": "Health endpoints were not exposing ingestion progress information despite the data being tracked internally in _pre_ingestion_worker.crate_progress.",
+          "solution": "Access the existing crate_progress data from the pre-ingestion worker and expose it through health endpoint responses to provide real-time progress visibility.",
+          "context": "Users need visibility into ingestion progress for large operations or when monitoring system status through health endpoints",
+          "implementation": [
+            "Added progress data extraction from _pre_ingestion_worker.crate_progress",
+            "Exposed total, completed, failed, current, and percent fields",
+            "Updated both health_check and pre_ingestion_health endpoints"
+          ],
+          "lesson": "Always expose progress information for long-running operations through health and status endpoints to improve user experience and monitoring capabilities",
+          "pattern": "Extract progress from worker: worker.crate_progress for real-time status reporting",
+          "dateEncountered": "2025-08-12",
+          "relatedFiles": ["app.py"],
+          "codeExample": "\"ingestion_progress\": {\n    \"total\": worker.crate_progress[\"total\"],\n    \"completed\": worker.crate_progress[\"completed\"],\n    \"failed\": worker.crate_progress[\"failed\"],\n    \"current\": worker.crate_progress[\"current\"],\n    \"percent\": worker.crate_progress[\"percent\"]\n}",
+          "debuggingTechnique": "Monitor health endpoints during ingestion operations to verify progress reporting accuracy"
+        },
+        {
+          "error": "MCP Server Local Testing Difficulties",
+          "rootCause": "Testing MCP servers locally can be challenging without proper REST mode setup, making it difficult to verify tool functionality and debug issues.",
+          "solution": "Use REST mode for local testing of MCP servers, which provides HTTP endpoints that can be easily tested with curl or other HTTP clients.",
+          "context": "Development and testing workflow for MCP server functionality requires easy local verification method",
+          "implementation": [
+            "Start server with --mode rest flag for HTTP endpoint access",
+            "Use curl for direct tool testing with JSON payloads",
+            "Background process management with nohup for clean testing"
+          ],
+          "lesson": "REST mode provides the easiest way to test MCP server functionality locally without MCP client complexity",
+          "pattern": "Use REST mode for testing: uv run docsrs-mcp --mode rest, then test with curl",
+          "dateEncountered": "2025-08-12",
+          "relatedFiles": ["app.py"],
+          "codeExample": "# Start server in REST mode\nuv run docsrs-mcp --mode rest\n\n# Test tool functionality\ncurl -X POST http://localhost:8000/tools/{tool_name} \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"params\": {\"parameter\": \"value\"}}'",
+          "debuggingTechnique": "Use REST endpoints to isolate server-side issues from MCP client serialization or communication problems",
+          "testingBestPractice": "Always verify MCP tools work correctly in REST mode before testing through MCP clients"
         }
       ]
     },
@@ -2592,6 +2710,17 @@
     }
   },
   "debuggingTips": {
+    "mcpTroubleshooting": [
+      "Use MCP tools to trace schema generation and compare manifest with actual Pydantic models",
+      "Test MCP tool parameters with curl to isolate client vs server validation issues",
+      "Compare exact parameter types between MCP schema and tool implementation",
+      "Verify $ref paths exist in schema structure before using in MCP manifests",
+      "Check field validators are properly implemented for type coercion in MCP tools",
+      "Use inline enum definitions instead of $ref for simple value constraints in MCP schemas",
+      "Monitor internal progress tracking and expose through health endpoints for user visibility",
+      "Test file validation with various case combinations to identify platform-specific issues",
+      "Always implement case-insensitive comparison for configuration file validation"
+    ],
     "vectorSearch": [
       "Check embedding dimensions match (384 for BAAI/bge-small-en-v1.5)",
       "Verify FAISS index is properly initialized with vss_index!",

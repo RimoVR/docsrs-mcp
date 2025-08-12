@@ -266,6 +266,33 @@ async def health_check():
             subsystems["pre_ingestion"]["status"] = "active"
         else:
             subsystems["pre_ingestion"]["status"] = "idle"
+
+        # Add ingestion progress if available
+        if _pre_ingestion_worker and hasattr(_pre_ingestion_worker, "crate_progress"):
+            progress_data = _pre_ingestion_worker.crate_progress
+            subsystems["pre_ingestion"]["ingestion_progress"] = {
+                "active": len(
+                    [
+                        p
+                        for p in progress_data.values()
+                        if p["status"] in ["downloading", "processing"]
+                    ]
+                ),
+                "completed": len(
+                    [p for p in progress_data.values() if p["status"] == "completed"]
+                ),
+                "failed": len(
+                    [
+                        p
+                        for p in progress_data.values()
+                        if p["status"] in ["failed", "error"]
+                    ]
+                ),
+                "skipped": len(
+                    [p for p in progress_data.values() if p["status"] == "skipped"]
+                ),
+                "details": progress_data,
+            }
     else:
         subsystems["pre_ingestion"] = {"status": "not_initialized"}
 
@@ -335,6 +362,34 @@ async def pre_ingestion_health():
             else {},
         },
     }
+
+    # Add detailed ingestion progress if available
+    if _pre_ingestion_worker and hasattr(_pre_ingestion_worker, "crate_progress"):
+        progress_data = _pre_ingestion_worker.crate_progress
+        response["ingestion_progress"] = {
+            "active": len(
+                [
+                    p
+                    for p in progress_data.values()
+                    if p["status"] in ["downloading", "processing"]
+                ]
+            ),
+            "completed": len(
+                [p for p in progress_data.values() if p["status"] == "completed"]
+            ),
+            "failed": len(
+                [
+                    p
+                    for p in progress_data.values()
+                    if p["status"] in ["failed", "error"]
+                ]
+            ),
+            "skipped": len(
+                [p for p in progress_data.values() if p["status"] == "skipped"]
+            ),
+            "total": len(progress_data),
+            "details": progress_data,
+        }
 
     # Add scheduler status if available
     if _ingestion_scheduler:
@@ -682,7 +737,7 @@ async def get_mcp_manifest(request: Request):
                             "description": "Path to Cargo.toml or Cargo.lock file",
                         },
                         "concurrency": {
-                            "anyOf": [{"type": "integer"}, {"type": "null"}],
+                            "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "minimum": 1,
                             "maximum": 10,
                             "default": 3,
@@ -1571,6 +1626,7 @@ async def mcp_tool_ingest_cargo_file(
     from pathlib import Path
 
     import aiohttp
+
     from .cargo import extract_crates_from_cargo, resolve_cargo_versions
     from .popular_crates import check_crate_exists, queue_for_ingestion
 

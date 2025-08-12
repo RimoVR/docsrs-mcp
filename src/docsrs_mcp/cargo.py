@@ -393,9 +393,9 @@ def extract_crates_from_cargo(file_path: Path) -> list[str]:
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    if file_path.name == "Cargo.toml":
+    if file_path.name.lower() == "cargo.toml":
         return parse_cargo_toml(file_path)["crates"]
-    elif file_path.name == "Cargo.lock":
+    elif file_path.name.lower() == "cargo.lock":
         return parse_cargo_lock(file_path)["crates"]
     else:
         raise ValueError(
