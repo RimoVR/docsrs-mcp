@@ -1273,6 +1273,9 @@ class IngestCargoFileRequest(BaseModel):
     skip_existing: bool = Field(
         default=True, description="Skip already ingested crates"
     )
+    resolve_versions: bool = Field(
+        default=False, description="Resolve version specifications to concrete versions"
+    )
 
     @field_validator("file_path")
     @classmethod

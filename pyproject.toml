@@ -42,6 +42,7 @@ dependencies = [
     "tiktoken>=0.11.0",
     "numpy>=2.2.6",
     "toml>=0.10.2",
+    "semver>=3.0.4",
 ]
 
 [project.scripts]

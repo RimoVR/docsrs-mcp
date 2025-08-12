@@ -293,10 +293,90 @@ class SearchCache:
         }
 
 
-# Global cache instance
+# Global cache instances
 _search_cache = SearchCache()
 
 
 def get_search_cache() -> SearchCache:
     """Get the global search cache instance."""
     return _search_cache
+
+
+class CrateInfoCache:
+    """LRU cache for crate info with TTL support."""
+
+    def __init__(self, max_size: int = 1000, ttl: int = 3600):
+        """
+        Initialize the crate info cache.
+
+        Args:
+            max_size: Maximum number of cached entries
+            ttl: Time-to-live in seconds for cached entries (default 1 hour)
+        """
+        self.max_size = max_size
+        self.ttl = ttl
+        self._cache: dict[str, tuple[float, Any]] = {}
+        self._access_order: list[str] = []
+
+    def get(self, crate_name: str) -> Any | None:
+        """
+        Retrieve cached crate info if available and not expired.
+
+        Returns:
+            Cached crate info or None if not found or expired
+        """
+        if crate_name in self._cache:
+            timestamp, crate_info = self._cache[crate_name]
+
+            # Check if entry has expired
+            if time.time() - timestamp > self.ttl:
+                # Remove expired entry
+                del self._cache[crate_name]
+                if crate_name in self._access_order:
+                    self._access_order.remove(crate_name)
+                return None
+
+            # Move to end (most recently used)
+            if crate_name in self._access_order:
+                self._access_order.remove(crate_name)
+            self._access_order.append(crate_name)
+
+            return crate_info
+
+        return None
+
+    def set(self, crate_name: str, crate_info: Any) -> None:
+        """
+        Store crate info in cache.
+
+        Args:
+            crate_name: The crate name
+            crate_info: Crate info to cache
+        """
+        # Remove least recently used if at capacity
+        if len(self._cache) >= self.max_size and crate_name not in self._cache:
+            if self._access_order:
+                lru_key = self._access_order.pop(0)
+                del self._cache[lru_key]
+
+        # Store with timestamp
+        self._cache[crate_name] = (time.time(), crate_info)
+
+        # Update access order
+        if crate_name in self._access_order:
+            self._access_order.remove(crate_name)
+        self._access_order.append(crate_name)
+
+    def clear(self) -> None:
+        """Clear all cached entries."""
+        self._cache.clear()
+        self._access_order.clear()
+
+
+# Global crate info cache instance
+_crate_info_cache = CrateInfoCache()
+
+
+def get_crate_info_cache() -> CrateInfoCache:
+    """Get the global crate info cache instance."""
+    return _crate_info_cache

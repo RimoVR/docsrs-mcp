@@ -1570,7 +1570,8 @@ async def mcp_tool_ingest_cargo_file(
     """
     from pathlib import Path
 
-    from .cargo import extract_crates_from_cargo
+    import aiohttp
+    from .cargo import extract_crates_from_cargo, resolve_cargo_versions
     from .popular_crates import check_crate_exists, queue_for_ingestion
 
     try:
@@ -1586,6 +1587,12 @@ async def mcp_tool_ingest_cargo_file(
                 crates_queued=0,
                 crates_skipped=0,
             )
+
+        # Resolve version specifications if requested
+        if params.resolve_versions:
+            async with aiohttp.ClientSession() as session:
+                crates = await resolve_cargo_versions(crates, session, resolve=True)
+                logger.info(f"Resolved {len(crates)} crate versions")
 
         # Check which crates already exist
         crates_to_ingest = []
