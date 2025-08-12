@@ -101,6 +101,7 @@ claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx --from git+https://github
 | Tool | Description |
 |------|-------------|
 | `start_pre_ingestion` | Pre-load popular crates for instant access |
+| `ingest_cargo_file` | Bulk ingest dependencies from Cargo.toml/Cargo.lock with version resolution |
 | `list_versions` | List all available crate versions |
 
 ## Architecture
