@@ -1389,7 +1389,10 @@ async def search_embeddings(
                 over_fetch * 1.5
             )  # Need more candidates for diversification
 
-        fetch_k = min(k + over_fetch, 50)  # Cap at 50 for performance
+        # Defensive bounds check to ensure k doesn't exceed safe limits
+        # Cap k at 20 even if validation passed higher (prevents edge cases)
+        safe_k = min(k, 20)
+        fetch_k = min(safe_k + over_fetch, 50)  # Cap at 50 for performance
 
         # Prepare patterns for LIKE queries
         crate_pattern = f"{crate_filter}::%%" if crate_filter else None
@@ -1628,6 +1631,9 @@ async def get_see_also_suggestions(
     if not db_path.exists():
         return []
 
+    # Defensive bounds check for k parameter
+    safe_k = min(k, 20)
+
     try:
         async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
             await db.execute("PRAGMA journal_mode = WAL")
@@ -1654,7 +1660,7 @@ async def get_see_also_suggestions(
                 """,
                 {
                     "embedding": bytes(sqlite_vec.serialize_float32(query_embedding)),
-                    "k": k,
+                    "k": safe_k,
                 },
             )
 

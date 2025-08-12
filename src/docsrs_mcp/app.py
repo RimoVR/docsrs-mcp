@@ -449,6 +449,8 @@ async def get_mcp_manifest(request: Request):
                             "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Number of results to return",
                             "default": 5,
+                            "minimum": 1,
+                            "maximum": 20,
                         },
                         "item_type": {
                             "type": "string",
@@ -563,6 +565,8 @@ async def get_mcp_manifest(request: Request):
                             "anyOf": [{"type": "integer"}, {"type": "string"}],
                             "description": "Number of examples to return",
                             "default": 5,
+                            "minimum": 1,
+                            "maximum": 20,
                         },
                         "language": {
                             "type": "string",

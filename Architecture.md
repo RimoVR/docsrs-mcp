@@ -3110,6 +3110,27 @@ The `validation.py` module provides centralized validation utilities with perfor
 - Handles string-to-integer conversion for MCP client compatibility
 - Enforces optional bounds checking with clear error messages
 - Preserves None values for application-layer default handling
+- **K parameter maximum set to 20** to ensure sqlite-vec performance and prevent over-fetch calculation issues
+
+#### K Parameter Bounds Design Decision
+
+**Rationale**
+K parameter maximum is set to 20 to ensure sqlite-vec performance and prevent over-fetch calculation issues:
+- Base calculation: k=20 + over_fetch=15 = 35
+- With MMR diversification: 35 * 1.5 = 52.5, capped at 50
+- This ensures fetch_k never exceeds sqlite-vec's optimal performance range
+
+**Implementation**
+1. **Validation layer**: coerce_to_int_with_bounds(min_val=1, max_val=20) in all K validators
+2. **MCP manifest**: anyOf patterns with minimum=1, maximum=20 constraints
+3. **Database layer**: Defensive safe_k = min(k, 20) before over-fetch calculations
+4. **Documentation**: Added sqlite-vec requirements to validation function docstring
+
+**Benefits**
+- Consistent bounds across all K parameters
+- Prevents sqlite-vec performance degradation
+- Clear error messages for invalid values
+- MCP client string/integer compatibility
 
 **validate_optional_path(path: Optional[str]) -> Optional[str]**
 - None-safe path validation for optional parameters

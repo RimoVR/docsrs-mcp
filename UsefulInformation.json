@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-11",
+  "lastUpdated": "2025-08-12",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -1410,6 +1410,48 @@
           "relatedFiles": ["src/docsrs_mcp/ingest.py"],
           "codeExample": "def create_stdlib_fallback_documentation(item_path: str) -> dict:\n    \"\"\"Generate basic documentation for stdlib items when rustdoc JSON unavailable\"\"\"\n    fallback_docs = {\n        'std::vec::Vec': {\n            'name': 'Vec',\n            'docs': 'A contiguous growable array type.',\n            'kind': 'struct'\n        },\n        'core::option::Option': {\n            'name': 'Option',\n            'docs': 'Type representing an optional value.',\n            'kind': 'enum'\n        }\n    }\n    return fallback_docs.get(item_path, {'name': item_path.split('::')[-1], 'docs': 'Standard library item', 'kind': 'unknown'})",
           "result": "Enables retrieval of std::vec::Vec, core::option::Option, and other stdlib items with basic documentation until full rustdoc JSON support is available"
+        },
+        {
+          "error": "K parameter validation with MCP string handling",
+          "rootCause": "MCP clients send numeric parameters as strings (e.g., k='5' instead of k=5), which can cause validation errors and over-fetch calculation issues with sqlite-vec",
+          "solution": "Implemented multi-layer validation with MCP manifest anyOf patterns, Pydantic field validators with mode='before', and defensive bounds checking before sqlite-vec operations",
+          "context": "MCP clients (Cursor, Claude Code) have varying serialization behaviors - some send k=20 as integer, others as string '20', requiring dual validation approach with sqlite-vec compatibility",
+          "implementation": [
+            "Multi-layer validation: MCP manifest with anyOf patterns + Pydantic field validators with mode='before'",
+            "Defensive bounds checking: Added safe_k = min(k, 20) before over-fetch calculations in database.py",
+            "Consistent validation: All K parameters use coerce_to_int_with_bounds(min_val=1, max_val=20)",
+            "Added anyOf patterns in MCP manifest: {'anyOf': [{'type': 'integer'}, {'type': 'string'}]} for k parameter",
+            "Created coerce_to_int_with_bounds helper function with bounds validation to prevent sqlite-vec issues",
+            "Over-fetching logic uses k+10 base with MMR multiplier (1.5x) but requires bounds validation"
+          ],
+          "keyInsights": [
+            "sqlite-vec requires integer K parameters in WHERE clauses (e.g., 'WHERE k = 10')",
+            "max_val=20 ensures fetch_k ≤ 50 even with MMR diversification (1.5x multiplier)",
+            "MCP manifest requires anyOf: [{'type': 'integer'}, {'type': 'string'}] with minimum/maximum constraints",
+            "Defensive bounds checking prevents edge cases even if validation is bypassed",
+            "Different MCP clients have varying serialization behaviors for numeric parameters",
+            "HTTP REST mode works perfectly with both string and integer inputs",
+            "anyOf patterns in manifest are essential for JSON Schema validation before Pydantic runs"
+          ],
+          "testingResults": [
+            "String parameter k='20' accepted successfully (HTTP 200)",
+            "Invalid k='25' rejected with clear error message (HTTP 422)",
+            "Production testing confirmed MCP client compatibility",
+            "MMR enabled scenarios verified with fetch_k calculation staying within limits"
+          ],
+          "pattern": "All numeric MCP parameters need dual validation: JSON Schema anyOf pattern + Pydantic field validator with bounds checking",
+          "dateEncountered": "2025-08-11",
+          "lastUpdated": "2025-08-12",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py", "src/docsrs_mcp/database.py"],
+          "codeExample": "# MCP manifest anyOf pattern:\n'k': {\n    'type': 'integer',\n    'description': 'Number of results to return',\n    'anyOf': [{'type': 'integer'}, {'type': 'string'}],\n    'minimum': 1,\n    'maximum': 20\n},\n\n# Pydantic field validator:\n@field_validator('k', mode='before')\n@classmethod\ndef validate_k(cls, v):\n    if v is None:\n        return None\n    return coerce_to_int_with_bounds(v, min_val=1, max_val=20, field_name='k')\n\n# Helper with bounds checking:\ndef coerce_to_int_with_bounds(value, min_val: int, max_val: int, field_name: str) -> int:\n    if isinstance(value, int):\n        result = value\n    elif isinstance(value, str):\n        try:\n            result = int(value.strip())\n        except ValueError:\n            raise ValueError(f'{field_name} must be integer between {min_val}-{max_val}. Got: {repr(value)[:100]}')\n    else:\n        raise ValueError(f'{field_name} must be integer. Got: {type(value).__name__}')\n    \n    if not (min_val <= result <= max_val):\n        raise ValueError(f'{field_name} must be between {min_val}-{max_val}. Got: {result}')\n    \n    return result\n\n# Defensive bounds checking in database operations:\nsafe_k = min(k, 20)  # Prevent over-fetch calculation issues\nfetch_k = min(safe_k + 10, 50)  # Cap at safe limits",
+          "testingRecommendations": [
+            "Test with k='20' (string max), k=20 (int max), k='25' (exceeds bounds)",
+            "Test with MMR enabled to verify fetch_k calculation stays within limits",
+            "Use curl to test both string and integer parameter formats",
+            "Test boundary conditions: k=1, k=20, k=21 (should fail)",
+            "Verify sqlite-vec queries work with calculated fetch_k values"
+          ],
+          "prevention": "Always use anyOf patterns in MCP manifests for numeric parameters, implement bounds validation in coercion functions, add defensive bounds checking before database operations, and cap calculated derived values (like fetch_k) to prevent database errors"
         }
       ]
     },

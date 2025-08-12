@@ -272,6 +272,12 @@ def coerce_to_int_with_bounds(
 
     Handles MCP client compatibility by accepting string inputs.
 
+    This function is critical for K parameter validation as sqlite-vec requires
+    integer K parameters in WHERE clauses (e.g., 'WHERE k = 10'). The max_val
+    for K parameters is typically set to 20 to ensure that fetch_k (calculated
+    as k + over_fetch) stays within sqlite-vec's performance limits even with
+    MMR diversification enabled (1.5x multiplier).
+
     Args:
         value: The value to validate and coerce
         field_name: Name of the field for error messages
@@ -284,6 +290,11 @@ def coerce_to_int_with_bounds(
 
     Raises:
         ValueError: If the value cannot be converted or is out of bounds
+
+    Note:
+        For K parameters, max_val=20 ensures fetch_k ≤ 50 even with MMR:
+        - Base: k=20 + over_fetch=15 = 35
+        - With MMR: 35 * 1.5 = 52.5, capped at 50
     """
     if value is None:
         if not examples:

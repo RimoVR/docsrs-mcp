@@ -1177,8 +1177,9 @@ async def check_crate_exists(crate_spec: str) -> bool:
     Returns:
         True if the crate is already cached, False otherwise
     """
-    from .config import CACHE_DIR
     import re
+
+    from .config import CACHE_DIR
 
     try:
         name, version = parse_crate_spec(crate_spec)
