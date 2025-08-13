@@ -104,6 +104,48 @@ claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx --from git+https://github
 | `ingest_cargo_file` | Bulk ingest dependencies from Cargo.toml/Cargo.lock with version resolution |
 | `list_versions` | List all available crate versions |
 
+## MCP Parameter Requirements
+
+**MCP Client Compatibility**: All parameters are accepted as strings to ensure maximum compatibility with MCP clients like Claude Code. The server automatically converts these to appropriate types.
+
+### Parameter Format Requirements
+
+- **Numeric parameters** must be passed as strings (e.g., `k="5"`, `count="100"`)
+- **Boolean parameters** must be passed as strings (e.g., `force="true"`, `deprecated="false"`)
+- **String parameters** remain unchanged
+- **REST API** continues to accept both strings and native types for backwards compatibility
+
+### MCP Tool Examples
+
+#### Search with proper parameter format:
+```json
+{
+  "crate_name": "tokio",
+  "query": "spawn async tasks",
+  "k": "10",
+  "item_types": "function,struct"
+}
+```
+
+#### Pre-ingestion with string parameters:
+```json
+{
+  "count": "100",
+  "concurrency": "3",
+  "force": "true"
+}
+```
+
+#### Cargo file ingestion with string parameters:
+```json
+{
+  "file_path": "/path/to/Cargo.toml",
+  "concurrency": "5",
+  "skip_existing": "true",
+  "resolve_versions": "false"
+}
+```
+
 ## Architecture
 
 ### Three-Tier Documentation System
@@ -177,7 +219,7 @@ async with httpx.AsyncClient() as client:
         json={
             "crate_name": "tokio",
             "query": "spawn async tasks",
-            "k": 5
+            "k": "5"  # Note: string format for MCP compatibility
         }
     )
     print(response.json())
@@ -203,7 +245,7 @@ response = await client.post(
 | Port already in use | Change port: `PORT=8001 uvx docsrs-mcp` |
 | Rate limiting (429) | Default: 30 req/s per IP, implement backoff |
 | Memory errors | Ensure ≥256MB RAM available |
-| MCP validation errors | Update to latest version, check parameter types |
+| MCP validation errors | Ensure all numeric/boolean parameters are passed as strings (e.g., `k="5"`, `force="true"`) |
 
 ## Recent Enhancements
 

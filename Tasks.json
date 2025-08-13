@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-12T12:00:00Z",
+    "lastUpdated": "2025-08-13T12:00:00Z",
     "priorities": [
       "critical",
       "high",
@@ -2951,6 +2951,83 @@
         "priority": 1,
         "relatedTasks": [],
         "roadblocks": []
+      },
+      {
+        "id": "mcp-param-validation-fix-1",
+        "title": "Fix MCP parameter validation compatibility",
+        "description": "Remove anyOf patterns and implement string-only parameter validation for MCP manifest compatibility",
+        "status": "completed",
+        "progress": 100,
+        "dependencies": [],
+        "effort": "medium",
+        "priority": "critical",
+        "relatedTasks": [
+          "mcp-2",
+          "mcp-bool-1",
+          "search-retrieval-fixes-1"
+        ],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-13",
+          "implementation": "Removed all anyOf patterns from MCP manifest and changed all numeric/boolean parameters to accept strings only. Added comprehensive parameter validation with examples and descriptions.",
+          "notes": "Fixed acceptance criteria violations 11, 12, and 16 by removing anyOf patterns that were causing MCP client compatibility issues. All parameters now use string-only types with proper validation and coercion. Added missing field validators for skip_existing and resolve_versions parameters. Enhanced all tool schemas with examples arrays and clear descriptions. Tested with REST mode confirming backwards compatibility.",
+          "bugFix": "Removed anyOf validation patterns and implemented string-only parameter handling for better MCP client compatibility",
+          "verification": "Tested with REST mode and confirmed all MCP tools work correctly with string parameters"
+        },
+        "details": {
+          "issueDescription": "anyOf patterns in MCP manifest were causing compatibility issues with MCP clients, violating acceptance criteria 11, 12, and 16",
+          "affectedEndpoints": "All MCP tool endpoints with numeric or boolean parameters",
+          "fixRequired": "Remove anyOf patterns and implement string-only parameter validation with proper coercion",
+          "solution": "Changed all numeric and boolean parameters to string-only with field validators for type coercion"
+        },
+        "changesImplemented": [
+          "search_items: k, min_doc_length, has_examples, deprecated now string-only",
+          "search_examples: k now string-only",
+          "start_pre_ingestion: count, concurrency, force now string-only",
+          "ingest_cargo_file: concurrency, skip_existing, resolve_versions now string-only",
+          "compare_versions: max_results, include_unchanged now string-only",
+          "Added examples arrays for all parameters",
+          "Enhanced parameter descriptions for clarity",
+          "Added missing field validators for skip_existing and resolve_versions",
+          "Added missing resolve_versions parameter to ingest_cargo_file manifest"
+        ],
+        "subtasks": [
+          {
+            "id": "mcp-param-validation-fix-1.1",
+            "title": "Remove anyOf patterns from all parameters",
+            "description": "Change all numeric and boolean parameters to string-only types",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-param-validation-fix-1.2",
+            "title": "Add field validators for parameter coercion",
+            "description": "Implement field validators to convert string parameters to appropriate types",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-param-validation-fix-1.3",
+            "title": "Add examples and enhance descriptions",
+            "description": "Add examples arrays and improve parameter descriptions for all tools",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-param-validation-fix-1.4",
+            "title": "Add missing parameter validators",
+            "description": "Add missing field validators for skip_existing and resolve_versions",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "mcp-param-validation-fix-1.5",
+            "title": "Test backwards compatibility",
+            "description": "Verify REST mode and MCP client compatibility with string-only parameters",
+            "status": "completed",
+            "progress": 100
+          }
+        ]
       },
       {
         "id": "export-1",

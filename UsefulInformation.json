@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-12",
+  "lastUpdated": "2025-08-13",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -1570,6 +1570,42 @@
             "Verify sqlite-vec queries work with calculated fetch_k values"
           ],
           "prevention": "Always use anyOf patterns in MCP manifests for numeric parameters, implement bounds validation in coercion functions, add defensive bounds checking before database operations, and cap calculated derived values (like fetch_k) to prevent database errors"
+        },
+        {
+          "error": "MCP client parameter validation incompatibility - anyOf schemas rejected by clients",
+          "rootCause": "MCP clients (Claude Code, Claude Desktop) have inconsistent JSON Schema support. Claude Code completely rejects anyOf schemas with validation errors, while Claude Desktop has buggy anyOf support that fails unpredictably",
+          "solution": "Avoid anyOf schemas entirely in MCP tools. Use single type definitions (string, integer, boolean) and rely on Pydantic field validators with mode='before' for type coercion. Design schemas to match what MCP clients actually send rather than what the server can handle",
+          "context": "MCP tool parameters fail validation despite REST API working correctly, causing tool execution failures",
+          "errorSymptoms": [
+            "MCP tools reject parameters with 'Input validation error: not valid under any of the given schemas'",
+            "REST API accepts same parameters without issues",
+            "Parameters work when passed as expected type but fail when coerced from strings"
+          ],
+          "researchFindings": [
+            "Claude Code has no anyOf support - completely rejects schemas with anyOf patterns",
+            "Claude Desktop has partial anyOf support but fails on complex cases",
+            "Different MCP clients send parameters as different types (strings vs native types)",
+            "JSON Schema validation in MCP protocol is stricter than OpenAPI/REST validation"
+          ],
+          "bestPractice": "Design MCP schemas around MCP client limitations, not server capabilities. Use conservative single-type schemas and handle type flexibility entirely in Pydantic validators",
+          "dateEncountered": "2025-08-13",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "codeExample": "# AVOID - anyOf patterns that break MCP clients:\n'k': {\n    'type': 'integer',\n    'anyOf': [{'type': 'integer'}, {'type': 'string'}]\n}\n\n# USE - single type with Pydantic coercion:\n'k': {\n    'type': 'string',  # Accept what clients actually send\n    'description': 'Number of results (sent as string)'\n}\n\n# Handle coercion in Pydantic validator:\n@field_validator('k', mode='before')\n@classmethod\ndef coerce_k(cls, v):\n    if isinstance(v, int):\n        return v\n    if isinstance(v, str):\n        return int(v.strip())\n    raise ValueError('k must be integer or string')",
+          "impact": "MCP tools become unusable when clients cannot validate parameter schemas, breaking the entire MCP integration despite server-side functionality working correctly"
+        },
+        {
+          "error": "Input validation error: '5' is not valid under any of the given schemas",
+          "rootCause": "Claude Code MCP client completely rejects anyOf schema patterns, causing validation failures even when server-side validation is correct. The error occurs when MCP clients send parameters to schemas using anyOf patterns.",
+          "solution": "Remove all anyOf patterns from MCP manifest entirely. Use simple string types for all parameters and rely on Pydantic field validators for type coercion. Add examples arrays and format hints to parameter descriptions for better client understanding.",
+          "context": "MCP parameter validation failing with Claude Code client despite working with REST API and Claude Desktop",
+          "lesson": "Claude Code doesn't support anyOf JSON schemas at all. Always test with actual MCP clients, not just REST API. Simple schemas are better for compatibility than complex validation patterns.",
+          "pattern": "Use single string type in manifest with robust Pydantic field validators for all type coercion and validation logic",
+          "dateEncountered": "2025-08-13",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "codeExample": "# MCP Manifest - Simple string type:\n'enabled': {\n    'type': 'string',\n    'description': 'Enable feature (true/false, 1/0, yes/no)',\n    'examples': ['true', 'false', '1', '0']\n}\n\n# Pydantic Field Validator - Handle all coercion:\n@field_validator('enabled', mode='before')\n@classmethod\ndef coerce_enabled(cls, v):\n    if isinstance(v, bool):\n        return v\n    if isinstance(v, str):\n        v_lower = v.lower().strip()\n        return v_lower in ('true', '1', 'yes', 'on', 't', 'y')\n    if isinstance(v, int | float):\n        return bool(v)\n    return False  # Default for invalid inputs",
+          "debuggingTechnique": "Test with both Claude Code MCP client and REST API to identify client-specific validation differences",
+          "bestPractice": "Design MCP schemas for the most restrictive client (Claude Code) and handle complexity in server-side validators. Field validators can handle the complexity that schemas can't.",
+          "impact": "Enables full compatibility with Claude Code MCP client while maintaining type safety and validation through Pydantic"
         }
       ]
     },
@@ -2336,6 +2372,21 @@
           "impact": "Prevents content length issues from reaching production, ensures consistent tutorial quality",
           "dateLearned": "2025-08-10",
           "relatedFiles": ["src/docsrs_mcp/app.py"]
+        },
+        {
+          "lesson": "Claude Code MCP client doesn't support anyOf JSON schemas",
+          "context": "MCP parameter validation failure resolution after extensive anyOf pattern implementation",
+          "details": "After implementing comprehensive anyOf patterns throughout all MCP tools, discovered that Claude Code MCP client completely rejects anyOf schema patterns with 'Input validation error: not valid under any of the given schemas'. The solution is to eliminate anyOf patterns entirely and use simple string types in the MCP manifest while handling all type coercion in Pydantic field validators. Field validators can handle complexity that JSON schemas cannot.",
+          "impact": "Enables full compatibility with Claude Code MCP client while maintaining robust server-side validation and type safety through Pydantic",
+          "dateLearned": "2025-08-13",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "implementationNotes": {
+            "schemaDesign": "Use single string types with examples and format hints in descriptions",
+            "validationPattern": "Implement comprehensive type coercion in @field_validator methods with mode='before'",
+            "clientTesting": "Always test with actual MCP clients, not just REST API endpoints",
+            "booleanPattern": "String to boolean conversion with comprehensive value recognition (true/false, 1/0, yes/no, on/off, t/y)",
+            "errorHandling": "Provide sensible defaults for invalid inputs rather than strict validation failures"
+          }
         }
       ]
     },
@@ -2855,8 +2906,10 @@
       "Verify MCP protocol: Check that STDIO is clean, no stdout pollution",
       "FastMCP conversion: Use FastMCP.from_fastapi() for automatic REST-to-MCP conversion",
       "Parameter type issues: MCP clients may send numeric parameters as strings - use Pydantic field validators with mode='before' for type coercion",
-      "Double validation conflicts: When MCP manifest schema is too restrictive, it prevents Pydantic field validators from running - use anyOf schema patterns for flexible type acceptance",
-      "Schema flexibility: Use anyOf: [{'type': 'integer'}, {'type': 'string'}] in MCP manifests for parameters that may arrive as strings from different clients",
+      "CRITICAL: Claude Code rejects anyOf schemas entirely - use simple string types in manifest and handle all coercion in Pydantic validators",
+      "Schema compatibility: Design for the most restrictive MCP client (Claude Code) - avoid anyOf patterns completely",
+      "Boolean field validator pattern: @field_validator('field', mode='before') with comprehensive string-to-bool conversion (true/false, 1/0, yes/no, on/off, t/y)",
+      "AVOID anyOf schemas: Use single string types in manifest with examples array - let Pydantic validators handle all type conversion and validation",
       "Decorator ordering: Always use @field_validator BEFORE @classmethod decorator, not after - decorator execution is bottom-up",
       "Validation patterns: Check None first, then correct type, then string conversion with try/catch and helpful error messages",
       "Error types: Expect ValidationError for built-in Pydantic constraints, ValueError for custom field_validator methods",
@@ -3036,7 +3089,7 @@
     "compatibility_issues": [
       "Windows path handling requires double backslashes in JSON config",
       "Python ModuleNotFoundError - ensure consistent virtual environments",
-      "MCP clients reject array type parameters - use anyOf patterns",
+      "Claude Code MCP client rejects anyOf patterns - use simple string schemas instead",
       "Platform-specific Python path resolution - use absolute paths",
       "JSON Schema validation occurs before Pydantic - design schemas accordingly"
     ],

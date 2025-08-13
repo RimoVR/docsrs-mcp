@@ -272,7 +272,7 @@ sequenceDiagram
     participant DB as SQLite+VSS
     
     Client->>API: POST /mcp/tools/search_items
-    Note over API: MCP Parameter Validation<br/>anyOf[integer,string] patterns<br/>Handle string "5" → int 5
+    Note over API: MCP Parameter Validation<br/>String-only parameters<br/>Handle string "5" → int 5
     API->>API: Query preprocessing (Unicode normalization NFKC)
     API->>DB: Check if crate@version exists
     
@@ -1893,7 +1893,7 @@ for example in examples_data:  # Now safely iterates over list elements
 **Location**: `app.py:151-297` in FastAPI route parameter handling
 
 **Issue Description**:
-MCP manifest schema lacked `anyOf` patterns for numeric parameters, causing type coercion failures when MCP clients send string representations of numbers.
+Initial MCP manifest schema used `anyOf` patterns but was later simplified to string-only parameters for broader client compatibility, particularly with Claude Code.
 
 **Technical Problem**:
 - Pydantic models include automatic string-to-number coercion
@@ -3017,36 +3017,55 @@ graph TD
 
 ### MCP Parameter Validation Architecture
 
-The MCP parameter validation system follows a **double-validation pattern** to ensure robust type handling and client compatibility:
+The MCP parameter validation system has evolved to use a **string-first validation strategy** for maximum client compatibility:
 
-1. **JSON Schema validation** with `anyOf` patterns in the manifest (app.py `get_mcp_manifest` function)
-2. **Pydantic field validators** with `mode='before'` for type coercion (models.py)
+1. **JSON Schema validation** with string-only parameters in the manifest (app.py `get_mcp_manifest` function)
+2. **Pydantic field validators** with `mode='before'` for type coercion from strings (models.py)
+3. **Double validation architecture**: Simple JSON Schema → Pydantic coercion
 
-This architectural decision enables consistent handling of boolean parameters alongside the existing numeric parameter pattern:
+#### Design Decision: String-Only Parameters
+
+**Why we removed `anyOf` patterns**:
+- **Claude Code Compatibility**: Claude Code doesn't support `anyOf` patterns in MCP tool schemas
+- **Client Diversity**: Different MCP clients handle type serialization inconsistently
+- **Simplicity Over Elegance**: Less complex schemas but maximum compatibility
+
+**Trade-offs**:
+- ✅ **Maximum Compatibility**: Works with all MCP client implementations
+- ✅ **Backwards Compatibility**: Pydantic validators maintain type coercion
+- ✅ **Clear Documentation**: String examples make parameter usage obvious
+- ⚠️ **Less Elegant Schemas**: Verbose descriptions vs. clean type definitions
 
 ```mermaid
 graph LR
-    subgraph "MCP Manifest Schema"
-        ANYOF[anyOf Pattern<br/>{"anyOf": [{"type": "integer"}, {"type": "string"}]}<br/>{"anyOf": [{"type": "boolean"}, {"type": "string"}]}]
-        JSON_VALID[JSON Schema Validation<br/>Allows multiple types]
-        PYDANTIC[Pydantic Type Coercion<br/>Handles actual conversion]
-        FASTMCP[FastMCP Double Validation<br/>Passes both types through]
+    subgraph "MCP Manifest Schema (String-Only)"
+        STRING_SCHEMA[String Parameters Only<br/>{"type": "string", "examples": ["5", "10", "20"]}<br/>{"type": "string", "examples": ["true", "false"]}]
+        JSON_VALID[JSON Schema Validation<br/>Simple string validation]
+        PYDANTIC[Pydantic Field Validators<br/>mode='before' type coercion]
+        TYPED_DATA[Typed Business Logic<br/>Receives proper types]
     end
     
-    subgraph "Parameter Examples"
-        INT_PARAM[k parameter<br/>Result count limit]
-        BOOL_PARAM[deprecated parameter<br/>Filter deprecated items<br/>Boolean anyOf pattern]
-        NUM_PARAM[min_doc_length<br/>Minimum documentation length]
+    subgraph "Parameter Flow"
+        MCP_CLIENT[MCP Client<br/>Sends string parameters]
+        INT_EXAMPLE[k: "10"<br/>→ int 10]
+        BOOL_EXAMPLE[deprecated: "true"<br/>→ bool True]
+        NUM_EXAMPLE[min_doc_length: "500"<br/>→ int 500]
     end
     
-    ANYOF --> JSON_VALID
-    JSON_VALID --> FASTMCP
-    FASTMCP --> PYDANTIC
+    MCP_CLIENT --> STRING_SCHEMA
+    STRING_SCHEMA --> JSON_VALID
+    JSON_VALID --> PYDANTIC
+    PYDANTIC --> TYPED_DATA
     
-    INT_PARAM --> ANYOF
-    BOOL_PARAM --> ANYOF
-    NUM_PARAM --> ANYOF
+    INT_EXAMPLE --> STRING_SCHEMA
+    BOOL_EXAMPLE --> STRING_SCHEMA
+    NUM_EXAMPLE --> STRING_SCHEMA
 ```
+
+**Key Architectural Principle**:
+*"Simplicity over elegance when dealing with diverse MCP client capabilities"*
+
+This approach prioritizes broad compatibility over schema sophistication, ensuring reliable operation across all MCP client implementations.
 
 ### Validation Best Practices Implementation
 
@@ -3236,41 +3255,43 @@ def validate_include_unchanged(cls, v: Any) -> bool:
 
 ### MCP Manifest Schema Patterns
 
-The MCP manifest schema uses consistent `anyOf` patterns for flexible parameter acceptance across all type-flexible parameters. This architectural decision ensures uniform handling of MCP client serialization variations:
+The MCP manifest schema uses **string-only parameters** with comprehensive examples and documentation for maximum client compatibility:
 
 ```json
 {
   "k": {
-    "anyOf": [
-      {"type": "integer", "minimum": 1, "maximum": 20},
-      {"type": "string"}
-    ],
-    "description": "Number of results to return"
+    "type": "string",
+    "description": "Number of results to return (pass as string: '5', '10', '20')",
+    "default": "5",
+    "examples": ["5", "10", "15", "20"]
   },
   "deprecated": {
-    "anyOf": [
-      {"type": "boolean"},
-      {"type": "string"}
-    ],
-    "description": "Filter deprecated items"
+    "type": "string",
+    "description": "Filter by deprecation status (pass as string: 'true' for deprecated only, 'false' for non-deprecated only)",
+    "examples": ["true", "false"]
+  },
+  "min_doc_length": {
+    "type": "string",
+    "description": "Minimum documentation length in characters (pass as string: '100', '500', '1000')",
+    "examples": ["100", "500", "1000", "2000"]
   }
 }
 ```
 
-**Consistent anyOf Patterns Across All Tools**
+**String-Only Schema Patterns**
 
-The system implements standardized `anyOf` patterns for all parameters requiring type flexibility:
+The system implements consistent string-only patterns for all type-coerced parameters:
 
-- **Numeric parameters**: `[{"type": "integer"}, {"type": "string"}]`
-- **Boolean parameters**: `[{"type": "boolean"}, {"type": "string"}]`  
-- **Optional strings**: `[{"type": "string"}, {"type": "null"}]`
+- **Numeric parameters**: `{"type": "string", "examples": ["5", "10", "20"]}`
+- **Boolean parameters**: `{"type": "string", "examples": ["true", "false"]}`  
+- **Optional parameters**: Standard string with nullable validation in Pydantic
 
-**Double Validation Architecture Benefits**
-- **MCP Client Compatibility**: FastMCP validates against JSON Schema first, so `anyOf` patterns are critical for flexible type acceptance
-- **Type Coercion**: Pydantic field validators handle conversion after schema validation passes
-- **Client Flexibility**: MCP clients can send parameters as native types or strings regardless of implementation
-- **Type Safety**: Maintains strict type validation after the coercion phase
-- **Schema Consistency**: All parameters with field validators now have corresponding `anyOf` patterns in the manifest
+**String-First Architecture Benefits**
+- **Universal Client Compatibility**: All MCP clients handle strings consistently
+- **Claude Code Support**: Avoids unsupported `anyOf` schema patterns
+- **Clear Usage Examples**: Explicit string examples prevent client confusion
+- **Type Safety**: Pydantic validators maintain strict type coercion after validation
+- **Simplified Debugging**: String parameters are easier to inspect and troubleshoot
 
 ### Validation Best Practices
 
@@ -3296,40 +3317,37 @@ The system implements standardized `anyOf` patterns for all parameters requiring
 
 ### Validation Flow Architecture
 
-The **double-validation pattern** ensures MCP client compatibility through this sequential flow:
+The **string-first validation pattern** ensures maximum MCP client compatibility through this sequential flow:
 
-1. **MCP Client Request** → JSON-RPC serialization (may convert types to strings)
-2. **FastMCP JSON Schema Validation** → `anyOf` patterns allow multiple input types to pass through
+1. **MCP Client Request** → JSON-RPC serialization with string parameters
+2. **FastMCP JSON Schema Validation** → Simple string validation (no complex patterns)
 3. **Pydantic Field Validators** → `mode='before'` handles type coercion from strings to native types
-4. **Centralized Validation** → Reusable functions with precompiled patterns
-5. **Constraint Checking** → Bounds validation and format verification
+4. **Centralized Validation** → Reusable functions with precompiled patterns and bounds checking
+5. **Constraint Checking** → Type-specific validation after coercion
 6. **Model Validation** → Cross-field validation and `extra='forbid'` security
 7. **Business Logic** → Receives validated, typed data
 
-**Critical**: FastMCP validates against the JSON Schema first, making `anyOf` patterns essential for accepting both native types and string representations from different MCP client implementations.
+**Critical**: String-only JSON Schema validation eliminates client compatibility issues while Pydantic field validators ensure proper type coercion and validation.
 
 ### Advanced MCP Schema Patterns
 
-**anyOf Pattern Implementation**
+**String-Only Pattern Implementation**
 
-The MCP schema architecture uses sophisticated `anyOf` patterns to handle diverse client implementations:
+The MCP schema architecture uses string-only patterns with comprehensive validation through Pydantic:
 
 ```json
 {
   "properties": {
     "k": {
-      "anyOf": [
-        {"type": "integer", "minimum": 1, "maximum": 20},
-        {"type": "string", "pattern": "^[1-9][0-9]?$|^20$"}
-      ],
-      "description": "Number of results (1-20)"
+      "type": "string",
+      "description": "Number of results to return (pass as string: '5', '10', '20')",
+      "default": "5",
+      "examples": ["5", "10", "15", "20"]
     },
     "deprecated": {
-      "anyOf": [
-        {"type": "boolean"},
-        {"type": "string", "enum": ["true", "false", "True", "False", "1", "0"]}
-      ],
-      "description": "Include deprecated items"
+      "type": "string", 
+      "description": "Filter by deprecation status (pass as string: 'true' for deprecated only, 'false' for non-deprecated only)",
+      "examples": ["true", "false"]
     }
   }
 }
@@ -3357,10 +3375,11 @@ def coerce_deprecated_to_bool(cls, v):
     return bool(v)
 ```
 
-**Benefits of anyOf + Field Validators Pattern**
-- **Maximum Compatibility**: Works with MCP clients that serialize differently
-- **Type Safety**: Maintains strict typing after validation
-- **Error Clarity**: Provides clear error messages for invalid inputs
+**Benefits of String-Only + Field Validators Pattern**
+- **Universal Compatibility**: Works with all MCP clients including Claude Code
+- **Type Safety**: Maintains strict typing after Pydantic validation
+- **Error Clarity**: Provides clear error messages for invalid string inputs
+- **Documentation Quality**: Examples and descriptions make usage unambiguous
 - **Schema Consistency**: Unified approach across all parameters
 
 ### Extended Numeric Parameter Validation
@@ -3422,31 +3441,32 @@ def coerce_min_doc_length_to_int(cls, v):
 
 **MCP Manifest Schema Updates**
 
-The MCP manifest schema has been updated to use anyOf patterns for numeric parameters that may arrive as strings:
+The MCP manifest schema has been updated to use string-only parameters with examples for maximum client compatibility:
 
 ```json
 {
   "min_doc_length": {
-    "anyOf": [{"type": "integer"}, {"type": "string"}],
-    "description": "Minimum documentation length",
-    "minimum": 100,
-    "maximum": 10000
+    "type": "string",
+    "description": "Minimum documentation length in characters (pass as string: '100', '500', '1000')",
+    "examples": ["100", "500", "1000", "2000"]
   },
   "deprecated": {
-    "anyOf": [{"type": "boolean"}, {"type": "string"}],
-    "description": "Filter deprecated items"
+    "type": "string",
+    "description": "Filter by deprecation status (pass as string: 'true' for deprecated only, 'false' for non-deprecated only)",
+    "examples": ["true", "false"]
   }
 }
 ```
 
 **Benefits**
-- **MCP Client Compatibility**: Handles various client serialization approaches
-- **Type Safety**: Maintains strict type validation after conversion
-- **Error Clarity**: Provides detailed error messages for invalid conversions
-- **Schema Flexibility**: anyOf pattern allows multiple input formats while preserving validation
-- **Backward Compatibility**: Existing code continues to work with native types
+- **Universal MCP Client Compatibility**: Works with all clients including Claude Code
+- **Type Safety**: Maintains strict type validation after Pydantic coercion
+- **Error Clarity**: Provides detailed error messages for invalid string conversions
+- **Schema Simplicity**: Single string type eliminates complex pattern matching
+- **Clear Documentation**: Examples make proper usage unambiguous
+- **Backwards Compatibility**: Pydantic validators maintain existing type coercion behavior
 
-This ensures compatibility with various MCP client implementations that may serialize parameters differently while maintaining strict type safety and validation.
+This ensures maximum compatibility across all MCP client implementations while maintaining strict type safety through Pydantic field validators.
 
 ## Token Optimization
 
@@ -3694,9 +3714,9 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - No changes required to existing FastAPI route handlers
 - Preserves all business logic, validation, and error handling
 - Maintains compatibility with existing FastAPI middleware
-- Generates MCP-compatible JSON schemas with `anyOf` patterns for flexible parameter types
-- **Boolean Parameter Support**: Manifest generation uses consistent `anyOf: [{"type": "boolean"}, {"type": "string"}]` patterns
-- **Double Validation System**: FastMCP's validation layer properly allows both boolean types to pass through to Pydantic
+- Generates MCP-compatible JSON schemas with string-only parameters for maximum compatibility
+- **String Parameter Support**: Manifest generation uses consistent string types with examples
+- **Type Coercion System**: Pydantic field validators handle string-to-type conversion after JSON validation
 
 **Protocol Isolation**
 - MCP mode uses stderr exclusively for logging to avoid stdout contamination
@@ -3714,17 +3734,23 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 
 ### Recent Architectural Decisions
 
-**Boolean Parameter Handling in MCP Manifest (2025-08-07)**
-- **Decision**: Boolean parameters in MCP manifest now use `anyOf` patterns for type flexibility
-- **Pattern**: `anyOf: [{"type": "boolean"}, {"type": "string"}]` consistent with existing numeric parameter handling
+**String-Only Parameter Strategy for MCP Compatibility (2025-08-13)**
+- **Decision**: Moved from `anyOf` patterns to string-only parameters in MCP manifest for maximum client compatibility
+- **Rationale**: Claude Code doesn't support `anyOf` patterns, requiring simpler schema approach
+- **Pattern**: `{"type": "string", "examples": ["5", "10", "20"]}` for all type-coerced parameters
 - **Technical Implementation**:
-  - MCP manifest schema generation uses consistent `anyOf` patterns for boolean parameters
-  - Pydantic field validators handle string-to-boolean conversion with `mode="before"`
-  - FastMCP's double validation system properly allows both types through validation pipeline
+  - MCP manifest schema uses only string types with comprehensive examples and documentation
+  - Pydantic field validators handle string-to-type conversion with `mode="before"`
+  - Centralized validation functions perform bounds checking and type coercion
 - **Benefits**:
-  - Enables MCP clients to send boolean parameters as either native booleans or strings
-  - Maintains consistency with existing numeric parameter validation patterns
-  - Preserves type safety through Pydantic's validation after coercion
+  - Universal compatibility with all MCP clients including Claude Code
+  - Maintains backwards compatibility through Pydantic validators
+  - Clearer documentation with explicit string examples
+  - Simpler schema debugging and validation
+- **Trade-offs**:
+  - Less elegant schemas but maximum compatibility
+  - More verbose parameter descriptions
+  - Requires careful documentation of string format expectations
   - Supports varied MCP client serialization approaches without breaking changes
 - **Integration**: Seamless integration with existing validation architecture without code duplication
 
@@ -3758,10 +3784,10 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - Maintains strict validation with `extra='forbid'` to prevent parameter injection
 - Graceful error handling with detailed error messages for debugging
 - Supports both native types and string representations for maximum compatibility
-- MCP manifest schemas use consistent `anyOf` patterns for all type-flexible parameters
-- **Critical Architecture Pattern**: `anyOf: [{"type": "boolean"}, {"type": "string"}]` for booleans matches existing numeric pattern
-- **Schema Consistency**: Uniform approach across integers, floats, and booleans enables predictable MCP client behavior
-- **Double Validation Flow**: JSON Schema validation → FastMCP processing → Pydantic type coercion ensures compatibility
+- MCP manifest schemas use consistent string-only patterns for all type-flexible parameters
+- **Critical Architecture Pattern**: `{"type": "string", "examples": [...]}` for all parameters requiring type coercion
+- **Schema Consistency**: Uniform string approach across integers, floats, and booleans enables universal MCP client compatibility
+- **String-First Validation Flow**: JSON Schema validation → Pydantic field validators → type coercion ensures compatibility
 
 **MVP Focus: Crate Descriptions Only (Enhanced with Standard Library Support)**
 - Basic ingestion pipeline processes crate metadata from crates.io API

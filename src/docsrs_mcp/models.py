@@ -1319,6 +1319,32 @@ class IngestCargoFileRequest(BaseModel):
             v, "concurrency", min_val=1, max_val=10, examples=[3, 5, 10]
         )
 
+    @field_validator("skip_existing", mode="before")
+    @classmethod
+    def coerce_skip_existing(cls, v):
+        """Coerce skip_existing to bool."""
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            v_lower = v.lower().strip()
+            return v_lower in ("true", "1", "yes", "on", "t", "y")
+        if isinstance(v, int | float):
+            return bool(v)
+        return True  # default
+
+    @field_validator("resolve_versions", mode="before")
+    @classmethod
+    def coerce_resolve_versions(cls, v):
+        """Coerce resolve_versions to bool."""
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            v_lower = v.lower().strip()
+            return v_lower in ("true", "1", "yes", "on", "t", "y")
+        if isinstance(v, int | float):
+            return bool(v)
+        return False  # default
+
     model_config = ConfigDict(extra="forbid")
 
 

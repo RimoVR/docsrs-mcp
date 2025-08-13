@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-11",
+    "lastUpdated": "2025-08-13",
     "compressionVersion": "1.1",
     "originalTokens": 47800,
     "legend": {
@@ -85,18 +85,90 @@
           "mcp": {"default": true, "purpose": "Claude Desktop integration"},
           "rest": {"purpose": "Debug/direct API", "flag": "--mode rest"}
         },
+        "client_compatibility": {
+          "claude_code": "NO support for anyOf schemas (confirmed 2025-08-13)",
+          "claude_desktop": "Partial/buggy anyOf support",
+          "fastmcp": "Limited polymorphism support for anyOf/oneOf/allOf",
+          "general": "Inconsistent JSON Schema support across MCP clients"
+        },
         "issues": {
           "vulns": {"cve": "N/A", "type": "Protocol corruption via stdout"},
           "type_coercion": {
             "problem": "Client sends strings for numeric/boolean params",
             "solution": "Use anyOf patterns + Pydantic mode='before' vals"
           },
-          "validation": "Double validation: FastMCP + MCP client inconsistencies"
+          "validation": "Double validation: FastMCP + MCP client inconsistencies",
+          "parameter_serialization": "Claude Code bugs with empty dictionaries",
+          "anyof_failures": "anyOf patterns cause validation failures in multiple clients",
+          "inspector_ui": "MCP Inspector UI sends null values for form parameters"
+        },
+        "best_practices_discovered": {
+          "parameter_compatibility": "Use string-only parameters for maximum MCP client compatibility",
+          "field_validation": "Implement field validators with mode='before' for type coercion",
+          "schema_examples": "Provide examples arrays in parameter schemas",
+          "description_hints": "Include clear format hints in descriptions"
         },
         "manifest": {
           "structure": "MCPManifest with MCPTool objects",
           "critical_fields": ["tutorial", "examples", "desc"],
           "patterns": "MANDATORY anyOf for numeric/boolean params"
+        },
+        "library_validation": {
+          "fastmcp_double_validation": "FastMCP performs double validation (JSON Schema → Pydantic)",
+          "pydantic_v2_coercion": "Pydantic v2 field validators handle coercion perfectly with mode='before'",
+          "performance_impact": "Double validation adds overhead but ensures compatibility"
+        }
+      },
+      "parameter_validation_investigation": {
+        "research_date": "2025-08-13",
+        "context": "Investigation during MCP parameter validation fix",
+        "client_compatibility_matrix": {
+          "claude_code": {
+            "anyof_support": "NONE - confirmed no support for anyOf schemas",
+            "parameter_handling": "String serialization only",
+            "known_bugs": "Empty dictionary parameter serialization failures"
+          },
+          "claude_desktop": {
+            "anyof_support": "PARTIAL - buggy implementation",
+            "parameter_handling": "Mixed type support with inconsistencies"
+          },
+          "fastmcp": {
+            "anyof_support": "LIMITED - basic oneOf/allOf/anyOf polymorphism",
+            "validation_behavior": "Double validation: JSON Schema then Pydantic"
+          },
+          "mcp_inspector": {
+            "parameter_handling": "Sends null values for form parameters",
+            "ui_limitations": "Form-based parameter input inconsistent with protocol"
+          }
+        },
+        "validation_patterns": {
+          "string_only_parameters": {
+            "compatibility": "Maximum compatibility across all MCP clients",
+            "implementation": "Use str type with field validators for coercion",
+            "benefit": "Eliminates anyOf-related validation failures"
+          },
+          "field_validators": {
+            "mode_before": "Required for type coercion from string inputs",
+            "pydantic_v2": "Handles coercion perfectly with proper configuration",
+            "error_handling": "Must raise ValueError, not ValidationError"
+          },
+          "schema_enhancements": {
+            "examples_arrays": "Provide concrete usage examples in parameter schemas",
+            "format_hints": "Include clear format descriptions for complex parameters",
+            "type_documentation": "Document expected input formats in descriptions"
+          }
+        },
+        "technical_findings": {
+          "double_validation_overhead": {
+            "description": "FastMCP validates parameters twice: JSON Schema then Pydantic",
+            "impact": "Adds processing overhead but ensures compatibility",
+            "mitigation": "Optimize validators for performance with isinstance() checks"
+          },
+          "anyof_schema_limitations": {
+            "problem": "anyOf patterns cause validation failures across multiple clients",
+            "root_cause": "Inconsistent JSON Schema implementation in MCP clients",
+            "solution": "Avoid anyOf patterns; use string parameters with validation"
+          }
         }
       }
     },
@@ -116,7 +188,12 @@
       "embedding": {
         "models": {
           "all_minilm_l6_v2": {"mem_reduction": "85%", "perf": "good"},
-          "baai_bge_small_en_v1_5": {"mteb_score": 62.17, "skip_instructions": true}
+          "baai_bge_small_en_v1_5": {
+            "mteb_score": 62.17, 
+            "skip_instructions": true,
+            "usage": "Primary embedding model for MCP semantic search",
+            "context": "Referenced during MCP parameter validation research 2025-08-13"
+          }
         },
         "fastembed": {
           "ver": "#{fastembed}",
@@ -1091,7 +1168,11 @@
       "p2: Use field validators with mode='before' for MCP client compatibility",
       "p2: Use isinstance(v, bool) fast path in Pydantic boolean validators for MCP parameter compatibility",
       "p2: Standard library rustdoc JSON unavailable on docs.rs - implement fallback for std/core/alloc crates",
-      "p2: Inform users to install rust-docs-json component via rustup for complete stdlib documentation"
+      "p2: Inform users to install rust-docs-json component via rustup for complete stdlib documentation",
+      "p2: Claude Code has NO anyOf schema support - use string-only parameters for maximum compatibility",
+      "p2: Avoid anyOf patterns in MCP schemas due to inconsistent client support",
+      "p2: Provide examples arrays and format hints in all MCP parameter schemas",
+      "p2: FastMCP double validation (JSON Schema → Pydantic) requires optimized field validators"
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",
@@ -1158,7 +1239,12 @@
       "Add Optional[T] or T | None type hints to indicate nullable parameters for better documentation",
       "Log None-related errors with appropriate levels: warning for recoverable, error for critical scenarios",
       "Validate dict.get() return values before operations as keys may be missing unexpectedly",
-      "Use guard clauses and getattr() patterns to prevent AttributeError: 'NoneType' object has no attribute"
+      "Use guard clauses and getattr() patterns to prevent AttributeError: 'NoneType' object has no attribute",
+      "Use string-only MCP parameters with Pydantic field validators for maximum client compatibility",
+      "Implement isinstance() fast paths in field validators to optimize FastMCP's double validation",
+      "Include concrete examples in JSON Schema parameter definitions for better client understanding",
+      "Test MCP tools with actual clients (Claude Code, Claude Desktop) not just unit tests",
+      "Handle MCP Inspector UI null values gracefully in parameter validation logic"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",
