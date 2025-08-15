@@ -3468,6 +3468,143 @@ The MCP manifest schema has been updated to use string-only parameters with exam
 
 This ensures maximum compatibility across all MCP client implementations while maintaining strict type safety through Pydantic field validators.
 
+### FastMCP Schema Override Pattern
+
+The system implements a critical workaround for Claude Code MCP client compatibility limitations through runtime schema override functionality.
+
+#### The Problem
+
+Claude Code MCP client has fundamental limitations that prevent normal FastMCP operation:
+- **Native JSON Types**: Sends parameters as native JSON types (integers, booleans)  
+- **No anyOf Support**: Does NOT support anyOf/oneOf/allOf JSON schema patterns
+- **FastMCP Auto-Generation**: FastMCP.from_fastapi() auto-generates schemas with anyOf patterns that Claude Code rejects
+
+```mermaid
+graph TB
+    subgraph "Problem Flow"
+        FASTMCP[FastMCP.from_fastapi()<br/>Auto-generates schemas]
+        ANYOF[anyOf Patterns<br/>{"anyOf": [{"type": "integer"}, {"type": "string"}]}]
+        CLAUDE[Claude Code Client<br/>Rejects anyOf patterns]
+        FAILURE[Schema Validation Failure<br/>Tool calls rejected]
+    end
+    
+    FASTMCP --> ANYOF
+    ANYOF --> CLAUDE
+    CLAUDE --> FAILURE
+    
+    style FAILURE fill:#ffcccc
+    style CLAUDE fill:#ffeecc
+```
+
+#### The Solution
+
+Implemented `override_fastmcp_schemas()` function that provides runtime schema manipulation:
+
+1. **Post-Generation Override**: Intercepts auto-generated schemas AFTER FastMCP creates them
+2. **Pattern Removal**: Replaces problematic parameter schemas with simple string types  
+3. **anyOf Elimination**: Removes anyOf patterns completely from tool schemas
+4. **Pre-Startup Application**: Applied in `run_mcp_server()` before server starts
+
+```mermaid
+graph TB
+    subgraph "Solution Architecture"
+        FASTMCP_GEN[FastMCP.from_fastapi()<br/>Generates initial schemas]
+        OVERRIDE[override_fastmcp_schemas()<br/>Runtime schema manipulation]
+        SIMPLE[Simple String Schemas<br/>{"type": "string", "description": "..."}]
+        CLAUDE_OK[Claude Code Compatible<br/>Schema validation passes]
+        VALIDATORS[Pydantic Validators<br/>mode='before' type conversion]
+        SUCCESS[Successful Tool Execution<br/>Native types → validated types]
+    end
+    
+    FASTMCP_GEN --> OVERRIDE
+    OVERRIDE --> SIMPLE
+    SIMPLE --> CLAUDE_OK
+    CLAUDE_OK --> VALIDATORS
+    VALIDATORS --> SUCCESS
+    
+    style SUCCESS fill:#ccffcc
+    style CLAUDE_OK fill:#ccffcc
+```
+
+#### Technical Implementation
+
+**Location**: `src/docsrs_mcp/mcp_server.py`  
+**Function**: `override_fastmcp_schemas()`  
+**Timing**: Called via `asyncio.run()` before server startup  
+**Targets**: All tools with problematic parameter types
+
+**Implementation Pattern**:
+```python
+async def override_fastmcp_schemas():
+    """Override FastMCP auto-generated schemas for Claude Code compatibility."""
+    tool_manager = server._tool_manager
+    
+    for tool_name in ["searchItems", "startPreIngestion", "ingestCargoFile", 
+                      "compareVersions", "searchExamples"]:
+        if tool_name in tool_manager._tools:
+            tool = tool_manager._tools[tool_name]
+            
+            # Replace integer/boolean parameters with string schemas
+            for param_name, schema in tool.description.inputSchema.properties.items():
+                if param_name in integer_params:
+                    schema.clear()
+                    schema.update({"type": "string", "description": f"Integer parameter (as string): {param_name}"})
+                elif param_name in boolean_params:
+                    schema.clear() 
+                    schema.update({"type": "string", "description": f"Boolean parameter (as string): {param_name}"})
+```
+
+#### How It Works
+
+1. **FastMCP Generation**: FastMCP generates schemas from Pydantic models (with anyOf patterns)
+2. **Runtime Override**: `override_fastmcp_schemas()` accesses internal `_tool_manager`
+3. **Schema Replacement**: Replaces parameter schemas: `integer/boolean → string`
+4. **Client Compatibility**: Claude Code sends native types against string schemas
+5. **Validation Success**: JSON Schema validation passes (lenient type checking)
+6. **Type Conversion**: Pydantic validators with `mode='before'` handle type conversion
+
+#### Affected Parameters
+
+**Integer Parameters**: 
+- `k`, `min_doc_length`, `concurrency`, `count`, `max_results`
+
+**Boolean Parameters**:
+- `force`, `has_examples`, `deprecated`, `skip_existing`, `resolve_versions`, `include_unchanged`
+
+#### Field Validator Requirements
+
+All validators use `mode='before'` for early type interception:
+- **Fast Path**: Direct handling for native types (int, bool)
+- **String Parsing**: Comprehensive string-to-type conversion
+- **Numeric Handling**: Proper parsing of numeric strings
+- **Error Messages**: Clear validation error reporting
+
+```python
+@field_validator("k", mode="before")
+@classmethod  
+def coerce_k_to_int(cls, v):
+    """Convert string numbers to int, handle native ints."""
+    if v is None:
+        return v
+    if isinstance(v, int):
+        return v  # Fast path for native integers
+    if isinstance(v, str):
+        return int(v)  # String conversion
+    raise ValueError(f"Invalid k value: {v}")
+```
+
+#### Architectural Impact
+
+**Temporary Workaround**: This solution can be removed when Claude Code fixes its anyOf support
+
+**Performance**: Minimal overhead during server startup only
+
+**Maintainability**: Centralized in single function for easy removal/modification
+
+**Compatibility**: Ensures broad MCP client support while maintaining type safety
+
+This pattern demonstrates the principle of **"Compatibility over elegance"** - prioritizing real-world client support over schema sophistication.
+
 ## Token Optimization
 
 ### Token Counting Utilities

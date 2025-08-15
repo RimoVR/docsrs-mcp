@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-13",
+    "lastUpdated": "2025-08-15",
     "compressionVersion": "1.1",
     "originalTokens": 47800,
     "legend": {
@@ -106,7 +106,9 @@
           "parameter_compatibility": "Use string-only parameters for maximum MCP client compatibility",
           "field_validation": "Implement field validators with mode='before' for type coercion",
           "schema_examples": "Provide examples arrays in parameter schemas",
-          "description_hints": "Include clear format hints in descriptions"
+          "description_hints": "Include clear format hints in descriptions",
+          "schema_override_technique": "Modify FastMCP _tool_manager schemas post-generation for client compatibility",
+          "validation_flow_optimization": "Leverage FastMCP's lenient JSON Schema validation with Pydantic conversion"
         },
         "manifest": {
           "structure": "MCPManifest with MCPTool objects",
@@ -168,6 +170,26 @@
             "problem": "anyOf patterns cause validation failures across multiple clients",
             "root_cause": "Inconsistent JSON Schema implementation in MCP clients",
             "solution": "Avoid anyOf patterns; use string parameters with validation"
+          },
+          "fastmcp_schema_override": {
+            "discovery": "FastMCP internal architecture allows post-generation schema modification",
+            "implementation": "Access via mcp._tool_manager after FastMCP.from_fastapi()",
+            "modification_window": "Between tool generation and server startup",
+            "json_schema_leniency": "FastMCP's validation layer accepts type mismatches when schemas declare strings but receive native types",
+            "double_validation_bypass": "Schema override prevents first validation layer from rejecting valid inputs",
+            "validation_flow": [
+              "FastMCP generates anyOf schemas from Pydantic models",
+              "Override replaces schemas with string-only types", 
+              "Client sends native JSON types",
+              "JSON Schema validation passes (lenient checking)",
+              "Pydantic validators perform actual type conversion"
+            ],
+            "compatibility_matrix": {
+              "claude_code": "WORKING with override",
+              "rest_api": "Unaffected (different validation path)",
+              "other_mcp_clients": "Compatible (handle strings naturally)"
+            },
+            "performance_impact": "Minimal - override runs once at startup, no runtime overhead after initialization"
           }
         }
       }
@@ -1172,7 +1194,8 @@
       "p2: Claude Code has NO anyOf schema support - use string-only parameters for maximum compatibility",
       "p2: Avoid anyOf patterns in MCP schemas due to inconsistent client support",
       "p2: Provide examples arrays and format hints in all MCP parameter schemas",
-      "p2: FastMCP double validation (JSON Schema → Pydantic) requires optimized field validators"
+      "p2: FastMCP double validation (JSON Schema → Pydantic) requires optimized field validators",
+      "p2: Use FastMCP schema override pattern to bypass client validation limitations while preserving type safety"
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",
@@ -1244,7 +1267,9 @@
       "Implement isinstance() fast paths in field validators to optimize FastMCP's double validation",
       "Include concrete examples in JSON Schema parameter definitions for better client understanding",
       "Test MCP tools with actual clients (Claude Code, Claude Desktop) not just unit tests",
-      "Handle MCP Inspector UI null values gracefully in parameter validation logic"
+      "Handle MCP Inspector UI null values gracefully in parameter validation logic",
+      "Apply FastMCP schema override technique: modify _tool_manager schemas to string-only types post-generation",
+      "Leverage FastMCP's lenient JSON Schema validation that accepts type mismatches for better client compatibility"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",

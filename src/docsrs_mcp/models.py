@@ -566,13 +566,42 @@ class SearchItemsRequest(BaseModel):
     @field_validator("deprecated", "has_examples", mode="before")
     @classmethod
     def validate_boolean_filters(cls, v):
-        """Convert various inputs to boolean for MCP compatibility."""
+        """Convert various inputs to boolean for MCP compatibility.
+
+        CRITICAL FOR CLAUDE CODE COMPATIBILITY:
+        ----------------------------------------
+        This validator handles the mismatch between:
+        1. Schema declaration: Says 'string' (due to our override in mcp_server.py)
+        2. Claude Code sends: Native boolean or integer
+        3. Our internal needs: Actual boolean values
+
+        The mode='before' is ESSENTIAL - it runs before Pydantic's type validation,
+        allowing us to intercept and convert the raw input from Claude Code.
+
+        Accepts multiple formats for maximum compatibility:
+        - Native booleans: True/False (what Claude Code actually sends)
+        - Strings: "true", "false", "1", "0", "yes", "no", "on", "off"
+        - Numbers: 1/0, any non-zero = true
+        - None/empty: Preserves as None (optional parameter)
+        """
         if v is None or v == "":
             return None
+
+        # Handle native boolean (most common from Claude Code)
         if isinstance(v, bool):
             return v
+
+        # Handle string representations (for other MCP clients)
         if isinstance(v, str):
-            return v.lower() in ["true", "1", "yes"]
+            v_lower = v.lower().strip()
+            # Expanded set of truthy values for better compatibility
+            return v_lower in ["true", "1", "yes", "on", "t", "y"]
+
+        # Handle numeric values (some clients send 1/0)
+        if isinstance(v, (int, float)):
+            return bool(v)
+
+        # Default to None for unrecognized types
         return None
 
     @field_validator("visibility", mode="before")
@@ -880,9 +909,7 @@ class RankingConfig(BaseModel):
             examples=[0.05, 0.15, 0.7],
         )
 
-    @field_validator(
-        "vector_weight", "type_weight", "quality_weight", "examples_weight"
-    )
+    @field_validator("examples_weight", mode="before")
     @classmethod
     def validate_weights_sum(cls, v, info):
         """Ensure all weights sum to 1.0 for normalized scoring."""
@@ -1074,19 +1101,26 @@ class PopularCrate(BaseModel):
         examples=[1704067200.0],
     )
 
-    @field_validator("name")
+    @field_validator("name", mode="before")
     @classmethod
-    def validate_name(cls, v: str) -> str:
+    def validate_name(cls, v: Any) -> str:
         """Validate crate name follows crates.io naming rules."""
+        # Handle any input type by converting to string first
+        if v is None:
+            raise ValueError("Crate name cannot be None")
+        if not isinstance(v, str):
+            v = str(v)
         return validate_crate_name(v)
 
-    @field_validator("version")
+    @field_validator("version", mode="before")
     @classmethod
-    def validate_version(cls, v: str | None) -> str | None:
+    def validate_version(cls, v: Any) -> str | None:
         """Validate version string if provided."""
-        if v is not None:
-            return validate_version_string(v)
-        return v
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            v = str(v)
+        return validate_version_string(v)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1294,12 +1328,18 @@ class IngestCargoFileRequest(BaseModel):
         default=False, description="Resolve version specifications to concrete versions"
     )
 
-    @field_validator("file_path")
+    @field_validator("file_path", mode="before")
     @classmethod
-    def validate_file_path(cls, v: str) -> str:
+    def validate_file_path(cls, v: Any) -> str:
         """Validate and normalize file path."""
         from pathlib import Path
 
+        # Convert any input to string first
+        if v is None:
+            raise ValueError("File path cannot be None")
+        if not isinstance(v, str):
+            v = str(v)
+            
         path = Path(v).resolve()
         if not path.exists():
             raise ValueError(f"File not found: {v}")
@@ -1526,31 +1566,72 @@ class CompareVersionsRequest(BaseModel):
         default=1000, ge=1, le=5000, description="Maximum number of changes to return"
     )
 
-    @field_validator("crate_name")
+    @field_validator("crate_name", mode="before")
     @classmethod
-    def validate_crate_name(cls, v: str) -> str:
+    def validate_crate_name(cls, v: Any) -> str:
         """Validate crate name format."""
         from .validation import validate_crate_name
 
+        # Convert any input to string first
+        if v is None:
+            raise ValueError("Crate name cannot be None")
+        if not isinstance(v, str):
+            v = str(v)
         return validate_crate_name(v)
 
-    @field_validator("version_a", "version_b")
+    @field_validator("version_a", "version_b", mode="before")
     @classmethod
-    def validate_version(cls, v: str) -> str:
+    def validate_version(cls, v: Any) -> str:
         """Validate version string format."""
         from .validation import validate_version_string
 
+        # Convert any input to string first
+        if v is None:
+            raise ValueError("Version cannot be None")
+        if not isinstance(v, str):
+            v = str(v)
         return validate_version_string(v)
 
     @field_validator("include_unchanged", mode="before")
     @classmethod
     def validate_include_unchanged(cls, v: Any) -> bool:
-        """Validate and coerce include_unchanged to boolean."""
+        """Validate and coerce include_unchanged to boolean.
+        
+        Handles multiple input formats for Claude Code compatibility:
+        - Native booleans: True/False
+        - Strings: "true"/"false", "1"/"0", "yes"/"no", "on"/"off", "t"/"f", "y"/"n"
+        - Numbers: 0 = False, non-zero = True
+        - None: defaults to False
+        """
+        # Fast path for native booleans
         if isinstance(v, bool):
             return v
+            
+        # Handle None (default to False)
+        if v is None:
+            return False
+            
+        # Handle string representations (case-insensitive)
         if isinstance(v, str):
-            return v.lower() in ("true", "1", "yes", "on")
-        return False  # default
+            v_lower = v.lower().strip()
+            # Check for truthy strings
+            if v_lower in ("true", "1", "yes", "on", "t", "y"):
+                return True
+            # Check for falsy strings
+            if v_lower in ("false", "0", "no", "off", "f", "n"):
+                return False
+            # Invalid string value
+            raise ValueError(
+                f"Invalid boolean string: '{v}'. "
+                f"Use: true/false, 1/0, yes/no, on/off, t/f, y/n"
+            )
+            
+        # Handle numeric values (0 = False, non-zero = True)
+        if isinstance(v, (int, float)):
+            return bool(v)
+            
+        # Default fallback for other types
+        return bool(v)  # default
 
     @field_validator("max_results", mode="before")
     @classmethod

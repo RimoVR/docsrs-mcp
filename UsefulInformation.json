@@ -2419,6 +2419,78 @@
           "codeExample": "# Schema generation - use string only\n\"k\": {\n    \"type\": \"string\",\n    \"description\": \"Number of results (integer between 1-100)\"\n}\n\n# Field validator handles conversion\n@field_validator('k', mode='before')\n@classmethod\ndef coerce_k(cls, v):\n    return coerce_to_int_with_bounds(v, min_val=1, max_val=100)",
           "lesson": "MCP clients may have stricter schema validation than servers expect. Always test with actual MCP clients, not just REST endpoints. Use simple schema types with complex validation logic rather than complex schemas with simple validation",
           "preventionPattern": "For MCP compatibility: simple schemas + complex validators > complex schemas + simple validators"
+        },
+        {
+          "error": "FastMCP auto-generates schemas that bypass custom manifest definitions",
+          "context": "FastMCP.from_fastapi() generates tool schemas from Pydantic models directly, causing validation conflicts when Claude Code sends native types",
+          "rootCause": "Double validation architecture (JSON Schema → Pydantic) creates barriers where parameters are rejected before field validators can coerce them",
+          "solution": "Use string-only schemas with comprehensive field validators - avoid anyOf patterns that Claude Code may not handle correctly",
+          "evidence": [
+            "searchItems fails with k=3 (integer) - rejected at schema validation",
+            "startPreIngestion fails with count=10 - numeric parameter validation error", 
+            "ingestCargoFile fails with concurrency=3 - type coercion blocked"
+          ],
+          "prevention": "Define all parameters as type: 'string' in manifest, use field_validator(mode='before') for coercion to avoid schema-level validation conflicts",
+          "dateEncountered": "2025-08-15",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "codePattern": "# Schema: simple string type\n\"parameter\": {\"type\": \"string\", \"description\": \"Integer value (1-100)\"}\n\n# Validator: comprehensive coercion\n@field_validator('parameter', mode='before')\n@classmethod\ndef coerce_param(cls, v):\n    return coerce_to_int_with_bounds(v, min_val=1, max_val=100)",
+          "status": "IDENTIFIED",
+          "architecturalImpact": "FastMCP auto-schema generation conflicts with manual manifest customization"
+        },
+        {
+          "error": "anyOf patterns may not work with Claude Code",
+          "context": "Claude Code has known issues with anyOf schema patterns in MCP tool definitions",
+          "rootCause": "Claude Code's MCP client implementation may have stricter schema validation that doesn't properly handle anyOf unions",
+          "solution": "Use string-only schemas with comprehensive field validators instead of anyOf patterns for better compatibility",
+          "alternativeApproach": "Define all parameters as type: 'string' in manifest and handle all type coercion in Pydantic field validators",
+          "prevention": "Avoid complex schema patterns (anyOf, oneOf) in MCP manifests when Claude Code is the primary target client",
+          "dateEncountered": "2025-08-15", 
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "compatibilityNote": "What works in JSON Schema specification may not work in all MCP client implementations",
+          "testingStrategy": "Always test with actual Claude Code MCP client, not just REST endpoints or other MCP clients",
+          "status": "HYPOTHESIS_TESTING"
+        },
+        {
+          "lesson": "MCP client compatibility trumps protocol purity",
+          "context": "When choosing between ideal MCP protocol implementation and Claude Code compatibility",
+          "insight": "Cannot follow MCP best practices perfectly when Claude Code is the primary target client",
+          "tradeoffs": [
+            "Accept string-only schemas over proper typed schemas for compatibility",
+            "Use comprehensive field validators instead of schema-level type definitions",
+            "Prioritize working solutions over theoretical protocol correctness"
+          ],
+          "prevention": "Design MCP tools with primary client constraints in mind, not just protocol specifications",
+          "dateLearned": "2025-08-15",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "designPrinciple": "Practical compatibility over theoretical purity",
+          "implementationGuidance": "When in doubt, choose the approach that works with Claude Code even if it's not the 'correct' way according to MCP specifications"
+        },
+        {
+          "error": "Claude Code MCP client rejects anyOf schemas and sends native JSON types",
+          "rootCause": "Claude Code has two critical bugs: 1) Sends native JSON types (integers, booleans) instead of strings, 2) Completely rejects anyOf/oneOf/allOf schema patterns",
+          "solution": "Implement comprehensive schema override system with override_fastmcp_schemas() function that intercepts FastMCP auto-generated schemas, replaces integer/boolean schemas with simple string types, and removes all anyOf patterns",
+          "context": "Input validation errors with anyOf schemas where parameters work in REST but fail in MCP mode with 'is not valid under any of the given schemas' errors",
+          "implementation": [
+            "Schema Override Function: override_fastmcp_schemas() in mcp_server.py intercepts FastMCP auto-generated schemas",
+            "Type conversion: Replaces integer/boolean schemas with simple string types",
+            "Pattern removal: Removes all anyOf patterns completely",
+            "Timing: Called before server startup to modify schemas at runtime",
+            "Field Validators: All validators use mode='before' to handle native types, strings, numbers",
+            "Boolean parsing: Comprehensive boolean parsing (true/1/yes/on/t/y)",
+            "Bounds checking: Proper bounds checking for numeric types"
+          ],
+          "affectedTools": ["searchItems", "startPreIngestion", "ingestCargoFile", "compareVersions", "searchExamples"],
+          "filesModified": ["src/docsrs_mcp/mcp_server.py", "src/docsrs_mcp/models.py"],
+          "testingCommands": [
+            "SearchItemsRequest(crate_name='tokio', query='async', k=5, has_examples=True)",
+            "SearchItemsRequest(crate_name='tokio', query='async', k='5', has_examples='true')"
+          ],
+          "futureRemoval": "When Claude Code fixes anyOf support, remove: 1) override_fastmcp_schemas() function, 2) Its call in run_mcp_server(), 3) Keep field validators as they provide good type flexibility",
+          "dateImplemented": "2025-08-15",
+          "status": "WORKING - Fully tested with mixed parameter types",
+          "lesson": "Complete schema overrides may be necessary for MCP client compatibility, not just field validators",
+          "pattern": "Runtime schema modification to work around client-specific limitations",
+          "debuggingTechnique": "Test with both native JSON types and string representations to verify comprehensive type handling"
         }
       ]
     },
