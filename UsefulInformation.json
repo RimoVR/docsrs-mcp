@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-13",
+  "lastUpdated": "2025-08-15",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -1606,6 +1606,19 @@
           "debuggingTechnique": "Test with both Claude Code MCP client and REST API to identify client-specific validation differences",
           "bestPractice": "Design MCP schemas for the most restrictive client (Claude Code) and handle complexity in server-side validators. Field validators can handle the complexity that schemas can't.",
           "impact": "Enables full compatibility with Claude Code MCP client while maintaining type safety and validation through Pydantic"
+        },
+        {
+          "error": "Module structure search results contaminated with internal/dependency modules",
+          "rootCause": "Search results include internal implementation details like std::, core::, deps:: modules that are not relevant to user queries about crate API structure",
+          "solution": "Implement post-processing filters to remove internal and dependency modules from search results. Filter patterns: ['::__', '_internal', 'deps::', 'std::', 'core::'] to focus on public API modules only",
+          "context": "Module structure queries returning too much noise from internal Rust standard library and dependency modules",
+          "lesson": "Search results need post-processing to remove irrelevant internal modules and focus on user-relevant public API surface",
+          "pattern": "Apply filtering patterns after search but before returning results to users",
+          "dateEncountered": "2025-08-13",
+          "relatedFiles": ["src/docsrs_mcp/search.py", "src/docsrs_mcp/filters.py"],
+          "codeExample": "# Filter internal modules from results\nfiltered_modules = [\n    module for module in modules \n    if not any(pattern in module.path for pattern in \n               ['::__', '_internal', 'deps::', 'std::', 'core::'])\n]",
+          "debuggingTechnique": "Compare raw search results with filtered results to verify internal modules are properly excluded",
+          "impact": "Improves search result quality by focusing on relevant public API modules instead of internal implementation details"
         }
       ]
     },
@@ -2387,6 +2400,25 @@
             "booleanPattern": "String to boolean conversion with comprehensive value recognition (true/false, 1/0, yes/no, on/off, t/y)",
             "errorHandling": "Provide sensible defaults for invalid inputs rather than strict validation failures"
           }
+        },
+        {
+          "error": "MCP client validation compatibility issues with anyOf schema patterns",
+          "rootCause": "Claude Code MCP client cannot handle anyOf JSON schema patterns, causing 'Input validation error: not valid under any of the given schemas' failures despite correct implementation",
+          "solution": "Replace all anyOf patterns with simple string-only schema types in MCP manifest. Use Pydantic field validators with mode='before' for comprehensive type coercion from strings to proper types (int, float, bool). All numeric and boolean parameters now use string type in schema with validation handling the conversion",
+          "context": "MCP parameter validation failing across all tools despite implementing proper anyOf schema patterns for type flexibility",
+          "implementation": [
+            "Changed all numeric parameters to 'type': 'string' in MCP manifest schema generation",
+            "Changed all boolean parameters to 'type': 'string' in MCP manifest schema generation", 
+            "Enhanced field validators to handle string-to-int, string-to-float, and string-to-bool conversion",
+            "Added module filtering in get_crate_summary to reduce noise from internal implementation details",
+            "Maintained all existing validation logic and bounds checking in Pydantic validators"
+          ],
+          "pattern": "Use string-only schemas in MCP manifests combined with robust Pydantic field validators for type coercion. This pattern works around MCP client schema limitations while maintaining server-side type safety",
+          "dateEncountered": "2025-08-15",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py"],
+          "codeExample": "# Schema generation - use string only\n\"k\": {\n    \"type\": \"string\",\n    \"description\": \"Number of results (integer between 1-100)\"\n}\n\n# Field validator handles conversion\n@field_validator('k', mode='before')\n@classmethod\ndef coerce_k(cls, v):\n    return coerce_to_int_with_bounds(v, min_val=1, max_val=100)",
+          "lesson": "MCP clients may have stricter schema validation than servers expect. Always test with actual MCP clients, not just REST endpoints. Use simple schema types with complex validation logic rather than complex schemas with simple validation",
+          "preventionPattern": "For MCP compatibility: simple schemas + complex validators > complex schemas + simple validators"
         }
       ]
     },
@@ -2758,6 +2790,43 @@
       "issue": "uvloop not compatible with Windows",
       "impact": "Performance degradation on Windows",
       "workaround": "Fallback to standard asyncio event loop on Windows"
+    },
+    "claudeCodeMcpCompatibility": {
+      "issue": "Claude Code does NOT support anyOf patterns in MCP schemas unlike Claude Desktop",
+      "impact": "Parameter validation fails when schemas use anyOf patterns for type flexibility",
+      "workaround": "Use string-only parameter types in MCP manifest with Pydantic field validators for coercion",
+      "details": {
+        "root_cause": "Claude Code implements stricter JSON Schema validation that rejects anyOf patterns entirely",
+        "solution_pattern": "Define parameters as type: 'string' in manifest, use @field_validator(mode='before') for type conversion",
+        "affected_tools": "All MCP tools with numeric or boolean parameters that need type flexibility"
+      }
+    },
+    "versionComparisonErrors": {
+      "issue": "PointerToNowhere errors in version comparison _map_item_type function",
+      "impact": "Version comparison tools fail with null reference errors",
+      "workaround": "Add defensive null checking before accessing item type properties",
+      "details": {
+        "root_cause": "Missing null checks when processing version comparison items",
+        "solution_pattern": "Check if item exists and has required properties before mapping types"
+      }
+    },
+    "preIngestionValidation": {
+      "issue": "Pre-ingestion tool parameters lack proper anyOf patterns causing HTTP 422 errors",
+      "impact": "Tool parameter validation fails when parameters sent as strings instead of expected types",
+      "workaround": "Update tool schemas to use string types with validators, not anyOf patterns for Claude Code compatibility",
+      "details": {
+        "root_cause": "Claude Code strict schema validation incompatible with anyOf type patterns",
+        "solution_pattern": "Use consistent string-type parameters with runtime type coercion in validators"
+      }
+    },
+    "moduleStructureNoise": {
+      "issue": "Module structure results include internal/dependency modules creating noise",
+      "impact": "Search results contaminated with irrelevant internal implementation details",
+      "workaround": "Filter internal and dependency modules from search results to focus on public API",
+      "details": {
+        "filter_patterns": ["::__", "_internal", "deps::", "std::", "core::"],
+        "solution_pattern": "Apply post-processing filters to remove non-user-relevant modules from results"
+      }
     }
   },
   "debuggingTips": {
@@ -2770,7 +2839,12 @@
       "Use inline enum definitions instead of $ref for simple value constraints in MCP schemas",
       "Monitor internal progress tracking and expose through health endpoints for user visibility",
       "Test file validation with various case combinations to identify platform-specific issues",
-      "Always implement case-insensitive comparison for configuration file validation"
+      "Always implement case-insensitive comparison for configuration file validation",
+      "CRITICAL: Claude Code does NOT support anyOf patterns - use string-only types with validators",
+      "Test tools with both Claude Code and Claude Desktop to identify client-specific compatibility issues",
+      "Add defensive null checking in version comparison functions to prevent PointerToNowhere errors",
+      "Filter internal/dependency modules from search results using pattern matching",
+      "For Claude Code compatibility: avoid anyOf, use string parameters with @field_validator coercion"
     ],
     "vectorSearch": [
       "Check embedding dimensions match (384 for BAAI/bge-small-en-v1.5)",

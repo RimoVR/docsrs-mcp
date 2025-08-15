@@ -478,8 +478,9 @@ async def get_mcp_manifest(request: Request):
                             "description": "Name of the crate to query (supports stdlib: std, core, alloc)",
                         },
                         "version": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}],
-                            "description": "Specific version (default: latest)",
+                            "type": "string",
+                            "description": "Specific version or 'latest' (default: latest). Pass null or empty string for latest",
+                            "examples": ["1.0.104", "latest", ""],
                         },
                     },
                     "required": ["crate_name"],
@@ -513,8 +514,9 @@ async def get_mcp_manifest(request: Request):
                         },
                         "query": {"type": "string", "description": "Search query text"},
                         "version": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}],
-                            "description": "Specific version (default: latest)",
+                            "type": "string",
+                            "description": "Specific version or 'latest' (default: latest). Pass null or empty string for latest",
+                            "examples": ["1.0.104", "latest", ""],
                         },
                         "k": {
                             "type": "string",
@@ -591,8 +593,9 @@ async def get_mcp_manifest(request: Request):
                             "description": "Full path to the item (e.g., 'tokio::spawn')",
                         },
                         "version": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}],
-                            "description": "Specific version (default: latest)",
+                            "type": "string",
+                            "description": "Specific version or 'latest' (default: latest). Pass null or empty string for latest",
+                            "examples": ["1.0.104", "latest", ""],
                         },
                     },
                     "required": ["crate_name", "item_path"],
@@ -629,8 +632,9 @@ async def get_mcp_manifest(request: Request):
                             "description": "Search query for finding relevant code examples",
                         },
                         "version": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}],
-                            "description": "Specific version (default: latest)",
+                            "type": "string",
+                            "description": "Specific version or 'latest' (default: latest). Pass null or empty string for latest",
+                            "examples": ["1.0.104", "latest", ""],
                         },
                         "k": {
                             "type": "string",
@@ -673,8 +677,9 @@ async def get_mcp_manifest(request: Request):
                             "description": "Name of the crate to get module tree for",
                         },
                         "version": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}],
-                            "description": "Specific version (default: latest)",
+                            "type": "string",
+                            "description": "Specific version or 'latest' (default: latest). Pass null or empty string for latest",
+                            "examples": ["1.0.104", "latest", ""],
                         },
                     },
                     "required": ["crate_name"],
@@ -1065,20 +1070,88 @@ async def get_crate_summary(request: Request, params: GetCrateSummaryRequest):
 
             name, version, description, repository, documentation = row
 
-            # Fetch modules with hierarchy information
+            # Fetch modules with hierarchy information, filtering out noise
+            # Filter criteria:
+            # 1. Exclude build artifacts (target/, .cargo/, out/, build/)
+            # 2. Exclude test modules unless explicitly needed
+            # 3. Limit depth to meaningful modules (depth <= 3)
+            # 4. Exclude empty re-export modules (item_count < 2 and depth > 0)
             cursor = await db.execute(
-                "SELECT name, path, parent_id, depth, item_count FROM modules WHERE crate_id = 1"
+                """
+                SELECT name, path, parent_id, depth, item_count 
+                FROM modules 
+                WHERE crate_id = 1
+                  AND depth <= 3
+                  AND (item_count >= 2 OR depth = 0)
+                  AND path NOT LIKE '%target::%'
+                  AND path NOT LIKE '%.cargo::%'
+                  AND path NOT LIKE '%build::%'
+                  AND path NOT LIKE '%out::%'
+                  AND path NOT LIKE '%tests::%'
+                  AND path NOT LIKE '%benches::%'
+                  AND path NOT LIKE '%examples::%'
+                  AND path NOT LIKE '%deps::%'
+                  AND path NOT LIKE '%__pycache__%'
+                ORDER BY depth ASC, path ASC
+                """
             )
-            modules = [
-                CrateModule(
-                    name=row[0],
-                    path=row[1],
-                    parent_id=row[2],
-                    depth=row[3],
-                    item_count=row[4],
+
+            all_rows = await cursor.fetchall()
+
+            # Additional filtering in Python for more complex patterns
+            filtered_modules = []
+            for row in all_rows:
+                name, path, parent_id, depth, item_count = row
+
+                # Skip internal/private modules (often start with underscore)
+                if name.startswith("_") and depth > 0:
+                    continue
+
+                # Skip generated modules
+                if any(
+                    pattern in path.lower()
+                    for pattern in ["generated", "autogen", ".pb.", "proto"]
+                ):
+                    continue
+
+                # Include the module
+                filtered_modules.append(
+                    CrateModule(
+                        name=name,
+                        path=path,
+                        parent_id=parent_id,
+                        depth=depth,
+                        item_count=item_count,
+                    )
                 )
-                for row in await cursor.fetchall()
-            ]
+
+            # If we filtered out too many modules, include some key ones back
+            if len(filtered_modules) < 5 and len(all_rows) > 10:
+                # Fall back to top-level modules and those with significant content
+                cursor = await db.execute(
+                    """
+                    SELECT name, path, parent_id, depth, item_count 
+                    FROM modules 
+                    WHERE crate_id = 1
+                      AND (depth <= 1 OR item_count >= 5)
+                      AND path NOT LIKE '%target::%'
+                      AND path NOT LIKE '%.cargo::%'
+                    ORDER BY depth ASC, item_count DESC
+                    LIMIT 20
+                    """
+                )
+                filtered_modules = [
+                    CrateModule(
+                        name=row[0],
+                        path=row[1],
+                        parent_id=row[2],
+                        depth=row[3],
+                        item_count=row[4],
+                    )
+                    for row in await cursor.fetchall()
+                ]
+
+            modules = filtered_modules
 
             return GetCrateSummaryResponse(
                 name=name,
