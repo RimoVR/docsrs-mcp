@@ -434,6 +434,25 @@
           "codeExample": "# Start server in REST mode\nuv run docsrs-mcp --mode rest\n\n# Test tool functionality\ncurl -X POST http://localhost:8000/tools/{tool_name} \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"params\": {\"parameter\": \"value\"}}'",
           "debuggingTechnique": "Use REST endpoints to isolate server-side issues from MCP client serialization or communication problems",
           "testingBestPractice": "Always verify MCP tools work correctly in REST mode before testing through MCP clients"
+        },
+        {
+          "error": "Version Comparison Returns 0 Changes Due to Missing Data Ingestion",
+          "rootCause": "The compare_versions command assumes versions are ingested when they may not be, leading to comparisons between empty datasets that always return 0 changes. ingest_crate() returns database paths without guaranteeing data presence.",
+          "solution": "Add validation after ingest_crate to check for empty data. Implement automatic re-ingestion with validation and retry logic, or create a data availability service with proper contracts.",
+          "context": "compare_versions tool produces misleading '0 changes' results when comparing versions that haven't been properly ingested",
+          "lesson": "Always validate data presence after ingestion operations before proceeding with analysis. Empty databases should trigger errors, not silent processing.",
+          "pattern": "Add data validation checkpoints: ingest → validate presence → process → return results",
+          "dateEncountered": "2025-08-15",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools.py", "src/docsrs_mcp/ingest.py", "src/docsrs_mcp/database.py"],
+          "codeExample": "# Testing command that reveals the issue:\ncurl -X POST http://localhost:8000/mcp/tools/compare_versions \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"crate_name\": \"serde\", \"version_a\": \"1.0.0\", \"version_b\": \"1.1.0\"}'",
+          "debuggingTechnique": "Use REST mode to test version comparison directly and verify data presence in returned database paths before comparison",
+          "solutionApproaches": [
+            "Simple fix: Add validation after ingest_crate to check for empty data",
+            "Comprehensive fix: Add automatic re-ingestion with validation and retry logic", 
+            "Root cause fix: Create data availability service with proper ingestion contracts"
+          ],
+          "architecturalIssue": "Silent failure pattern - empty databases are processed normally instead of raising errors",
+          "testingBestPractice": "Always verify both versions have actual data before running comparisons"
         }
       ]
     },
@@ -1619,6 +1638,20 @@
           "codeExample": "# Filter internal modules from results\nfiltered_modules = [\n    module for module in modules \n    if not any(pattern in module.path for pattern in \n               ['::__', '_internal', 'deps::', 'std::', 'core::'])\n]",
           "debuggingTechnique": "Compare raw search results with filtered results to verify internal modules are properly excluded",
           "impact": "Improves search result quality by focusing on relevant public API modules instead of internal implementation details"
+        },
+        {
+          "error": "Version comparison returns 0 for all comparisons",
+          "rootCause": "When crate versions don't exist or rustdoc JSON is unavailable, ingestion falls back to storing only a single description embedding, causing comparison to find no meaningful differences",
+          "solution": "Added validation to check for minimal ingestion (less than 2 items) and raise clear error messages instead of returning misleading '0 changes'",
+          "context": "Version comparison failing to detect differences due to insufficient documentation data",
+          "lesson": "Always validate data completeness before performing comparisons to avoid misleading results",
+          "pattern": "Use MIN_ITEMS_THRESHOLD check before attempting version comparisons",
+          "dateEncountered": "2025-08-15",
+          "relatedFiles": ["src/docsrs_mcp/version_diff.py", "src/docsrs_mcp/validation.py"],
+          "codeExample": "# Check for minimal ingestion before comparison\nif len(old_items) < MIN_ITEMS_THRESHOLD:\n    raise ValueError(f\"Insufficient documentation found for {crate} v{old_version} (only {len(old_items)} item found). The crate may not be fully ingested.\")",
+          "debuggingTechnique": "Check ingestion counts in database before running comparisons to identify incomplete data",
+          "implementationDetails": "Added MIN_ITEMS_THRESHOLD check in version_diff.py using existing validation utilities from validation.py to provide actionable error messages explaining the issue",
+          "impact": "Prevents misleading '0 changes' results and provides clear error messages when comparison data is insufficient"
         }
       ]
     },

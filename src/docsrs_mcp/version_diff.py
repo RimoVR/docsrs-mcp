@@ -27,6 +27,11 @@ from .models import (
     Severity,
     VersionDiffResponse,
 )
+from .validation import (
+    format_error_message,
+    validate_crate_name,
+    validate_version_string,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,17 +133,51 @@ class VersionDiffEngine:
             )
             return cached_result
 
+        # Validate inputs before expensive operations
+        try:
+            validated_crate = validate_crate_name(request.crate_name)
+            validated_version_a = validate_version_string(request.version_a)
+            validated_version_b = validate_version_string(request.version_b)
+        except ValueError as e:
+            raise ValueError(f"Invalid input parameters: {e}") from e
+
         # Ensure both versions are ingested
         logger.info(
-            f"Comparing {request.crate_name} versions {request.version_a} vs {request.version_b}"
+            f"Comparing {validated_crate} versions {validated_version_a} vs {validated_version_b}"
         )
 
-        db_path_a = await ingest_crate(request.crate_name, request.version_a)
-        db_path_b = await ingest_crate(request.crate_name, request.version_b)
+        db_path_a = await ingest_crate(validated_crate, validated_version_a)
+        db_path_b = await ingest_crate(validated_crate, validated_version_b)
 
         # Get all items from both versions
         items_a = await get_all_items_for_version(db_path_a)
         items_b = await get_all_items_for_version(db_path_b)
+
+        # Verify data was actually ingested - prevent misleading "0 changes"
+        # Check for empty or minimal ingestion (only description embedding)
+        MIN_ITEMS_THRESHOLD = 2  # At least 2 items to be considered properly ingested
+
+        if not items_a or len(items_a) < MIN_ITEMS_THRESHOLD:
+            item_count = len(items_a) if items_a else 0
+            error_msg = format_error_message(
+                "custom",
+                message=f"Insufficient documentation found for {validated_crate} v{validated_version_a} "
+                f"(only {item_count} item{'s' if item_count != 1 else ''} found). "
+                f"The crate may not be fully ingested. This often happens when a version doesn't exist "
+                f"or rustdoc JSON is unavailable. Try using a valid version number.",
+            )
+            raise ValueError(error_msg)
+
+        if not items_b or len(items_b) < MIN_ITEMS_THRESHOLD:
+            item_count = len(items_b) if items_b else 0
+            error_msg = format_error_message(
+                "custom",
+                message=f"Insufficient documentation found for {validated_crate} v{validated_version_b} "
+                f"(only {item_count} item{'s' if item_count != 1 else ''} found). "
+                f"The crate may not be fully ingested. This often happens when a version doesn't exist "
+                f"or rustdoc JSON is unavailable. Try using a valid version number.",
+            )
+            raise ValueError(error_msg)
 
         # Compute item hashes for change detection
         hashes_a = {}
