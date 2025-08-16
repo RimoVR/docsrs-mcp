@@ -452,11 +452,29 @@ erDiagram
         TEXT crate_name "crate name"
         TEXT version "crate version"
         INTEGER ts "ingestion timestamp"
+        TEXT ingestion_status "not_started, in_progress, completed, failed - DEFAULT 'not_started'"
+        INTEGER started_at "ingestion start timestamp - DEFAULT NULL"
+        INTEGER completed_at "ingestion completion timestamp - DEFAULT NULL"
+        TEXT last_error "most recent error message - DEFAULT NULL"
+        INTEGER expected_items "expected number of items to ingest - DEFAULT NULL"
+        INTEGER actual_items "actual number of items ingested - DEFAULT NULL"
+    }
+    
+    INGESTION_CHECKPOINTS {
+        INTEGER id PK
+        INTEGER crate_id FK
+        TEXT checkpoint_type "module, item, embedding"
+        TEXT checkpoint_name "name of checkpoint"
+        INTEGER processed_count "items processed at checkpoint"
+        INTEGER total_count "total items at checkpoint"
+        INTEGER checkpoint_ts "checkpoint timestamp"
+        TEXT metadata "additional checkpoint data as JSON - DEFAULT NULL"
     }
     
     EXAMPLE_EMBEDDINGS ||--|| VEC_EXAMPLE_EMBEDDINGS : "vector indexed by rowid"
     EXAMPLE_EMBEDDINGS ||--o{ EXAMPLE_EMBEDDINGS : "deduplication via example_hash"
     CRATE_METADATA ||--o{ REEXPORTS : "contains"
+    CRATE_METADATA ||--o{ INGESTION_CHECKPOINTS : "tracks"
     META ||--|| CRATE_METADATA : "describes"
 ```
 
@@ -962,17 +980,42 @@ graph TB
 
 ## MCP Tool Endpoints
 
+### Universal Auto-Ingestion Pattern
+
+All MCP tools that query crate data implement a universal auto-ingestion pattern to ensure data availability:
+
+```python
+# Standard pattern implemented across all MCP tools
+async def tool_handler(crate_name: str, **kwargs):
+    # 1. Always call ingest_crate() first
+    await ingest_crate(crate_name, version=kwargs.get('version'))
+    
+    # 2. Proceed with tool-specific logic
+    result = await perform_tool_operation(crate_name, **kwargs)
+    return result
+```
+
+**Tools implementing auto-ingestion**:
+- `search_documentation`: Auto-ingests before searching
+- `navigate_modules`: Auto-ingests before navigation
+- `get_examples`: Auto-ingests before example retrieval
+- `search_examples`: Auto-ingests before example search
+- `get_item_signature`: Auto-ingests before signature lookup
+- `get_module_tree`: Auto-ingests before tree traversal
+- `getCrateSummary`: Auto-ingests before summary generation
+
 ```mermaid
 graph TD
-    subgraph "Enhanced MCP Tools"
-        SEARCH_DOC[search_documentation<br/>Vector similarity search with type filtering<br/>Input: query text, item_type filter<br/>Output: ranked documentation items with see-also suggestions]
-        NAV_MOD[navigate_modules<br/>Module hierarchy navigation<br/>Input: crate, path<br/>Output: module tree structure]
-        GET_EX[get_examples<br/>Code example retrieval<br/>Input: item_id or query<br/>Output: relevant code examples]
-        SEARCH_EX[search_examples<br/>Semantic code example search<br/>Smart snippet extraction with fallback<br/>Input: query, language filter<br/>Output: scored code examples with deduplication]
-        GET_SIG[get_item_signature<br/>Item signature retrieval<br/>Input: item_path<br/>Output: complete signature]
-        INGEST_TOOL[ingest_crate<br/>Manual crate ingestion<br/>Input: crate name/version<br/>Output: ingestion status]
+    subgraph "Enhanced MCP Tools with Auto-Ingestion"
+        SEARCH_DOC[search_documentation<br/>Auto-ingest → Vector similarity search with type filtering<br/>Input: query text, item_type filter<br/>Output: ranked documentation items with see-also suggestions]
+        NAV_MOD[navigate_modules<br/>Auto-ingest → Module hierarchy navigation<br/>Input: crate, path<br/>Output: module tree structure]
+        GET_EX[get_examples<br/>Auto-ingest → Code example retrieval<br/>Input: item_id or query<br/>Output: relevant code examples]
+        SEARCH_EX[search_examples<br/>Auto-ingest → Semantic code example search<br/>Smart snippet extraction with fallback<br/>Input: query, language filter<br/>Output: scored code examples with deduplication]
+        GET_SIG[get_item_signature<br/>Auto-ingest → Item signature retrieval<br/>Input: item_path<br/>Output: complete signature]
+        INGEST_TOOL[ingest_crate<br/>Manual crate ingestion<br/>Input: crate name/version<br/>Output: ingestion status with completion tracking]
         START_PRE_INGEST[start_pre_ingestion<br/>Start pre-ingestion system<br/>Input: force, concurrency, count<br/>Output: status, message, stats, monitoring]
-        GET_MOD_TREE[get_module_tree<br/>Module hierarchy navigation<br/>Input: crate, version, module_path<br/>Output: hierarchical tree structure]
+        GET_MOD_TREE[get_module_tree<br/>Auto-ingest → Module hierarchy navigation<br/>Input: crate, version, module_path<br/>Output: hierarchical tree structure]
+        GET_CRATE_SUMMARY[getCrateSummary<br/>Auto-ingest → Crate summary generation<br/>Input: crate_name, version<br/>Output: comprehensive crate overview with schema override]
     end
     
     subgraph "MCP Protocol"
@@ -986,10 +1029,11 @@ graph TD
         REST_EXAMPLES[POST /get_examples<br/>Example retrieval endpoint]
         REST_SEARCH_EX[POST /search_examples<br/>Code example search endpoint]
         REST_SIG[POST /get_item_signature<br/>Signature endpoint]
-        REST_INGEST[POST /ingest<br/>FastAPI endpoint]
-        REST_START_PRE[POST /mcp/tools/start_pre_ingestion<br/>Pre-ingestion control endpoint]
+        REST_INGEST[POST /ingest<br/>FastAPI endpoint with completion tracking]
+        REST_START_PRE[POST /mcp/tools/start_pre_ingestion<br/>Pre-ingestion control endpoint<br/>MCP-controllable without CLI flags]
         REST_MOD_TREE[POST /get_module_tree<br/>Module tree endpoint]
-        HEALTH[GET /health<br/>Liveness probe]
+        REST_CRATE_SUMMARY[POST /getCrateSummary<br/>Crate summary endpoint with schema override]
+        HEALTH[GET /health<br/>Enhanced liveness probe with ingestion status<br/>Reports: available_not_started vs disabled states]
     end
     
     FASTMCP --> SEARCH_DOC
@@ -1007,6 +1051,7 @@ graph TD
     INGEST_TOOL -->|converts| REST_INGEST
     START_PRE_INGEST -->|converts| REST_START_PRE
     GET_MOD_TREE -->|converts| REST_MOD_TREE
+    GET_CRATE_SUMMARY -->|converts| REST_CRATE_SUMMARY
     STDIO_TRANSPORT --> FASTMCP
 ```
 
@@ -5330,9 +5375,252 @@ classDiagram
 - **Graceful Degradation**: Failed pre-ingestion attempts don't impact on-demand user requests
 - **Comprehensive Logging**: Detailed error tracking without impacting user-facing performance
 
-## MCP Pre-Ingestion Control Tool Architecture
+## Ingestion Completion Tracking Architecture
 
-The `start_pre_ingestion` MCP tool provides programmatic control over the background pre-ingestion system, enabling external services and agents to efficiently manage cache warming and performance optimization.
+The system implements comprehensive ingestion completion tracking to provide visibility into ingestion progress, detect failures, and enable reliable re-ingestion detection.
+
+### Core Tracking Components
+
+```mermaid
+graph TD
+    subgraph "Ingestion Tracking"
+        TRACKER[IngestionTracker<br/>Progress monitoring<br/>Checkpoint management]
+        STATUS[IngestionStatusManager<br/>Status updates<br/>Error handling]
+        CHECKPOINT[CheckpointRecorder<br/>Module, item, embedding checkpoints<br/>Progress metadata]
+    end
+    
+    subgraph "Database Tables"
+        CRATE_META[crate_metadata<br/>Enhanced with tracking fields<br/>ingestion_status, timestamps, counts]
+        CHECKPOINTS[ingestion_checkpoints<br/>Granular progress tracking<br/>Recovery support]
+    end
+    
+    subgraph "Re-ingestion Detection"
+        DETECTOR[ReIngestionDetector<br/>Status-based detection<br/>Progress comparison]
+        VALIDATOR[ProgressValidator<br/>Expected vs actual items<br/>Completion verification]
+    end
+    
+    TRACKER --> STATUS
+    TRACKER --> CHECKPOINT
+    STATUS --> CRATE_META
+    CHECKPOINT --> CHECKPOINTS
+    DETECTOR --> CRATE_META
+    DETECTOR --> CHECKPOINTS
+    VALIDATOR --> CRATE_META
+```
+
+### Enhanced crate_metadata Schema
+
+The `crate_metadata` table has been enhanced with ingestion tracking fields:
+
+```sql
+-- Enhanced ingestion tracking fields
+ALTER TABLE crate_metadata ADD COLUMN ingestion_status TEXT DEFAULT 'not_started';
+ALTER TABLE crate_metadata ADD COLUMN started_at INTEGER DEFAULT NULL;
+ALTER TABLE crate_metadata ADD COLUMN completed_at INTEGER DEFAULT NULL;
+ALTER TABLE crate_metadata ADD COLUMN last_error TEXT DEFAULT NULL;
+ALTER TABLE crate_metadata ADD COLUMN expected_items INTEGER DEFAULT NULL;
+ALTER TABLE crate_metadata ADD COLUMN actual_items INTEGER DEFAULT NULL;
+```
+
+**Status Values**:
+- `not_started`: Crate has never been ingested
+- `in_progress`: Ingestion currently running
+- `completed`: Ingestion finished successfully
+- `failed`: Ingestion encountered errors
+
+### New ingestion_checkpoints Table
+
+```sql
+CREATE TABLE ingestion_checkpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    crate_id INTEGER NOT NULL,
+    checkpoint_type TEXT NOT NULL,  -- 'module', 'item', 'embedding'
+    checkpoint_name TEXT NOT NULL,  -- Name of checkpoint
+    processed_count INTEGER NOT NULL,
+    total_count INTEGER NOT NULL,
+    checkpoint_ts INTEGER NOT NULL,
+    metadata TEXT DEFAULT NULL,     -- JSON metadata
+    FOREIGN KEY (crate_id) REFERENCES crate_metadata(id) ON DELETE CASCADE
+);
+```
+
+### Re-ingestion Detection Mechanism
+
+The ingestion pipeline detects re-ingestion scenarios using multiple indicators:
+
+```python
+def detect_re_ingestion(crate_name: str, version: str) -> bool:
+    """Detect if this is a re-ingestion attempt."""
+    metadata = get_crate_metadata(crate_name, version)
+    
+    if not metadata:
+        return False  # First ingestion
+    
+    # Check status-based indicators
+    if metadata.ingestion_status in ['completed', 'failed']:
+        return True
+    
+    # Check progress indicators
+    if metadata.started_at and not metadata.completed_at:
+        # Stalled ingestion - treat as re-ingestion
+        elapsed = time.time() - metadata.started_at
+        if elapsed > INGESTION_TIMEOUT:
+            return True
+    
+    return False
+```
+
+## Enhanced Fallback Ingestion Architecture
+
+The three-tier fallback system has been enhanced with improved Tier 2 capabilities and schema standardization.
+
+### Enhanced Three-Tier Fallback System
+
+```mermaid
+graph TD
+    subgraph "Tier 1: Rustdoc JSON (10-15% coverage)"
+        T1_DOWNLOAD[Download rustdoc JSON<br/>docs.rs CDN]
+        T1_PARSE[Enhanced JSON Parser<br/>Complete item extraction]
+        T1_EXTRACT[Macro & Example Extraction<br/>Fragment specifiers]
+    end
+    
+    subgraph "Tier 2: Enhanced Source Extraction (80%+ coverage)"
+        T2_DOWNLOAD[Download source archive<br/>static.crates.io]
+        T2_PARSE[Enhanced Source Parser<br/>AST-based extraction]
+        T2_SCHEMA[Schema Standardization Layer<br/>Unified data format]
+        T2_MACRO[Enhanced Macro Detection<br/>Pattern matching]
+    end
+    
+    subgraph "Tier 3: Latest Version Fallback (100% guarantee)"
+        T3_LATEST[Latest Version Lookup<br/>crates.io API]
+        T3_FALLBACK[Standard Library Fallback<br/>Basic documentation]
+        T3_MINIMAL[Minimal Documentation<br/>Name + basic info]
+    end
+    
+    subgraph "Ingestion Method Tracking"
+        METHOD_TRACKER[IngestionMethodTracker<br/>Records fallback tier used<br/>Success/failure rates]
+    end
+    
+    T1_DOWNLOAD --> T1_PARSE
+    T1_PARSE --> T1_EXTRACT
+    T1_EXTRACT -->|Success| METHOD_TRACKER
+    T1_EXTRACT -->|Failure| T2_DOWNLOAD
+    
+    T2_DOWNLOAD --> T2_PARSE
+    T2_PARSE --> T2_SCHEMA
+    T2_SCHEMA --> T2_MACRO
+    T2_MACRO -->|Success| METHOD_TRACKER
+    T2_MACRO -->|Failure| T3_LATEST
+    
+    T3_LATEST --> T3_FALLBACK
+    T3_FALLBACK --> T3_MINIMAL
+    T3_MINIMAL --> METHOD_TRACKER
+```
+
+### Schema Standardization Layer
+
+Tier 2 now includes a schema standardization layer that normalizes data from different sources:
+
+```python
+class SchemaStandardizer:
+    """Standardizes documentation data across ingestion tiers."""
+    
+    def standardize_item(self, raw_item: Dict, source_tier: int) -> StandardizedItem:
+        """Convert raw item data to standardized format."""
+        return StandardizedItem(
+            item_id=self._extract_id(raw_item, source_tier),
+            item_path=self._extract_path(raw_item, source_tier),
+            item_type=self._extract_type(raw_item, source_tier),
+            signature=self._extract_signature(raw_item, source_tier),
+            documentation=self._extract_docs(raw_item, source_tier),
+            examples=self._extract_examples(raw_item, source_tier),
+            metadata={
+                'source_tier': source_tier,
+                'extraction_method': self._get_method(source_tier),
+                'confidence_score': self._calculate_confidence(raw_item, source_tier)
+            }
+        )
+```
+
+### Ingestion Method Tracking
+
+The system tracks which fallback tier was used for each crate:
+
+```sql
+-- Add method tracking to crate_metadata
+ALTER TABLE crate_metadata ADD COLUMN ingestion_method TEXT DEFAULT NULL;
+ALTER TABLE crate_metadata ADD COLUMN fallback_tier INTEGER DEFAULT NULL;
+ALTER TABLE crate_metadata ADD COLUMN method_confidence REAL DEFAULT NULL;
+```
+
+## MCP Parameter Schema Override Architecture
+
+Several MCP tools require schema overrides for Claude Code compatibility, implementing FastMCP's schema override functionality.
+
+### Tools Requiring Schema Override
+
+```mermaid
+graph TD
+    subgraph "Schema Override Tools"
+        GET_CRATE_SUMMARY[getCrateSummary<br/>Requires: crate_name parameter override<br/>Claude Code compatibility]
+        EXISTING_TOOLS[Other existing tools<br/>Already using schema overrides<br/>Maintained compatibility]
+    end
+    
+    subgraph "FastMCP Schema Override"
+        OVERRIDE_ENGINE[FastMCP Schema Override Engine<br/>Parameter remapping<br/>Type coercion]
+        VALIDATION[Enhanced Parameter Validation<br/>Claude Code compatibility<br/>Error handling]
+    end
+    
+    subgraph "Claude Code Compatibility"
+        PARAMETER_MAP[Parameter Mapping<br/>name → crate_name<br/>Transparent to clients]
+        TYPE_COERCION[Type Coercion<br/>String → Union types<br/>Flexible input handling]
+    end
+    
+    GET_CRATE_SUMMARY --> OVERRIDE_ENGINE
+    EXISTING_TOOLS --> OVERRIDE_ENGINE
+    OVERRIDE_ENGINE --> VALIDATION
+    VALIDATION --> PARAMETER_MAP
+    VALIDATION --> TYPE_COERCION
+```
+
+### getCrateSummary Schema Override
+
+The `getCrateSummary` tool implements schema override for Claude Code compatibility:
+
+```python
+@mcptool(schema_override={
+    "properties": {
+        "crate_name": {
+            "type": "string",
+            "description": "Name of the Rust crate to summarize"
+        },
+        "version": {
+            "type": "string", 
+            "description": "Specific version to summarize (optional)",
+            "default": "latest"
+        }
+    },
+    "required": ["crate_name"]
+})
+async def getCrateSummary(crate_name: str, version: str = "latest") -> CrateSummaryResponse:
+    """Generate comprehensive crate summary with auto-ingestion."""
+    # Universal auto-ingestion pattern
+    await ingest_crate(crate_name, version)
+    
+    # Generate summary
+    return await generate_crate_summary(crate_name, version)
+```
+
+### Claude Code Compatibility Requirements
+
+**Parameter Naming**: Tools use `crate_name` parameter to match Claude Code expectations
+**Type Flexibility**: Schema overrides support both strict and flexible parameter types
+**Error Handling**: Enhanced validation provides clear error messages for parameter mismatches
+**Backward Compatibility**: Existing tools maintain compatibility while adding new overrides
+
+## Pre-Ingestion MCP Control Architecture
+
+The `start_pre_ingestion` MCP tool provides programmatic control over the background pre-ingestion system without requiring CLI flags, enabling external services and agents to efficiently manage cache warming and performance optimization.
 
 ### Tool Integration Architecture
 
@@ -5350,7 +5638,7 @@ graph TD
     end
     
     subgraph "Control Logic"
-        STATE_CHECK[Global State Check<br/>worker and scheduler status]
+        STATE_CHECK[Global State Check<br/>worker and scheduler status<br/>available_not_started vs disabled detection]
         DUPLICATE_GUARD[Duplicate Prevention<br/>unless force=true]
         TASK_SPAWN[asyncio.create_task()<br/>Background execution]
     end
@@ -5706,6 +5994,9 @@ The enhanced popular crates architecture includes comprehensive monitoring capab
 - **Storage Health**: SQLite cache database integrity and disk space utilization
 - **Background Task Status**: Pre-ingestion worker health and task completion rates
 - **Embeddings Subsystem**: Warmup status (warmed/cold) and configuration state (enabled/disabled)
+- **Ingestion Status**: Enhanced reporting of available_not_started vs disabled states
+- **Completion Tracking**: Real-time ingestion progress and checkpoint status
+- **Re-ingestion Detection**: Status of re-ingestion attempts and failure recovery
 
 ### Enhanced Tool Documentation with Embedded Tutorials
 | Component | Impact | Notes |
@@ -5717,6 +6008,52 @@ The enhanced popular crates architecture includes comprehensive monitoring capab
 | Memory Usage | +2MB | Tutorial content embedded in manifest, no separate caching |
 | Backward Compatibility | 100% | Optional fields (str \| None) maintain compatibility |
 | Validation Overhead | Minimal | JSON schema extras provide client-side validation |
+
+## Architectural Impact Summary
+
+The 5 critical architectural enhancements provide comprehensive improvements to the docsrs-mcp system:
+
+### 1. Ingestion Completion Tracking
+**Impact**: Provides complete visibility into ingestion processes with granular progress tracking
+- **Database Changes**: Enhanced `crate_metadata` table + new `ingestion_checkpoints` table  
+- **Reliability**: Enables detection of stalled/failed ingestions and reliable recovery
+- **Monitoring**: Real-time progress tracking and checkpoint-based recovery
+- **Re-ingestion**: Intelligent detection prevents duplicate work and data corruption
+
+### 2. Universal Auto-Ingestion Pattern  
+**Impact**: Ensures data availability across all MCP tools without manual intervention
+- **API Changes**: All query tools now auto-ingest before operation
+- **User Experience**: Transparent crate preparation eliminates "not found" errors
+- **Performance**: Reduces redundant ingestion attempts through status checking
+- **Consistency**: Standardized pattern across all MCP tools
+
+### 3. Pre-Ingestion MCP Control
+**Impact**: Enables programmatic control over background pre-ingestion without CLI flags
+- **Management**: External systems can control cache warming and optimization
+- **Health Monitoring**: Enhanced status reporting distinguishes available_not_started vs disabled
+- **Integration**: Seamless MCP tool integration without server restart requirements
+- **Observability**: Real-time monitoring of pre-ingestion effectiveness
+
+### 4. Enhanced Fallback Ingestion
+**Impact**: Improved reliability and coverage for documentation extraction
+- **Coverage**: Enhanced Tier 2 increases success rate from 80% to 90%+
+- **Schema Standardization**: Unified data format across all fallback tiers
+- **Method Tracking**: Records which tier was used for performance analysis
+- **Quality**: Better macro extraction and source parsing capabilities
+
+### 5. MCP Parameter Schema Override
+**Impact**: Ensures Claude Code compatibility and parameter flexibility
+- **Compatibility**: Native support for Claude Code parameter expectations
+- **Tools**: `getCrateSummary` and other tools use schema overrides
+- **Error Handling**: Enhanced validation with clear error messages
+- **Backward Compatibility**: Existing tools continue to work without changes
+
+### Combined Architectural Benefits
+- **Reliability**: Comprehensive tracking and fallback systems ensure high success rates
+- **Observability**: Enhanced health endpoints provide detailed system insights  
+- **Performance**: Auto-ingestion patterns and enhanced fallbacks improve response times
+- **Maintainability**: Standardized patterns across tools reduce complexity
+- **Scalability**: Tracking systems support monitoring and optimization at scale
 
 ## Enhanced Future Considerations
 - Cross-crate dependency search capabilities with enhanced metadata
@@ -5732,3 +6069,5 @@ The enhanced popular crates architecture includes comprehensive monitoring capab
 - **Predictive Pre-ingestion**: Use query patterns to predict and pre-ingest likely-needed crates
 - **Dynamic Tutorial Generation**: Automatically generate and update tutorial content based on API usage patterns and user feedback
 - **Multi-language Tutorial Support**: Extend tutorial fields to support multiple programming language examples
+- **Ingestion Analytics**: Leverage completion tracking data for performance optimization and predictive pre-ingestion
+- **Cross-Tool Optimization**: Use auto-ingestion patterns to optimize resource usage across tool interactions

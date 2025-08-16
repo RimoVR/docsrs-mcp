@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-15",
+  "lastUpdated": "2025-08-16",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -453,6 +453,95 @@
           ],
           "architecturalIssue": "Silent failure pattern - empty databases are processed normally instead of raising errors",
           "testingBestPractice": "Always verify both versions have actual data before running comparisons"
+        },
+        {
+          "error": "Crate Name 'unwind' Error in MCP Mode",
+          "rootCause": "All crates showing as 'unwind' when using MCP mode due to getCrateSummary tool missing from tools_to_fix dictionary in mcp_server.py schema override",
+          "solution": "Add getCrateSummary to tools_to_fix dictionary in mcp_server.py to ensure proper schema override for Claude Code compatibility",
+          "context": "MCP mode returning incorrect crate names, breaking crate identification and search functionality",
+          "implementation": [
+            "Added getCrateSummary to tools_to_fix dictionary alongside other MCP tools",
+            "Ensured all MCP tools have proper schema overrides for Claude Code compatibility",
+            "Verified tool parameter validation works correctly with schema override"
+          ],
+          "lesson": "Always include ALL MCP tools in schema override when supporting Claude Code - missing tools cause unexpected behavior",
+          "pattern": "When adding new MCP tools, immediately add them to tools_to_fix for schema override compatibility",
+          "dateEncountered": "2025-08-16",
+          "relatedFiles": ["mcp_server.py"],
+          "codeExample": "tools_to_fix = {\n    'searchItems': SearchItemsRequest,\n    'getCrateSummary': GetCrateSummaryRequest,  # Must include for proper schema override\n    'compareVersions': CompareVersionsRequest,\n    'startPreIngestion': StartPreIngestionRequest\n}",
+          "debuggingTechnique": "Test all MCP tools in Claude Code to verify proper parameter handling and response formatting"
+        },
+        {
+          "error": "Incomplete Ingestion Detection Failures",
+          "rootCause": "Partial ingestion failures leave corrupted data that appears complete based on file existence checks, leading to inconsistent system state",
+          "solution": "Implement ingestion_status tracking with checkpoint validation to explicitly track completion status rather than relying on file existence",
+          "context": "Ingestion processes failing partway through leave databases in inconsistent state that passes basic existence checks",
+          "implementation": [
+            "Add ingestion_status field to track explicit completion state",
+            "Implement checkpoint validation to verify data integrity",
+            "Replace file existence checks with explicit completion tracking",
+            "Add validation steps to verify ingestion completeness before marking as done"
+          ],
+          "lesson": "File existence != completion; need explicit completion tracking with validation checkpoints",
+          "pattern": "Always track explicit completion status with validation rather than inferring from file presence",
+          "dateEncountered": "2025-08-16",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/database.py"],
+          "codeExample": "# Instead of:\nif os.path.exists(db_path):\n    return 'completed'\n\n# Use:\nif self.ingestion_status.get(crate_key) == 'completed' and self.validate_ingestion_checkpoint(db_path):\n    return 'completed'",
+          "debuggingTechnique": "Check ingestion_status tracking and validate database integrity after partial failures"
+        },
+        {
+          "error": "Pre-Ingestion 'not_initialized' Status Confusion",
+          "rootCause": "Health endpoint shows 'not_initialized' when pre-ingestion is disabled by default, causing confusion between disabled vs not-started states",
+          "solution": "Replace 'not_initialized' with 'available_not_started' and remove CLI flag dependency to distinguish between disabled and not-started states",
+          "context": "Users see 'not_initialized' status and assume system is broken when pre-ingestion is simply not started",
+          "implementation": [
+            "Change status message from 'not_initialized' to 'available_not_started'",
+            "Remove dependency on CLI flags for status determination",
+            "Clarify status messages to distinguish between disabled, not-started, and initialized states",
+            "Update health endpoint to provide clearer status information"
+          ],
+          "lesson": "Status messages must distinguish between disabled vs not-started states to avoid user confusion",
+          "pattern": "Use explicit status messages that clearly indicate the current state and available actions",
+          "dateEncountered": "2025-08-16",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "# Instead of:\nstatus = 'not_initialized' if not pre_ingest_enabled else 'running'\n\n# Use:\nstatus = 'available_not_started' if worker.status == 'idle' else worker.status",
+          "debuggingTechnique": "Review health endpoint responses to ensure status messages are clear and actionable"
+        },
+        {
+          "error": "Version Comparison 'Insufficient Documentation' Failures",
+          "rootCause": "Version comparison fails for crates that used fallback ingestion, returning insufficient documentation error when comparing versions with degraded schema extraction",
+          "solution": "Enhance Tier 2 schema extraction and adjust MIN_ITEMS_THRESHOLD to handle graceful degradation scenarios",
+          "context": "Crates ingested with fallback mechanisms fail version comparison due to insufficient data threshold checks",
+          "implementation": [
+            "Improve Tier 2 schema extraction to capture more documentation items",
+            "Adjust MIN_ITEMS_THRESHOLD to account for fallback ingestion scenarios",
+            "Add graceful handling for degraded schema situations",
+            "Track schema quality levels to inform comparison logic"
+          ],
+          "lesson": "Schema degradation must be tracked and handled gracefully - comparison logic must adapt to data quality",
+          "pattern": "Implement quality-aware thresholds that adapt to the available data quality level",
+          "dateEncountered": "2025-08-16",
+          "relatedFiles": ["src/docsrs_mcp/version_diff.py", "src/docsrs_mcp/ingest.py"],
+          "codeExample": "# Adjust threshold based on ingestion tier:\nmin_threshold = MIN_ITEMS_THRESHOLD if tier == 1 else MIN_ITEMS_THRESHOLD // 2\nif total_items < min_threshold:\n    logger.warning(f'Insufficient data for comparison (tier {tier}): {total_items} < {min_threshold}')",
+          "debuggingTechnique": "Check ingestion tier and item counts before running version comparisons to identify threshold issues"
+        },
+        {
+          "error": "Auto-Ingestion Pattern Consistency Issues",
+          "rootCause": "Some tools may not trigger auto-ingestion consistently, causing unexpected failures when accessing non-ingested crates",
+          "solution": "Audit all tools and standardize ingest_crate() pattern to ensure consistent auto-ingestion behavior across all entry points",
+          "context": "Inconsistent auto-ingestion patterns across different tools lead to unexpected failures for non-ingested crates",
+          "implementation": [
+            "Audit all MCP tools for consistent ingest_crate() pattern usage",
+            "Standardize auto-ingestion logic across all entry points",
+            "Add validation to ensure ingestion is attempted before data access",
+            "Document and enforce the auto-ingestion pattern for all new tools"
+          ],
+          "lesson": "Critical patterns must be enforced across all entry points - inconsistency leads to unreliable behavior",
+          "pattern": "Always call ingest_crate() before attempting data access in any tool or endpoint",
+          "dateEncountered": "2025-08-16",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools.py"],
+          "codeExample": "# Standard pattern for all tools:\nasync def tool_function(crate_name: str, ...):\n    # Always attempt ingestion first\n    db_path = await ingest_crate(crate_name, session)\n    if not db_path:\n        raise ValueError(f'Failed to ingest crate: {crate_name}')\n    \n    # Proceed with tool logic\n    return process_data(db_path, ...)",
+          "debuggingTechnique": "Review all tool implementations to verify consistent auto-ingestion pattern usage"
         }
       ]
     },

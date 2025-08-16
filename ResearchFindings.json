@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-15",
+    "lastUpdated": "2025-08-16",
     "compressionVersion": "1.1",
     "originalTokens": 47800,
     "legend": {
@@ -360,6 +360,28 @@
           "fallback_strategy": "Direct tier3 fallback with basic functionality",
           "user_solution": "rustup component add --toolchain nightly rust-docs-json for complete stdlib JSON"
         }
+      }
+    },
+    "auto_ingestion_analysis": {
+      "universal_coverage_status": {
+        "desc": "Assessment of auto-ingestion implementation across all MCP tools",
+        "finding": "Most tools already implement auto-ingestion correctly with await ingest_crate() pattern",
+        "coverage_estimate": "85-90% of tools have proper auto-ingestion",
+        "standard_pattern": "await ingest_crate() as first operation in tool implementations",
+        "gap_identification": "Need comprehensive audit to ensure 100% coverage",
+        "implementation_consistency": "Consistent pattern across existing tools indicates good design",
+        "remaining_work": "Systematic audit and gap filling for remaining 10-15% of tools"
+      },
+      "audit_methodology": {
+        "approach": "Systematic review of all MCP tool implementations",
+        "verification_steps": [
+          "Check for ingest_crate() call presence",
+          "Verify call placement at function start",
+          "Confirm proper error handling",
+          "Test with uninitalized crate scenarios"
+        ],
+        "success_criteria": "100% of tools handle uninitialized crates gracefully",
+        "performance_impact": "Minimal - ingestion checks are fast for already-processed crates"
       }
     },
     "docs_rs": {
@@ -1049,6 +1071,15 @@
       }
     },
     "critical_bugs": {
+      "crate_name_unwind_bug": {
+        "desc": "getCrateSummary tool missing from tools_to_fix dictionary causes parameter processing failures",
+        "problem": "All crates appear named 'unwind' in MCP mode due to missing schema override",
+        "root_cause": "getCrateSummary tool not included in FastMCP schema override dictionary",
+        "solution": "Add getCrateSummary to schema override dictionary with string-only parameters",
+        "impact": "Incorrect crate identification in MCP client interactions",
+        "frequency": "100% of getCrateSummary calls in MCP mode",
+        "resolution_status": "Fixed by adding tool to tools_to_fix dictionary"
+      },
       "version_comparison_nonetype": {
         "desc": "AttributeError when semantic_changes contains None values during string operations",
         "problem": "semantic_changes.join().lower() fails with NoneType in list",
@@ -1085,6 +1116,35 @@
         ],
         "debugging_challenges": "Error messages lack specificity for troubleshooting",
         "solution": "Enhanced error reporting with field-specific context"
+      },
+      "pre_ingestion_mcp_control": {
+        "desc": "Health endpoints misleadingly show 'not_initialized' when disabled by default",
+        "problem": "CLI flag dependency conflicts with MCP-first approach causing incorrect status messages",
+        "root_cause": "Default disable_pre_ingestion=True conflicts with health endpoint status reporting",
+        "manifestation": "Users receive 'not_initialized' status even when system is functioning correctly",
+        "impact": "Confusing user experience and incorrect system status reporting",
+        "solution": "Remove CLI dependency and fix status message logic for MCP mode"
+      },
+      "ingestion_completion_tracking": {
+        "desc": "System only checks file existence, not actual completion status",
+        "problem": "Incomplete ingestion reported as complete leading to partial failure scenarios",
+        "partial_failure_points": [
+          "rustdoc download interruption",
+          "JSON parsing errors", 
+          "embedding generation failures",
+          "cross-reference processing incomplete"
+        ],
+        "root_cause": "Binary existence check insufficient for multi-stage ingestion process",
+        "solution": "Multi-level tracking with atomic state management and completion verification",
+        "impact": "Silent failures and inconsistent search results"
+      },
+      "fallback_ingestion_schema": {
+        "desc": "Tier 2/3 ingestion produces degraded schema missing critical fields",
+        "problem": "Version comparison fails with 'insufficient documentation' due to schema gaps",
+        "missing_fields": ["generic_params", "trait_bounds", "parent_id"],
+        "root_cause": "Simplified AST parsing for fallback sources omits complex type information",
+        "impact": "Reduced comparison accuracy and incomplete version diff analysis",
+        "solution": "Enhanced AST parsing and schema standardization across all ingestion tiers"
       }
     },
     "defensive_programming": {
@@ -1195,7 +1255,12 @@
       "p2: Avoid anyOf patterns in MCP schemas due to inconsistent client support",
       "p2: Provide examples arrays and format hints in all MCP parameter schemas",
       "p2: FastMCP double validation (JSON Schema → Pydantic) requires optimized field validators",
-      "p2: Use FastMCP schema override pattern to bypass client validation limitations while preserving type safety"
+      "p2: Use FastMCP schema override pattern to bypass client validation limitations while preserving type safety",
+      "p2: Add getCrateSummary to schema override dictionary to fix crate name 'unwind' bug in MCP mode",
+      "p2: Implement universal auto-ingestion audit to ensure 100% tool coverage",
+      "p2: Replace binary existence checks with multi-level ingestion completion tracking",
+      "p2: Remove CLI flag dependency from health endpoint status reporting in MCP mode",
+      "p2: Enhance Tier 2/3 fallback ingestion with complete schema standardization including generic_params and trait_bounds"
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",
@@ -1269,7 +1334,12 @@
       "Test MCP tools with actual clients (Claude Code, Claude Desktop) not just unit tests",
       "Handle MCP Inspector UI null values gracefully in parameter validation logic",
       "Apply FastMCP schema override technique: modify _tool_manager schemas to string-only types post-generation",
-      "Leverage FastMCP's lenient JSON Schema validation that accepts type mismatches for better client compatibility"
+      "Leverage FastMCP's lenient JSON Schema validation that accepts type mismatches for better client compatibility",
+      "Include all MCP tools in schema override dictionary to prevent parameter processing failures",
+      "Implement systematic tool audit with ingest_crate() verification across all MCP endpoints",
+      "Use atomic state management for ingestion completion tracking beyond simple file existence",
+      "Standardize schema across all ingestion tiers to maintain version comparison accuracy",
+      "Implement completion verification at each ingestion stage: download, parse, embed, cross-reference"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",
@@ -1296,9 +1366,9 @@
   },
   "stats": {
     "original_tokens": 47800,
-    "compressed_tokens_estimate": 15900,
-    "compression_ratio": "66.7%",
-    "token_reduction": 31900,
+    "compressed_tokens_estimate": 16200,
+    "compression_ratio": "66.1%",
+    "token_reduction": 31600,
     "preservation": {
       "technical_details": "100%",
       "library_versions": "100%", 

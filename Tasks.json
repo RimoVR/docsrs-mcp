@@ -1,7 +1,7 @@
 {
   "taskManagement": {
     "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-13T12:00:00Z",
+    "lastUpdated": "2025-08-16T12:00:00Z",
     "priorities": [
       "critical",
       "high",
@@ -1558,6 +1558,97 @@
             "src/docsrs_mcp/models.py (case-insensitive path validation)",
             "src/docsrs_mcp/cargo.py (case-insensitive path validation)"
           ]
+        }
+      },
+      {
+        "id": "bugfix-crate-name-unwind",
+        "title": "Fix crate name \"unwind\" bug",
+        "description": "Every crate is incorrectly named \"unwind\" when calling crate summary through MCP mode",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "small",
+        "impact": "high",
+        "estimatedHours": 2,
+        "relatedTasks": [],
+        "roadblocks": [],
+        "details": {
+          "rootCause": "getCrateSummary tool missing from tools_to_fix dictionary in mcp_server.py",
+          "implementation": "Add getCrateSummary to tools_to_fix dictionary with parameter schema override",
+          "location": "src/docsrs_mcp/mcp_server.py"
+        }
+      },
+      {
+        "id": "feature-universal-auto-ingestion",
+        "title": "Ensure universal auto-ingestion for all tools",
+        "description": "Ensure EVERY tool that queries crate/version combinations automatically triggers ingestion if not ingested",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "medium",
+        "impact": "high",
+        "estimatedHours": 6,
+        "relatedTasks": [],
+        "roadblocks": [],
+        "details": {
+          "implementation": "Audit all MCP tools, add ingest_crate() calls where missing, standardize pattern",
+          "scope": "All MCP tools that query crate/version combinations"
+        }
+      },
+      {
+        "id": "feature-ingestion-completion-tracking",
+        "title": "Implement ingestion completion tracking",
+        "description": "Add database tracking to detect incomplete ingestions and trigger automatic re-ingestion",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "dependencies": ["feature-universal-auto-ingestion"],
+        "effort": "large",
+        "impact": "high",
+        "estimatedHours": 12,
+        "relatedTasks": [],
+        "roadblocks": [],
+        "details": {
+          "implementation": "Schema enhancement with ingestion_status, transaction integration, re-ingestion detection",
+          "scope": "Database schema and ingestion pipeline"
+        }
+      },
+      {
+        "id": "bugfix-pre-ingestion-mcp-control",
+        "title": "Fix pre-ingestion MCP control",
+        "description": "Pre-ingestion has misleading health messages and requires CLI flags for MCP mode",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "dependencies": [],
+        "effort": "medium",
+        "impact": "high",
+        "estimatedHours": 4,
+        "relatedTasks": [],
+        "roadblocks": [],
+        "details": {
+          "implementation": "Remove CLI flag dependency, fix health messages, enable MCP-only control",
+          "location": "Pre-ingestion system and health endpoints"
+        }
+      },
+      {
+        "id": "feature-fallback-schema-enhancement",
+        "title": "Enhance fallback ingestion schema",
+        "description": "Improve ingestion of older crates without rustdoc JSON to match schema for version comparison",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "dependencies": ["feature-ingestion-completion-tracking"],
+        "effort": "large",
+        "impact": "high",
+        "estimatedHours": 16,
+        "relatedTasks": [],
+        "roadblocks": [],
+        "details": {
+          "implementation": "Enhanced source extraction, schema standardization, comparison engine updates",
+          "scope": "Fallback ingestion system and version comparison engine"
         }
       }
     ],
