@@ -102,7 +102,12 @@ async def override_fastmcp_schemas():
                 # These tools have no problematic parameters but are listed for completeness
                 "list_versions": {},  # Only has string parameters
                 "control_pre_ingestion": {},  # Only has enum parameters
+                "get_item_doc": {},  # Only has string parameters
+                "get_module_tree": {},  # Only has string parameters
             }
+
+            # Track tools not in our fix list for monitoring
+            uncovered_tools = []
 
             # Iterate through tools and modify their schemas
             for tool in tools_dict:
@@ -138,9 +143,32 @@ async def override_fastmcp_schemas():
                                     logger.debug(
                                         f"Replaced {tool.name}.{param_name} schema from {original_type} to string for Claude Code"
                                     )
+                # Track tools not in our fix list
+                # Check if the tool has any non-string parameters that might need fixing
+                elif hasattr(tool, "parameters") and tool.parameters:
+                    if "properties" in tool.parameters:
+                        for param_name, param_schema in tool.parameters[
+                            "properties"
+                        ].items():
+                            # Check for anyOf patterns or non-string types
+                            if "anyOf" in param_schema or (
+                                "type" in param_schema
+                                and param_schema["type"] != "string"
+                            ):
+                                uncovered_tools.append(
+                                    f"{tool.name}.{param_name} (type: {param_schema.get('type', 'complex')})"
+                                )
+                                break  # Only report once per tool
+
+            # Log warning if there are uncovered tools with non-string parameters
+            if uncovered_tools:
+                logger.warning(
+                    f"Found {len(uncovered_tools)} MCP tools not in tools_to_fix with non-string parameters: {', '.join(uncovered_tools[:3])}{'...' if len(uncovered_tools) > 3 else ''}. "
+                    "Consider adding them to tools_to_fix if MCP clients have issues."
+                )
 
             logger.info(
-                "Successfully overrode FastMCP schemas for Claude Code compatibility"
+                f"Successfully overrode FastMCP schemas for Claude Code compatibility ({len(tools_to_fix)} tools covered)"
             )
 
     except Exception as e:
@@ -158,6 +186,7 @@ def run_mcp_server():
 
         # Override FastMCP schemas for Claude Code compatibility
         # This must happen before starting the server
+        logger.info("Applying FastMCP schema overrides for MCP client compatibility...")
         asyncio.run(override_fastmcp_schemas())
 
         # Start pre-ingestion in background if enabled (matching app.py pattern)
