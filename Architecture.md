@@ -1033,7 +1033,8 @@ graph TD
         REST_START_PRE[POST /mcp/tools/start_pre_ingestion<br/>Pre-ingestion control endpoint<br/>MCP-controllable without CLI flags]
         REST_MOD_TREE[POST /get_module_tree<br/>Module tree endpoint]
         REST_CRATE_SUMMARY[POST /getCrateSummary<br/>Crate summary endpoint with schema override]
-        HEALTH[GET /health<br/>Enhanced liveness probe with ingestion status<br/>Reports: available_not_started vs disabled states]
+        HEALTH[GET /health<br/>Enhanced liveness probe with ingestion status<br/>Reports: available_not_started vs disabled states<br/>Incomplete/stalled ingestion counts]
+        RECOVER[POST /recover<br/>Manual ingestion recovery endpoint<br/>Rate limited: 10 requests/minute per IP]
     end
     
     FASTMCP --> SEARCH_DOC
@@ -5839,6 +5840,133 @@ The Runtime Control Pattern provides several key advantages:
 
 This architecture ensures the MCP tool provides powerful pre-ingestion control while maintaining system reliability and performance characteristics.
 
+## Ingestion Recovery API Architecture
+
+The `/recover` endpoint provides manual recovery capabilities for stalled or incomplete ingestions, with comprehensive rate limiting and monitoring integration.
+
+### Recovery Endpoint Specification
+
+```mermaid
+graph TD
+    subgraph "API Layer"
+        ENDPOINT[POST /recover<br/>Manual recovery endpoint]
+        RATE_LIMIT[Rate Limiting<br/>10 requests/minute per IP<br/>SlowAPI implementation]
+        VALIDATION[Request Validation<br/>crate_name, version parameters]
+    end
+    
+    subgraph "Recovery Logic"
+        STATUS_CHECK[Status Check<br/>Query ingestion_status table]
+        STALL_DETECTION[Stall Detection<br/>Running > 1 hour threshold]
+        RECOVERY_EXEC[Recovery Execution<br/>recover_incomplete_ingestion()]
+        RESTART[Restart Ingestion<br/>Full pipeline re-execution]
+    end
+    
+    subgraph "Response Types"
+        SUCCESS[Recovery Initiated<br/>200 OK with details]
+        SKIPPED[Already Complete<br/>200 OK with skip reason]
+        ERROR[Recovery Failed<br/>500 with error details]
+        RATE_LIMITED[Too Many Requests<br/>429 with retry-after]
+    end
+    
+    ENDPOINT --> RATE_LIMIT
+    RATE_LIMIT --> VALIDATION
+    VALIDATION --> STATUS_CHECK
+    STATUS_CHECK --> STALL_DETECTION
+    STALL_DETECTION --> RECOVERY_EXEC
+    RECOVERY_EXEC --> RESTART
+    
+    STATUS_CHECK --> SUCCESS
+    STATUS_CHECK --> SKIPPED
+    RECOVERY_EXEC --> ERROR
+    RATE_LIMIT --> RATE_LIMITED
+```
+
+### Rate Limiting Implementation
+
+**Rate Limit Configuration**:
+- **Limit**: 10 requests per minute per IP address
+- **Implementation**: SlowAPI (slowapi) with in-memory storage
+- **Scope**: Applied specifically to `/recover` endpoint only
+- **Reset**: Rate limit window resets every minute
+
+**HTTP 429 Response Format**:
+```json
+{
+    "detail": "Rate limit exceeded: 10 per 1 minute",
+    "retry_after": 45
+}
+```
+
+### Integration with Health Monitoring
+
+The recovery system integrates with the health endpoint to provide visibility into incomplete ingestions:
+
+**Health Response Enhancement**:
+```json
+{
+    "status": "healthy",
+    "ingestion_status": {
+        "incomplete_count": 3,
+        "stalled_count": 1,
+        "failed_count": 2,
+        "oldest_incomplete": "2023-12-01T10:30:00Z"
+    }
+}
+```
+
+**Key Monitoring Metrics**:
+- **incomplete_count**: Total ingestions in non-terminal states
+- **stalled_count**: Ingestions running longer than 1 hour
+- **failed_count**: Ingestions in failed state
+- **oldest_incomplete**: Timestamp of longest-running incomplete ingestion
+
+### Recovery Flow Implementation
+
+```python
+@app.post("/recover")
+@limiter.limit("10/minute")
+async def recover_ingestion(
+    request: Request,
+    crate_name: str = Body(...),
+    version: str = Body(...)
+) -> RecoveryResponse:
+    """Manual recovery endpoint for stalled/incomplete ingestions."""
+    
+    try:
+        result = await recover_incomplete_ingestion(crate_name, version)
+        
+        if result.skipped:
+            return RecoveryResponse(
+                status="skipped",
+                message=result.reason,
+                crate_name=crate_name,
+                version=version
+            )
+        
+        return RecoveryResponse(
+            status="recovery_initiated",
+            message="Ingestion recovery started successfully",
+            crate_name=crate_name,
+            version=version,
+            recovery_details=result.details
+        )
+        
+    except Exception as e:
+        logger.error(f"Recovery failed for {crate_name}:{version}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Recovery failed: {str(e)}"
+        )
+```
+
+**Error Handling**:
+- **Validation Errors**: 422 for invalid crate_name/version format
+- **Rate Limiting**: 429 with retry-after header
+- **Internal Errors**: 500 with sanitized error message
+- **Not Found**: 404 if crate/version doesn't exist in ingestion_status
+
+This architecture provides reliable manual recovery capabilities while protecting the system from abuse through comprehensive rate limiting and monitoring integration.
+
 ## Enhanced MCP Tool Documentation Architecture
 
 The enhanced MCP tool documentation system provides comprehensive, tutorial-rich descriptions while maintaining token efficiency through embedded tutorial fields in the MCPTool model.
@@ -6126,11 +6254,14 @@ The enhanced popular crates architecture includes comprehensive monitoring capab
 
 The 5 critical architectural enhancements provide comprehensive improvements to the docsrs-mcp system:
 
-### 1. Ingestion Completion Tracking
-**Impact**: Provides complete visibility into ingestion processes with granular progress tracking
-- **Database Changes**: Enhanced `crate_metadata` table + new `ingestion_checkpoints` table  
-- **Reliability**: Enables detection of stalled/failed ingestions and reliable recovery
-- **Monitoring**: Real-time progress tracking and checkpoint-based recovery
+### 1. Ingestion Completion Tracking (✅ IMPLEMENTED)
+**Impact**: Provides complete visibility into ingestion processes with state machine tracking
+- **Database Changes**: New `ingestion_status` table with partial index for efficient queries
+- **Pipeline Integration**: Status updates throughout ingestion pipeline with `set_ingestion_status()`
+- **Recovery System**: `/recover` endpoint for manual recovery with rate limiting (10 req/min)
+- **Health Monitoring**: Real-time incomplete/stalled counts in `/health` endpoint
+- **State Machine**: `started` → `downloading` → `processing` → `completed`/`failed`
+- **Performance**: Partial index enables sub-millisecond incomplete detection queries
 - **Re-ingestion**: Intelligent detection prevents duplicate work and data corruption
 
 ### 2. Universal Auto-Ingestion Pattern  

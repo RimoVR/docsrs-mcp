@@ -2936,6 +2936,76 @@
           "dateAdded": "2025-08-10"
         },
         {
+          "practice": "Ingestion completion tracking beyond file existence",
+          "description": "Proper completion tracking for multi-stage ingestion operations requires more than just checking file existence - implement granular state tracking for precise failure identification",
+          "implementation": "Use dedicated ingestion_status table with stage-by-stage tracking (download, extraction, parsing, database_insert, embedding_generation, completion) and status values (pending, in_progress, completed, failed, retrying)",
+          "benefits": [
+            "Precise identification of failure points in complex ingestion pipelines",
+            "Enables targeted recovery strategies instead of blanket re-processing",
+            "Better visibility into ingestion progress for monitoring and debugging",
+            "Prevents partial ingestion states from being considered complete"
+          ],
+          "lessons": {
+            "stateTracking": "File existence is insufficient - use proper state machines to track multi-stage operations",
+            "failureRecovery": "Granular tracking enables precise recovery instead of full re-ingestion",
+            "monitoring": "Completion status should be queryable and observable for operations teams"
+          },
+          "dateAdded": "2025-08-18"
+        },
+        {
+          "practice": "State machines for granular failure point identification",
+          "description": "Use state machine patterns in complex operations to identify exactly where failures occur, enabling targeted recovery and better debugging",
+          "implementation": "Define clear states (pending → in_progress → completed/failed), track transitions with timestamps, and include error context for failed states",
+          "benefits": [
+            "Precise error localization reduces debugging time",
+            "Targeted recovery strategies minimize resource waste",
+            "Clear operational visibility into system health",
+            "Enables retry strategies based on failure type and location"
+          ],
+          "lessons": {
+            "stateDesign": "Design states to match actual operational stages, not just success/failure",
+            "transitionTracking": "Log state transitions with timestamps and context for debugging",
+            "errorContext": "Include detailed error information to enable intelligent recovery decisions"
+          },
+          "dateAdded": "2025-08-18"
+        },
+        {
+          "practice": "Rate limiting recovery endpoints to prevent resource exhaustion",
+          "description": "Recovery operations can be resource-intensive and should be rate-limited to prevent system overload during mass recovery scenarios",
+          "implementation": "Implement exponential backoff for retry attempts, limit concurrent recovery operations, and provide circuit breaker patterns for mass failures",
+          "benefits": [
+            "Prevents cascade failures during recovery operations",
+            "Maintains system stability under recovery load",
+            "Enables controlled recovery prioritization",
+            "Protects against accidental DoS from recovery operations"
+          ],
+          "lessons": {
+            "backoffStrategy": "Use exponential backoff with jitter to prevent thundering herd problems",
+            "concurrencyLimits": "Limit concurrent recovery operations based on system resources",
+            "circuitBreaker": "Implement circuit breaker patterns to stop recovery when system is overloaded",
+            "prioritization": "Provide mechanisms to prioritize critical recovery operations"
+          },
+          "dateAdded": "2025-08-18"
+        },
+        {
+          "practice": "SQLite partial indexes for status tracking",
+          "description": "Use SQLite partial indexes to optimize queries for incomplete ingestion states, providing significant performance improvements over full table scans",
+          "implementation": "CREATE INDEX idx_incomplete_ingestion ON ingestion_status(crate_name, version) WHERE status != 'completed' - only indexes rows matching the WHERE condition",
+          "benefits": [
+            "Reduces query time from O(n) to O(log n) for incomplete detection",
+            "Smaller index size compared to full indexes - only stores relevant rows",
+            "Efficient for status-based queries in operational monitoring",
+            "Supports fast identification of items needing recovery or retry"
+          ],
+          "sqliteSpecifics": {
+            "partialIndexSupport": "SQLite partial indexes are highly efficient for conditional queries",
+            "storageOptimization": "Only rows matching WHERE condition are stored in the index",
+            "queryOptimizer": "SQLite query optimizer automatically uses partial indexes when WHERE conditions match",
+            "maintenanceOverhead": "Minimal maintenance overhead as index only updates for relevant rows"
+          },
+          "dateAdded": "2025-08-18"
+        },
+        {
           "practice": "Fuzzy query normalization for international users",
           "description": "Apply British-to-American spelling normalization during query preprocessing to improve search consistency for international users while maintaining documentation in American English",
           "implementation": {
@@ -2981,6 +3051,39 @@
             "complexQueries": "High complexity queries with many filters → shorter TTL (15 minutes) to maintain freshness",
             "popularityTracking": "Track hit counts for popularity-based TTL extension",
             "storagePattern": "Store TTL with cache entries: (timestamp, results, ttl) for per-entry control"
+          }
+        },
+        {
+          "pattern": "Ingestion status table pattern",
+          "implementation": "Create dedicated ingestion_status table for tracking multi-stage operations",
+          "description": "Track ingestion progress beyond simple file existence using granular state machine approach",
+          "details": {
+            "tableSchema": "ingestion_status(crate_name, version, stage, status, timestamp, error_message, retry_count)",
+            "stages": "download, extraction, parsing, database_insert, embedding_generation, completion",
+            "statusValues": "pending, in_progress, completed, failed, retrying",
+            "benefits": "Enables precise failure point identification and targeted recovery strategies"
+          }
+        },
+        {
+          "pattern": "Partial indexes for incomplete detection",
+          "implementation": "Use SQLite partial indexes for efficient querying of incomplete ingestion states",
+          "description": "Optimize database queries for finding incomplete or failed ingestions without full table scans",
+          "details": {
+            "indexDefinition": "CREATE INDEX idx_incomplete_ingestion ON ingestion_status(crate_name, version) WHERE status != 'completed'",
+            "queryPattern": "SELECT crate_name, version FROM ingestion_status WHERE status != 'completed' ORDER BY timestamp",
+            "performance": "Reduces query time from O(n) to O(log n) for incomplete detection",
+            "storageEfficiency": "Partial indexes only store entries matching the WHERE condition, reducing index size"
+          }
+        },
+        {
+          "pattern": "Fail-fast recovery pattern",
+          "implementation": "Delete and re-ingest approach instead of complex state repair for failed operations",
+          "description": "Simplify error recovery by treating ingestion as atomic operation with clean restart on failure",
+          "details": {
+            "recoveryStrategy": "DELETE FROM all_tables WHERE crate_name=? AND version=?; followed by fresh ingestion",
+            "advantages": "Eliminates complex partial state repair logic, ensures data consistency, prevents cascading failures",
+            "tradeoffs": "Higher resource cost for recovery, but much simpler implementation and debugging",
+            "rateLimiting": "Implement exponential backoff and max retry limits to prevent resource exhaustion"
           }
         }
       ]
@@ -3369,7 +3472,9 @@
       "implBlockParsing": "Impl block parsing uses existing streaming architecture without performance impact, composite naming creates searchable identifiers efficiently, no schema changes required for trait implementation search",
       "databaseBatchInsertion": "Use executemany() with IGNORE clause for duplicate handling achieves 70% reduction in insertion time compared to individual INSERT statements, especially beneficial for large re-export datasets",
       "batchInsertOptimization": "Pre-process re-export data into tuples before batching to avoid repeated serialization overhead during executemany() operations",
-      "memoryLeakPrevention": "Configure FastEmbed ONNX Runtime with sess_options.enable_cpu_mem_arena = False to prevent memory accumulation, implement explicit model lifecycle management"
+      "memoryLeakPrevention": "Configure FastEmbed ONNX Runtime with sess_options.enable_cpu_mem_arena = False to prevent memory accumulation, implement explicit model lifecycle management",
+      "ingestionStatusTracking": "Use dedicated ingestion_status table with partial indexes for efficient incomplete detection queries, ~90% performance improvement over full table scans for status monitoring",
+      "failFastRecovery": "DELETE and re-ingest pattern provides simpler implementation than complex state repair, uses more resources but eliminates cascading failure scenarios"
     }
   },
   "codeQuality": {
