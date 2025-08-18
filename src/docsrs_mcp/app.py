@@ -1080,8 +1080,7 @@ async def get_crate_summary(request: Request, params: GetCrateSummaryRequest):
                 """
                 SELECT name, path, parent_id, depth, item_count 
                 FROM modules 
-                WHERE crate_id = 1
-                  AND depth <= 3
+                WHERE depth <= 3
                   AND (item_count >= 2 OR depth = 0)
                   AND path NOT LIKE '%target::%'
                   AND path NOT LIKE '%.cargo::%'
@@ -1101,10 +1100,10 @@ async def get_crate_summary(request: Request, params: GetCrateSummaryRequest):
             # Additional filtering in Python for more complex patterns
             filtered_modules = []
             for row in all_rows:
-                name, path, parent_id, depth, item_count = row
+                module_name, path, parent_id, depth, item_count = row
 
                 # Skip internal/private modules (often start with underscore)
-                if name.startswith("_") and depth > 0:
+                if module_name.startswith("_") and depth > 0:
                     continue
 
                 # Skip generated modules
@@ -1117,7 +1116,7 @@ async def get_crate_summary(request: Request, params: GetCrateSummaryRequest):
                 # Include the module
                 filtered_modules.append(
                     CrateModule(
-                        name=name,
+                        name=module_name,
                         path=path,
                         parent_id=parent_id,
                         depth=depth,
@@ -1132,8 +1131,7 @@ async def get_crate_summary(request: Request, params: GetCrateSummaryRequest):
                     """
                     SELECT name, path, parent_id, depth, item_count 
                     FROM modules 
-                    WHERE crate_id = 1
-                      AND (depth <= 1 OR item_count >= 5)
+                    WHERE (depth <= 1 OR item_count >= 5)
                       AND path NOT LIKE '%target::%'
                       AND path NOT LIKE '%.cargo::%'
                     ORDER BY depth ASC, item_count DESC

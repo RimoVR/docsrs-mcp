@@ -75,32 +75,33 @@ async def override_fastmcp_schemas():
             # Each tool maps to parameters that need type override and their original types
             # We track original types for logging/debugging purposes
             tools_to_fix = {
-                "searchItems": {
+                "search_items": {
                     "k": "integer",  # Number of results
                     "min_doc_length": "integer",  # Min doc length filter
                     "has_examples": "boolean",  # Filter for examples
                     "deprecated": "boolean",  # Deprecation filter
                 },
-                "startPreIngestion": {
+                "start_pre_ingestion": {
                     "count": "integer",  # Number of crates to ingest
                     "concurrency": "integer",  # Parallel workers
                     "force": "boolean",  # Force restart flag
                 },
-                "ingestCargoFile": {
+                "ingest_cargo_file": {
                     "concurrency": "integer",  # Parallel workers
                     "skip_existing": "boolean",  # Skip already ingested
                     "resolve_versions": "boolean",  # Resolve version specs
                 },
-                "compareVersions": {
+                "compare_versions": {
                     "include_unchanged": "boolean",  # Include unchanged items
                     "max_results": "integer",  # Max changes to return
                 },
-                "searchExamples": {
+                "get_crate_summary": {},  # Only has string parameters
+                "search_examples": {
                     "k": "integer"  # Number of examples
                 },
                 # These tools have no problematic parameters but are listed for completeness
-                "listVersions": {},  # Only has string parameters
-                "controlPreIngestion": {},  # Only has enum parameters
+                "list_versions": {},  # Only has string parameters
+                "control_pre_ingestion": {},  # Only has enum parameters
             }
 
             # Iterate through tools and modify their schemas
