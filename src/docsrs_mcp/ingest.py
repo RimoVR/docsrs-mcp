@@ -56,6 +56,7 @@ from .memory_utils import (
     get_adaptive_batch_size,
     trigger_gc_if_needed,
 )
+from .models import IngestionTier
 
 logger = logging.getLogger(__name__)
 
@@ -1403,6 +1404,152 @@ def extract_where_predicate(predicate: dict) -> dict | None:
         return None
 
 
+def enhance_fallback_schema(
+    chunk: dict[str, Any], ingestion_tier: IngestionTier
+) -> dict[str, Any]:
+    """
+    Enhance fallback ingestion schema with synthesized metadata.
+
+    This function normalizes chunks from Tier 2/3 fallback ingestion to match
+    the schema expected by version comparison and other downstream components.
+
+    Args:
+        chunk: Raw chunk from fallback ingestion
+        ingestion_tier: The tier of ingestion being used
+
+    Returns:
+        Enhanced chunk with synthesized fields for missing metadata
+    """
+    # Ensure all required fields exist with sensible defaults
+    enhanced = chunk.copy()
+
+    # Generate parent_id if missing
+    if not enhanced.get("parent_id"):
+        # Try to infer parent from item_path
+        item_path = enhanced.get("item_path", "")
+        if "::" in item_path:
+            # Get parent module path
+            parent_path = "::".join(item_path.split("::")[:-1])
+            if parent_path:
+                enhanced["parent_id"] = parent_path
+        else:
+            enhanced["parent_id"] = None
+
+    # Generate generic_params if missing
+    if not enhanced.get("generic_params"):
+        # Try to extract from signature
+        signature = enhanced.get("signature", "")
+        if signature and "<" in signature and ">" in signature:
+            # Simple extraction of generic params
+            start = signature.find("<")
+            end = signature.rfind(">")
+            if start < end:
+                params = signature[start + 1 : end].strip()
+                if params:
+                    # Convert to JSON format expected by version diff
+                    param_list = []
+                    for param in params.split(","):
+                        param = param.strip()
+                        if param:
+                            param_list.append(
+                                {
+                                    "name": param.split(":")[0].strip()
+                                    if ":" in param
+                                    else param,
+                                    "kind": {"type": "type"},
+                                    "default": None,
+                                }
+                            )
+                    if param_list:
+                        enhanced["generic_params"] = json.dumps(param_list)
+
+        if not enhanced.get("generic_params"):
+            # No generics found
+            enhanced["generic_params"] = None
+
+    # Generate trait_bounds if missing
+    if not enhanced.get("trait_bounds"):
+        # Try to extract from signature or generic_params
+        signature = enhanced.get("signature", "")
+        if "where" in signature:
+            # Extract where clause
+            where_start = signature.find("where")
+            where_clause = signature[where_start + 5 :].strip()
+            if where_clause:
+                # Simple parsing of where clause
+                bounds = []
+                for clause in where_clause.split(","):
+                    clause = clause.strip()
+                    if ":" in clause:
+                        type_param, bound = clause.split(":", 1)
+                        bounds.append(
+                            {
+                                "type": "trait",
+                                "trait": bound.strip(),
+                                "type_param": type_param.strip(),
+                            }
+                        )
+                if bounds:
+                    enhanced["trait_bounds"] = json.dumps(bounds)
+
+        # Also check generic params for inline bounds (e.g., T: Clone)
+        if not enhanced.get("trait_bounds") and enhanced.get("generic_params"):
+            try:
+                params = json.loads(enhanced["generic_params"])
+                bounds = []
+                for param in params:
+                    name = param.get("name", "")
+                    if ":" in name:
+                        type_param, bound = name.split(":", 1)
+                        bounds.append(
+                            {
+                                "type": "trait",
+                                "trait": bound.strip(),
+                                "type_param": type_param.strip(),
+                            }
+                        )
+                        # Update param name without bound
+                        param["name"] = type_param.strip()
+                if bounds:
+                    enhanced["trait_bounds"] = json.dumps(bounds)
+                    # Update generic_params without inline bounds
+                    enhanced["generic_params"] = json.dumps(params)
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        if not enhanced.get("trait_bounds"):
+            enhanced["trait_bounds"] = None
+
+    # Ensure item_type is set
+    if not enhanced.get("item_type"):
+        # Try to infer from signature or default to 'unknown'
+        signature = enhanced.get("signature", "").lower()
+        if signature.startswith("fn ") or signature.startswith("pub fn"):
+            enhanced["item_type"] = "function"
+        elif signature.startswith("struct ") or signature.startswith("pub struct"):
+            enhanced["item_type"] = "struct"
+        elif signature.startswith("enum ") or signature.startswith("pub enum"):
+            enhanced["item_type"] = "enum"
+        elif signature.startswith("trait ") or signature.startswith("pub trait"):
+            enhanced["item_type"] = "trait"
+        elif signature.startswith("mod ") or signature.startswith("pub mod"):
+            enhanced["item_type"] = "module"
+        elif signature.startswith("type ") or signature.startswith("pub type"):
+            enhanced["item_type"] = "type"
+        elif signature.startswith("const ") or signature.startswith("pub const"):
+            enhanced["item_type"] = "constant"
+        elif signature.startswith("static ") or signature.startswith("pub static"):
+            enhanced["item_type"] = "static"
+        else:
+            # Fallback to unknown
+            enhanced["item_type"] = "unknown"
+
+    # Add ingestion tier metadata
+    enhanced["_ingestion_tier"] = ingestion_tier.value
+
+    return enhanced
+
+
 async def parse_rustdoc_items_streaming(json_content: str):
     """Parse rustdoc JSON using ijson for memory-efficient streaming.
 
@@ -2720,6 +2867,9 @@ async def create_stdlib_fallback_documentation(
 
 async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
     """Ingest a crate's documentation and return the database path."""
+    # Initialize ingestion tier tracking - will be set based on which path succeeds
+    ingestion_tier = None
+
     async with aiohttp.ClientSession() as session:
         # Check if this is a standard library crate
         if is_stdlib_crate(crate_name):
@@ -2850,6 +3000,9 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
                 # Parse rustdoc items (now returns an async generator)
                 logger.info("Parsing rustdoc items in streaming mode")
+
+                # Track ingestion tier - this is the primary path with full rustdoc JSON
+                ingestion_tier = IngestionTier.RUSTDOC_JSON
 
                 # Collect items from streaming parser
                 items = []
@@ -3031,6 +3184,10 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
                 # Try source extraction fallback for non-stdlib crates
                 if not is_stdlib_crate(crate_name):
                     logger.info("Attempting source extraction fallback")
+
+                    # Track ingestion tier - fallback to source extraction
+                    ingestion_tier = IngestionTier.SOURCE_EXTRACTION
+
                     try:
                         # Import extractor module from parent directory
                         import sys
@@ -3095,6 +3252,11 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
                                         "generic_params": None,  # Not available in fallback
                                         "trait_bounds": None,  # Not available in fallback
                                     }
+
+                                    # Apply schema enhancement for tier 2 fallback
+                                    chunk = enhance_fallback_schema(
+                                        chunk, ingestion_tier
+                                    )
                                     chunks.append(chunk)
 
                                 # Generate and store embeddings using existing infrastructure
@@ -3112,6 +3274,12 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
 
                                 logger.info(
                                     f"Successfully stored {len(chunks)} fallback items for {crate_name}@{version}"
+                                )
+                                
+                                # Update status to completed with SOURCE_EXTRACTION tier
+                                await set_ingestion_status(
+                                    db_path, crate_id, "completed",
+                                    ingestion_tier=IngestionTier.SOURCE_EXTRACTION.value
                                 )
 
                                 # Skip the basic description fallback since we have real data
@@ -3223,6 +3391,13 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
                                     logger.warning(
                                         f"Failed to generate example embeddings: {ex_err}"
                                     )
+                                
+                                # Update status to completed with SOURCE_EXTRACTION tier
+                                # (latest version fallback is still a form of source extraction)
+                                await set_ingestion_status(
+                                    db_path, crate_id, "completed",
+                                    ingestion_tier=IngestionTier.SOURCE_EXTRACTION.value
+                                )
 
                                 return db_path
 
@@ -3234,15 +3409,28 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
 
                 logger.info("Falling back to basic crate description embedding")
 
+                # Track ingestion tier - final fallback to description only
+                ingestion_tier = IngestionTier.DESCRIPTION_ONLY
+
                 # Fallback: create a simple embedding from the crate description
                 if description:
-                    chunks = [
-                        {
-                            "item_path": "crate",
-                            "header": f"{crate_name} - Crate Documentation",
-                            "content": description,
-                        }
-                    ]
+                    chunk = {
+                        "item_path": "crate",
+                        "header": f"{crate_name} - Crate Documentation",
+                        "content": description,
+                        "item_type": "crate",
+                        "signature": None,
+                        "parent_id": None,
+                        "examples": [],
+                        "visibility": "public",
+                        "deprecated": False,
+                        "generic_params": None,
+                        "trait_bounds": None,
+                    }
+
+                    # Apply schema enhancement for tier 3 fallback
+                    chunk = enhance_fallback_schema(chunk, ingestion_tier)
+                    chunks = [chunk]
 
                     try:
                         # First, clean up any partial writes from the failed main ingestion
@@ -3276,8 +3464,20 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
             # Clean up embedding model to free memory after each crate
             cleanup_embedding_model()
 
-            # Set completion status
-            await set_ingestion_status(db_path, crate_id, "completed")
+            # Set completion status with ingestion tier
+            # Note: ingestion_tier might not be set if we reached here through early exits
+            # Default to rustdoc_json if not explicitly set (shouldn't normally happen)
+            if "ingestion_tier" not in locals():
+                ingestion_tier = IngestionTier.RUSTDOC_JSON
+
+            await set_ingestion_status(
+                db_path,
+                crate_id,
+                "completed",
+                ingestion_tier=ingestion_tier.value
+                if hasattr(ingestion_tier, "value")
+                else ingestion_tier,
+            )
 
             logger.info(f"Successfully ingested {crate_name}@{version}")
             return db_path

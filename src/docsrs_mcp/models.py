@@ -1339,7 +1339,7 @@ class IngestCargoFileRequest(BaseModel):
             raise ValueError("File path cannot be None")
         if not isinstance(v, str):
             v = str(v)
-            
+
         path = Path(v).resolve()
         if not path.exists():
             raise ValueError(f"File not found: {v}")
@@ -1488,6 +1488,14 @@ class Severity(str, Enum):
     PATCH = "patch"
 
 
+class IngestionTier(str, Enum):
+    """Tier of documentation ingestion method used."""
+
+    RUSTDOC_JSON = "rustdoc_json"  # Full rustdoc JSON with complete metadata
+    SOURCE_EXTRACTION = "source_extraction"  # Fallback source extraction from CDN
+    DESCRIPTION_ONLY = "description_only"  # Minimal description fallback
+
+
 class ItemSignature(BaseModel):
     """Represents the signature of a Rust item."""
 
@@ -1596,7 +1604,7 @@ class CompareVersionsRequest(BaseModel):
     @classmethod
     def validate_include_unchanged(cls, v: Any) -> bool:
         """Validate and coerce include_unchanged to boolean.
-        
+
         Handles multiple input formats for Claude Code compatibility:
         - Native booleans: True/False
         - Strings: "true"/"false", "1"/"0", "yes"/"no", "on"/"off", "t"/"f", "y"/"n"
@@ -1606,11 +1614,11 @@ class CompareVersionsRequest(BaseModel):
         # Fast path for native booleans
         if isinstance(v, bool):
             return v
-            
+
         # Handle None (default to False)
         if v is None:
             return False
-            
+
         # Handle string representations (case-insensitive)
         if isinstance(v, str):
             v_lower = v.lower().strip()
@@ -1625,11 +1633,11 @@ class CompareVersionsRequest(BaseModel):
                 f"Invalid boolean string: '{v}'. "
                 f"Use: true/false, 1/0, yes/no, on/off, t/f, y/n"
             )
-            
+
         # Handle numeric values (0 = False, non-zero = True)
         if isinstance(v, (int, float)):
             return bool(v)
-            
+
         # Default fallback for other types
         return bool(v)  # default
 

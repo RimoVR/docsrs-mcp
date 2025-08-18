@@ -551,7 +551,8 @@ async def migrate_add_ingestion_tracking(db_path: Path) -> None:
                 error_message TEXT,
                 items_processed INTEGER DEFAULT 0,
                 total_items INTEGER,
-                checkpoint_data TEXT  -- JSON for extensibility
+                checkpoint_data TEXT,  -- JSON for extensibility
+                ingestion_tier TEXT CHECK(ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', NULL))
             )
         """)
 
@@ -787,7 +788,8 @@ async def init_database(db_path: Path) -> None:
                 error_message TEXT,
                 items_processed INTEGER DEFAULT 0,
                 total_items INTEGER,
-                checkpoint_data TEXT  -- JSON for extensibility
+                checkpoint_data TEXT,  -- JSON for extensibility
+                ingestion_tier TEXT CHECK(ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', NULL))
             )
         """)
 
@@ -2073,6 +2075,7 @@ async def set_ingestion_status(
     checkpoint_data: dict | None = None,
     items_processed: int | None = None,
     total_items: int | None = None,
+    ingestion_tier: str | None = None,
 ) -> None:
     """Update ingestion status with retry logic.
 
@@ -2084,6 +2087,7 @@ async def set_ingestion_status(
         checkpoint_data: Optional checkpoint data as dict (will be JSON serialized)
         items_processed: Optional count of items processed
         total_items: Optional total count of items
+        ingestion_tier: Optional tier of ingestion ('rustdoc_json', 'source_extraction', 'description_only')
     """
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         # Get current timestamp
@@ -2108,7 +2112,8 @@ async def set_ingestion_status(
                     SET status = ?, updated_at = ?, completed_at = ?, 
                         error_message = ?, checkpoint_data = ?,
                         items_processed = COALESCE(?, items_processed),
-                        total_items = COALESCE(?, total_items)
+                        total_items = COALESCE(?, total_items),
+                        ingestion_tier = COALESCE(?, ingestion_tier)
                     WHERE crate_id = ?
                     """,
                     (
@@ -2119,6 +2124,7 @@ async def set_ingestion_status(
                         checkpoint_json,
                         items_processed,
                         total_items,
+                        ingestion_tier,
                         crate_id,
                     ),
                 )
@@ -2130,7 +2136,8 @@ async def set_ingestion_status(
                     SET status = ?, updated_at = ?, error_message = ?, 
                         checkpoint_data = ?,
                         items_processed = COALESCE(?, items_processed),
-                        total_items = COALESCE(?, total_items)
+                        total_items = COALESCE(?, total_items),
+                        ingestion_tier = COALESCE(?, ingestion_tier)
                     WHERE crate_id = ?
                     """,
                     (
@@ -2140,6 +2147,7 @@ async def set_ingestion_status(
                         checkpoint_json,
                         items_processed,
                         total_items,
+                        ingestion_tier,
                         crate_id,
                     ),
                 )
@@ -2150,8 +2158,8 @@ async def set_ingestion_status(
                 """
                 INSERT INTO ingestion_status 
                 (crate_id, status, started_at, updated_at, completed_at, 
-                 error_message, checkpoint_data, items_processed, total_items)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 error_message, checkpoint_data, items_processed, total_items, ingestion_tier)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     crate_id,
@@ -2163,6 +2171,7 @@ async def set_ingestion_status(
                     checkpoint_json,
                     items_processed or 0,
                     total_items,
+                    ingestion_tier,
                 ),
             )
 

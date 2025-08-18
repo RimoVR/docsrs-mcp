@@ -20,6 +20,7 @@ from .models import (
     ChangeType,
     CompareVersionsRequest,
     DiffSummary,
+    IngestionTier,
     ItemChange,
     ItemKind,
     ItemSignature,
@@ -34,6 +35,75 @@ from .validation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def get_ingestion_tier(db_path) -> str | None:
+    """Get the ingestion tier for a crate from the database.
+
+    Args:
+        db_path: Path to the database file
+
+    Returns:
+        The ingestion tier string or None if not found
+    """
+    import aiosqlite
+
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute("""
+                SELECT ingestion_tier 
+                FROM ingestion_status 
+                WHERE status = 'completed'
+                LIMIT 1
+            """)
+            row = await cursor.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        logger.warning(f"Failed to get ingestion tier: {e}")
+        return None
+
+
+def is_fallback_tier(tier: str | None) -> bool:
+    """Check if the ingestion tier is a fallback tier (not full rustdoc JSON).
+
+    Args:
+        tier: The ingestion tier string
+
+    Returns:
+        True if this is a fallback tier (source extraction or description only)
+    """
+    if tier is None:
+        # If tier is not tracked, assume it's not fallback (backward compatibility)
+        return False
+
+    # Check if it's one of the fallback tiers
+    return tier in [
+        IngestionTier.SOURCE_EXTRACTION.value,
+        IngestionTier.DESCRIPTION_ONLY.value,
+    ]
+
+
+def get_tier_threshold(tier: str | None) -> int:
+    """Get the appropriate MIN_ITEMS_THRESHOLD based on ingestion tier.
+
+    Args:
+        tier: The ingestion tier string
+
+    Returns:
+        The minimum items threshold appropriate for the tier
+    """
+    if tier == IngestionTier.RUSTDOC_JSON.value:
+        # Full rustdoc JSON should have many items
+        return 2  # At least 2 items for normal ingestion
+    elif tier == IngestionTier.SOURCE_EXTRACTION.value:
+        # Source extraction may have fewer items
+        return 1  # At least 1 item from source extraction
+    elif tier == IngestionTier.DESCRIPTION_ONLY.value:
+        # Description-only fallback has minimal items
+        return 1  # Accept single crate description
+    else:
+        # Unknown or None - use default threshold
+        return 2  # Default to standard threshold
 
 
 class DiffCache:
@@ -153,30 +223,57 @@ class VersionDiffEngine:
         items_a = await get_all_items_for_version(db_path_a)
         items_b = await get_all_items_for_version(db_path_b)
 
-        # Verify data was actually ingested - prevent misleading "0 changes"
-        # Check for empty or minimal ingestion (only description embedding)
-        MIN_ITEMS_THRESHOLD = 2  # At least 2 items to be considered properly ingested
+        # Get ingestion tiers for tier-aware validation
+        tier_a = await get_ingestion_tier(db_path_a)
+        tier_b = await get_ingestion_tier(db_path_b)
 
-        if not items_a or len(items_a) < MIN_ITEMS_THRESHOLD:
+        # Verify data was actually ingested - prevent misleading "0 changes"
+        # Use tier-aware thresholds based on ingestion method
+        threshold_a = get_tier_threshold(tier_a)
+        threshold_b = get_tier_threshold(tier_b)
+
+        if not items_a or len(items_a) < threshold_a:
             item_count = len(items_a) if items_a else 0
-            error_msg = format_error_message(
-                "custom",
-                message=f"Insufficient documentation found for {validated_crate} v{validated_version_a} "
-                f"(only {item_count} item{'s' if item_count != 1 else ''} found). "
-                f"The crate may not be fully ingested. This often happens when a version doesn't exist "
-                f"or rustdoc JSON is unavailable. Try using a valid version number.",
-            )
+
+            # Provide tier-specific error message
+            if is_fallback_tier(tier_a):
+                error_msg = format_error_message(
+                    "custom",
+                    message=f"Limited documentation available for {validated_crate} v{validated_version_a} "
+                    f"(only {item_count} item{'s' if item_count != 1 else ''} found via {tier_a or 'unknown method'}). "
+                    f"This crate was ingested using fallback extraction because rustdoc JSON was unavailable. "
+                    f"Version comparison may have limited accuracy.",
+                )
+            else:
+                error_msg = format_error_message(
+                    "custom",
+                    message=f"Insufficient documentation found for {validated_crate} v{validated_version_a} "
+                    f"(only {item_count} item{'s' if item_count != 1 else ''} found). "
+                    f"The crate may not be fully ingested. This often happens when a version doesn't exist "
+                    f"or rustdoc JSON is unavailable. Try using a valid version number.",
+                )
             raise ValueError(error_msg)
 
-        if not items_b or len(items_b) < MIN_ITEMS_THRESHOLD:
+        if not items_b or len(items_b) < threshold_b:
             item_count = len(items_b) if items_b else 0
-            error_msg = format_error_message(
-                "custom",
-                message=f"Insufficient documentation found for {validated_crate} v{validated_version_b} "
-                f"(only {item_count} item{'s' if item_count != 1 else ''} found). "
-                f"The crate may not be fully ingested. This often happens when a version doesn't exist "
-                f"or rustdoc JSON is unavailable. Try using a valid version number.",
-            )
+
+            # Provide tier-specific error message
+            if is_fallback_tier(tier_b):
+                error_msg = format_error_message(
+                    "custom",
+                    message=f"Limited documentation available for {validated_crate} v{validated_version_b} "
+                    f"(only {item_count} item{'s' if item_count != 1 else ''} found via {tier_b or 'unknown method'}). "
+                    f"This crate was ingested using fallback extraction because rustdoc JSON was unavailable. "
+                    f"Version comparison may have limited accuracy.",
+                )
+            else:
+                error_msg = format_error_message(
+                    "custom",
+                    message=f"Insufficient documentation found for {validated_crate} v{validated_version_b} "
+                    f"(only {item_count} item{'s' if item_count != 1 else ''} found). "
+                    f"The crate may not be fully ingested. This often happens when a version doesn't exist "
+                    f"or rustdoc JSON is unavailable. Try using a valid version number.",
+                )
             raise ValueError(error_msg)
 
         # Compute item hashes for change detection

@@ -80,7 +80,7 @@ graph LR
             DL[Compression Support<br/>zst, gzip, json]
             PARSE[ijson Parser<br/>Memory-efficient streaming<br/>Module hierarchy extraction<br/>Path validation with fallback generation]
             HIERARCHY[build_module_hierarchy()<br/>Parent-child relationships<br/>Depth calculation<br/>Item counting]
-            EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]<br/>FALLBACK[Three-Tier Fallback Architecture<br/>Tier 1: Rustdoc JSON (10-15% coverage)<br/>Tier 2: Source extraction via CDN (80%+ coverage)<br/>Tier 3: Latest version fallback (100% guarantee)<br/>CDN URL: static.crates.io/crates/{name}/{name}-{version}.crate<br/>Enhanced macro extraction with fragment specifiers]<br/>MACROEXT[EnhancedMacroExtractor<br/>Patterns: macro_rules!, #[proc_macro], #[proc_macro_derive], #[proc_macro_attribute]<br/>Fragment specifiers: expr, ident, pat, ty, stmt, block, item, meta, tt, vis, literal, path<br/>Results: lazy_static(4 macros), serde_derive(5 macros), anyhow(15 macros)]
+            EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]<br/>TIER_SYSTEM[Three-Tier Ingestion System<br/>RUSTDOC_JSON: Full metadata (primary path)<br/>SOURCE_EXTRACTION: Fallback via CDN (80%+ coverage)<br/>DESCRIPTION_ONLY: Minimal fallback (100% guarantee)<br/>enhance_fallback_schema() for tier 2/3<br/>Tier-aware validation with different MIN_ITEMS_THRESHOLD]<br/>MACROEXT[EnhancedMacroExtractor<br/>Patterns: macro_rules!, #[proc_macro], #[proc_macro_derive], #[proc_macro_attribute]<br/>Fragment specifiers: expr, ident, pat, ty, stmt, block, item, meta, tt, vis, literal, path<br/>Results: lazy_static(4 macros), serde_derive(5 macros), anyhow(15 macros)]
             PATHVAL[Path Validation<br/>validate_item_path_with_fallback()<br/>Database integrity enforcement]
             EMBED[FastEmbed<br/>Batch processing<br/>Embeddings warmup during startup<br/>Memory-aware batch operations<br/>Enhanced transaction management]
             LOCK[Per-crate Locks<br/>Prevent duplicates]
@@ -458,6 +458,7 @@ erDiagram
         TEXT last_error "most recent error message - DEFAULT NULL"
         INTEGER expected_items "expected number of items to ingest - DEFAULT NULL"
         INTEGER actual_items "actual number of items ingested - DEFAULT NULL"
+        TEXT ingestion_tier "RUSTDOC_JSON, SOURCE_EXTRACTION, DESCRIPTION_ONLY - DEFAULT NULL"
     }
     
     INGESTION_CHECKPOINTS {
@@ -1807,7 +1808,7 @@ This architecture ensures reliable, secure, and efficient delivery of docsrs-mcp
 
 ## Enhanced Three-Tier Fallback System
 
-The system implements a comprehensive three-tier extraction strategy that significantly expands documentation coverage from ~10% to 80%+ of available crates:
+The system implements a comprehensive three-tier ingestion strategy that significantly expands documentation coverage from ~10% to 80%+ of available crates:
 
 ```mermaid
 graph TD
@@ -5471,88 +5472,151 @@ def detect_re_ingestion(crate_name: str, version: str) -> bool:
     return False
 ```
 
-## Enhanced Fallback Ingestion Architecture
+## Ingestion Tier System
 
-The three-tier fallback system has been enhanced with improved Tier 2 capabilities and schema standardization.
+We've implemented a comprehensive three-tier ingestion system to handle different documentation availability scenarios, ensuring 80%+ crate coverage while maintaining appropriate data quality expectations for each ingestion method.
+
+### Three-Tier Architecture Overview
+
+**Tiers**:
+1. **RUSTDOC_JSON** - Full rustdoc JSON with complete metadata (primary path)
+2. **SOURCE_EXTRACTION** - Fallback source extraction from CDN when rustdoc fails
+3. **DESCRIPTION_ONLY** - Minimal description fallback for basic coverage
 
 ### Enhanced Three-Tier Fallback System
 
 ```mermaid
 graph TD
-    subgraph "Tier 1: Rustdoc JSON (10-15% coverage)"
+    subgraph "Tier 1: RUSTDOC_JSON (Primary Path)"
         T1_DOWNLOAD[Download rustdoc JSON<br/>docs.rs CDN]
-        T1_PARSE[Enhanced JSON Parser<br/>Complete item extraction]
+        T1_PARSE[Enhanced JSON Parser<br/>Complete metadata extraction]
         T1_EXTRACT[Macro & Example Extraction<br/>Fragment specifiers]
+        T1_SCHEMA[Full Schema Available<br/>All metadata fields]
     end
     
-    subgraph "Tier 2: Enhanced Source Extraction (80%+ coverage)"
+    subgraph "Tier 2: SOURCE_EXTRACTION (Fallback)"
         T2_DOWNLOAD[Download source archive<br/>static.crates.io]
         T2_PARSE[Enhanced Source Parser<br/>AST-based extraction]
-        T2_SCHEMA[Schema Standardization Layer<br/>Unified data format]
+        T2_ENHANCE[enhance_fallback_schema()<br/>Synthesize missing metadata]
         T2_MACRO[Enhanced Macro Detection<br/>Pattern matching]
     end
     
-    subgraph "Tier 3: Latest Version Fallback (100% guarantee)"
+    subgraph "Tier 3: DESCRIPTION_ONLY (Minimal)"
         T3_LATEST[Latest Version Lookup<br/>crates.io API]
         T3_FALLBACK[Standard Library Fallback<br/>Basic documentation]
-        T3_MINIMAL[Minimal Documentation<br/>Name + basic info]
+        T3_MINIMAL[Minimal Documentation<br/>Description-only embedding]
     end
     
-    subgraph "Ingestion Method Tracking"
-        METHOD_TRACKER[IngestionMethodTracker<br/>Records fallback tier used<br/>Success/failure rates]
+    subgraph "Schema Enhancement Layer"
+        ENHANCE[enhance_fallback_schema()<br/>Extract generic_params from signatures<br/>Generate trait_bounds from where clauses<br/>Infer item_type from context]
+    end
+    
+    subgraph "Tier-Aware Validation"
+        VALIDATION[Tier-specific validation<br/>MIN_ITEMS_THRESHOLD per tier<br/>is_fallback_tier() checks<br/>get_tier_threshold() logic]
     end
     
     T1_DOWNLOAD --> T1_PARSE
     T1_PARSE --> T1_EXTRACT
-    T1_EXTRACT -->|Success| METHOD_TRACKER
-    T1_EXTRACT -->|Failure| T2_DOWNLOAD
+    T1_EXTRACT --> T1_SCHEMA
+    T1_SCHEMA -->|Success| VALIDATION
+    T1_SCHEMA -->|RustdocVersionNotFoundError| T2_DOWNLOAD
     
     T2_DOWNLOAD --> T2_PARSE
-    T2_PARSE --> T2_SCHEMA
-    T2_SCHEMA --> T2_MACRO
-    T2_MACRO -->|Success| METHOD_TRACKER
-    T2_MACRO -->|Failure| T3_LATEST
+    T2_PARSE --> T2_ENHANCE
+    T2_ENHANCE --> ENHANCE
+    ENHANCE --> T2_MACRO
+    T2_MACRO -->|Success| VALIDATION
+    T2_MACRO -->|Timeout/Error| T3_LATEST
     
     T3_LATEST --> T3_FALLBACK
     T3_FALLBACK --> T3_MINIMAL
-    T3_MINIMAL --> METHOD_TRACKER
+    T3_MINIMAL --> VALIDATION
 ```
 
-### Schema Standardization Layer
+### Schema Enhancement for Fallback Tiers
 
-Tier 2 now includes a schema standardization layer that normalizes data from different sources:
+The `enhance_fallback_schema()` function synthesizes missing metadata fields for tier 2/3 ingestion when rustdoc JSON is unavailable:
 
 ```python
-class SchemaStandardizer:
-    """Standardizes documentation data across ingestion tiers."""
+def enhance_fallback_schema(item_data: Dict, source_tier: str) -> Dict:
+    """Enhance fallback tier data with synthesized metadata fields."""
+    enhanced = item_data.copy()
     
-    def standardize_item(self, raw_item: Dict, source_tier: int) -> StandardizedItem:
-        """Convert raw item data to standardized format."""
-        return StandardizedItem(
-            item_id=self._extract_id(raw_item, source_tier),
-            item_path=self._extract_path(raw_item, source_tier),
-            item_type=self._extract_type(raw_item, source_tier),
-            signature=self._extract_signature(raw_item, source_tier),
-            documentation=self._extract_docs(raw_item, source_tier),
-            examples=self._extract_examples(raw_item, source_tier),
-            metadata={
-                'source_tier': source_tier,
-                'extraction_method': self._get_method(source_tier),
-                'confidence_score': self._calculate_confidence(raw_item, source_tier)
-            }
+    # Extract generic_params from function signatures using regex patterns
+    if 'signature' in enhanced and enhanced['signature']:
+        enhanced['generic_params'] = extract_generic_params_from_signature(
+            enhanced['signature']
         )
+    
+    # Generate trait_bounds from where clauses
+    if 'where_clause' in enhanced:
+        enhanced['trait_bounds'] = extract_trait_bounds(
+            enhanced['where_clause']
+        )
+    
+    # Infer item_type from context when not explicitly available
+    if not enhanced.get('item_type'):
+        enhanced['item_type'] = infer_item_type_from_context(
+            enhanced.get('signature', ''),
+            enhanced.get('item_path', '')
+        )
+    
+    # Mark enhancement metadata
+    enhanced['metadata'] = {
+        'source_tier': source_tier,
+        'enhanced_schema': True,
+        'enhancement_confidence': calculate_enhancement_confidence(enhanced)
+    }
+    
+    return enhanced
 ```
 
-### Ingestion Method Tracking
+**Enhancement Capabilities**:
+- **Generic Parameters**: Extracted from function signatures using regex patterns
+- **Trait Bounds**: Generated from where clauses in function definitions  
+- **Item Type Inference**: Contextual analysis when explicit type unavailable
+- **Confidence Scoring**: Quality assessment for enhanced metadata
 
-The system tracks which fallback tier was used for each crate:
+### Tier-Aware Validation System
+
+Different validation thresholds apply based on the ingestion tier used:
+
+**MIN_ITEMS_THRESHOLD Values**:
+- **RUSTDOC_JSON**: 2 items (higher threshold for complete data)
+- **SOURCE_EXTRACTION**: 1 item (lower threshold for extracted data)
+- **DESCRIPTION_ONLY**: 1 item (minimal threshold for basic coverage)
+
+```python
+def is_fallback_tier(tier: str) -> bool:
+    """Check if using fallback ingestion method."""
+    return tier in ['SOURCE_EXTRACTION', 'DESCRIPTION_ONLY']
+
+def get_tier_threshold(tier: str) -> int:
+    """Get appropriate threshold for ingestion tier."""
+    thresholds = {
+        'RUSTDOC_JSON': 2,
+        'SOURCE_EXTRACTION': 1, 
+        'DESCRIPTION_ONLY': 1
+    }
+    return thresholds.get(tier, 2)  # Default to highest threshold
+```
+
+### Database Schema Integration
+
+The ingestion tier is tracked in the database for tier-aware processing:
 
 ```sql
--- Add method tracking to crate_metadata
-ALTER TABLE crate_metadata ADD COLUMN ingestion_method TEXT DEFAULT NULL;
-ALTER TABLE crate_metadata ADD COLUMN fallback_tier INTEGER DEFAULT NULL;
-ALTER TABLE crate_metadata ADD COLUMN method_confidence REAL DEFAULT NULL;
+-- Enhanced crate_metadata with tier tracking
+ALTER TABLE crate_metadata ADD COLUMN ingestion_tier TEXT DEFAULT NULL;
+
+-- Tier values: 'RUSTDOC_JSON', 'SOURCE_EXTRACTION', 'DESCRIPTION_ONLY'
 ```
+
+**Benefits of Tier Tracking**:
+- **Quality Assessment**: Know data quality expectations per crate
+- **Performance Optimization**: Apply tier-specific processing logic
+- **Coverage Metrics**: Track success rates across ingestion methods
+- **Error Context**: Provide tier-aware error messages and limitations
 
 ## MCP Parameter Schema Override Architecture
 
@@ -6278,12 +6342,13 @@ The 5 critical architectural enhancements provide comprehensive improvements to 
 - **Integration**: Seamless MCP tool integration without server restart requirements
 - **Observability**: Real-time monitoring of pre-ingestion effectiveness
 
-### 4. Enhanced Fallback Ingestion
-**Impact**: Improved reliability and coverage for documentation extraction
-- **Coverage**: Enhanced Tier 2 increases success rate from 80% to 90%+
-- **Schema Standardization**: Unified data format across all fallback tiers
-- **Method Tracking**: Records which tier was used for performance analysis
-- **Quality**: Better macro extraction and source parsing capabilities
+### 4. Ingestion Tier System
+**Impact**: Comprehensive three-tier ingestion system ensuring 80%+ crate coverage
+- **Tier Classification**: RUSTDOC_JSON, SOURCE_EXTRACTION, DESCRIPTION_ONLY with clear data quality expectations
+- **Schema Enhancement**: enhance_fallback_schema() synthesizes missing metadata for fallback tiers
+- **Tier-Aware Validation**: Different MIN_ITEMS_THRESHOLD values per tier (rustdoc=2, source=1, description=1)
+- **Database Integration**: ingestion_tier column tracks method used for each crate
+- **Quality Assurance**: Tier-aware error messages explain limitations appropriately
 
 ### 5. MCP Parameter Schema Override
 **Impact**: Ensures Claude Code compatibility and parameter flexibility
