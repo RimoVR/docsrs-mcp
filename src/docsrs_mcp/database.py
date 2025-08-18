@@ -525,6 +525,49 @@ async def migrate_add_generics_metadata(db_path: Path) -> None:
         logger.info("Successfully added generic_params and trait_bounds columns")
 
 
+async def migrate_add_ingestion_tracking(db_path: Path) -> None:
+    """Add ingestion_status table for tracking completion and recovery."""
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Check if migration is needed by checking for ingestion_status table
+        cursor = await db.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='ingestion_status'
+        """)
+
+        if await cursor.fetchone():
+            # Table already exists
+            return
+
+        logger.info("Migrating database to add ingestion tracking functionality")
+
+        # Create ingestion_status table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS ingestion_status (
+                crate_id INTEGER PRIMARY KEY REFERENCES crate_metadata(id),
+                status TEXT NOT NULL CHECK(status IN ('started', 'downloading', 'processing', 'completed', 'failed')),
+                started_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                completed_at REAL,
+                error_message TEXT,
+                items_processed INTEGER DEFAULT 0,
+                total_items INTEGER,
+                checkpoint_data TEXT  -- JSON for extensibility
+            )
+        """)
+
+        # Create partial index for fast incomplete detection (O(1) queries)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_incomplete_ingestions 
+            ON ingestion_status(updated_at) 
+            WHERE status != 'completed'
+        """)
+
+        await db.commit()
+        logger.info(
+            "Successfully added ingestion_status table with tracking capabilities"
+        )
+
+
 async def init_database(db_path: Path) -> None:
     """Initialize database with required tables and extensions."""
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
@@ -732,6 +775,28 @@ async def init_database(db_path: Path) -> None:
         await db.execute("ANALYZE")
 
         await db.commit()
+
+        # Create ingestion status tracking table
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS ingestion_status (
+                crate_id INTEGER PRIMARY KEY REFERENCES crate_metadata(id),
+                status TEXT NOT NULL CHECK(status IN ('started', 'downloading', 'processing', 'completed', 'failed')),
+                started_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                completed_at REAL,
+                error_message TEXT,
+                items_processed INTEGER DEFAULT 0,
+                total_items INTEGER,
+                checkpoint_data TEXT  -- JSON for extensibility
+            )
+        """)
+
+        # Create partial index for fast incomplete detection (O(1) queries)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_incomplete_ingestions 
+            ON ingestion_status(updated_at) 
+            WHERE status != 'completed'
+        """)
 
 
 async def store_crate_metadata(
@@ -1990,3 +2055,330 @@ async def get_all_item_paths(db_path: Path) -> list[str]:
 
         logger.debug(f"Retrieved {len(paths)} unique item paths from database")
         return paths
+
+
+# ============================================================
+# Ingestion Status Management Functions
+# ============================================================
+
+import json
+
+
+@RetryableTransaction(max_retries=3)
+async def set_ingestion_status(
+    db_path: Path,
+    crate_id: int,
+    status: str,
+    error_message: str | None = None,
+    checkpoint_data: dict | None = None,
+    items_processed: int | None = None,
+    total_items: int | None = None,
+) -> None:
+    """Update ingestion status with retry logic.
+
+    Args:
+        db_path: Path to database
+        crate_id: ID of the crate being ingested
+        status: Status string ('started', 'downloading', 'processing', 'completed', 'failed')
+        error_message: Optional error message for failed ingestions
+        checkpoint_data: Optional checkpoint data as dict (will be JSON serialized)
+        items_processed: Optional count of items processed
+        total_items: Optional total count of items
+    """
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Get current timestamp
+        current_time = time.time()
+
+        # Serialize checkpoint data if provided
+        checkpoint_json = json.dumps(checkpoint_data) if checkpoint_data else None
+
+        # Check if record exists
+        cursor = await db.execute(
+            "SELECT crate_id FROM ingestion_status WHERE crate_id = ?", (crate_id,)
+        )
+        exists = await cursor.fetchone()
+
+        if exists:
+            # Update existing record
+            if status == "completed":
+                await execute_with_retry(
+                    db,
+                    """
+                    UPDATE ingestion_status 
+                    SET status = ?, updated_at = ?, completed_at = ?, 
+                        error_message = ?, checkpoint_data = ?,
+                        items_processed = COALESCE(?, items_processed),
+                        total_items = COALESCE(?, total_items)
+                    WHERE crate_id = ?
+                    """,
+                    (
+                        status,
+                        current_time,
+                        current_time,
+                        error_message,
+                        checkpoint_json,
+                        items_processed,
+                        total_items,
+                        crate_id,
+                    ),
+                )
+            else:
+                await execute_with_retry(
+                    db,
+                    """
+                    UPDATE ingestion_status 
+                    SET status = ?, updated_at = ?, error_message = ?, 
+                        checkpoint_data = ?,
+                        items_processed = COALESCE(?, items_processed),
+                        total_items = COALESCE(?, total_items)
+                    WHERE crate_id = ?
+                    """,
+                    (
+                        status,
+                        current_time,
+                        error_message,
+                        checkpoint_json,
+                        items_processed,
+                        total_items,
+                        crate_id,
+                    ),
+                )
+        else:
+            # Insert new record
+            await execute_with_retry(
+                db,
+                """
+                INSERT INTO ingestion_status 
+                (crate_id, status, started_at, updated_at, completed_at, 
+                 error_message, checkpoint_data, items_processed, total_items)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    crate_id,
+                    status,
+                    current_time,
+                    current_time,
+                    current_time if status == "completed" else None,
+                    error_message,
+                    checkpoint_json,
+                    items_processed or 0,
+                    total_items,
+                ),
+            )
+
+        await db.commit()
+        logger.debug(f"Updated ingestion status for crate_id={crate_id} to {status}")
+
+
+async def get_ingestion_status(db_path: Path, crate_id: int) -> dict | None:
+    """Get current ingestion status for a crate.
+
+    Args:
+        db_path: Path to database
+        crate_id: ID of the crate
+
+    Returns:
+        Dict with status information or None if not found
+    """
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        cursor = await db.execute(
+            """
+            SELECT status, started_at, updated_at, completed_at, 
+                   error_message, items_processed, total_items, checkpoint_data
+            FROM ingestion_status 
+            WHERE crate_id = ?
+            """,
+            (crate_id,),
+        )
+        row = await cursor.fetchone()
+
+        if row:
+            checkpoint_data = None
+            if row[7]:  # checkpoint_data
+                try:
+                    checkpoint_data = json.loads(row[7])
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f"Failed to parse checkpoint data for crate_id={crate_id}"
+                    )
+
+            return {
+                "status": row[0],
+                "started_at": row[1],
+                "updated_at": row[2],
+                "completed_at": row[3],
+                "error_message": row[4],
+                "items_processed": row[5],
+                "total_items": row[6],
+                "checkpoint_data": checkpoint_data,
+            }
+
+        return None
+
+
+async def find_incomplete_ingestions(
+    cache_dir: Path,
+    stale_threshold_seconds: int = 1800,  # 30 minutes default
+) -> list[dict]:
+    """Find all incomplete/stalled ingestions using partial index.
+
+    Args:
+        cache_dir: Cache directory containing crate databases
+        stale_threshold_seconds: Seconds after which an ingestion is considered stalled
+
+    Returns:
+        List of dicts with incomplete ingestion information
+    """
+    incomplete = []
+    current_time = time.time()
+    stale_threshold = current_time - stale_threshold_seconds
+
+    # Iterate through all crate directories
+    for crate_dir in cache_dir.iterdir():
+        if not crate_dir.is_dir():
+            continue
+
+        # Check each version database
+        for db_file in crate_dir.glob("*.db"):
+            try:
+                async with aiosqlite.connect(db_file, timeout=DB_TIMEOUT) as db:
+                    # Use partial index for efficient query
+                    cursor = await db.execute(
+                        """
+                        SELECT 
+                            cm.name, cm.version, cm.id,
+                            s.status, s.started_at, s.updated_at, 
+                            s.error_message, s.items_processed, s.total_items
+                        FROM ingestion_status s
+                        JOIN crate_metadata cm ON s.crate_id = cm.id
+                        WHERE s.status != 'completed'
+                          AND (s.status = 'failed' OR s.updated_at < ?)
+                        """,
+                        (stale_threshold,),
+                    )
+
+                    async for row in cursor:
+                        incomplete.append(
+                            {
+                                "crate_name": row[0],
+                                "version": row[1],
+                                "crate_id": row[2],
+                                "status": row[3],
+                                "started_at": row[4],
+                                "updated_at": row[5],
+                                "error_message": row[6],
+                                "items_processed": row[7],
+                                "total_items": row[8],
+                                "db_path": str(db_file),
+                                "is_stalled": row[5] < stale_threshold
+                                and row[3] != "failed",
+                            }
+                        )
+            except Exception as e:
+                logger.warning(f"Error checking ingestion status for {db_file}: {e}")
+                continue
+
+    logger.info(f"Found {len(incomplete)} incomplete ingestions")
+    return incomplete
+
+
+async def is_ingestion_complete(db_path: Path) -> bool:
+    """Check if ingestion completed successfully.
+
+    This replaces the simple db_path.exists() check with proper completion validation.
+
+    Args:
+        db_path: Path to database
+
+    Returns:
+        True if ingestion is complete, False otherwise
+    """
+    if not db_path.exists():
+        return False
+
+    try:
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            # First check if tables exist
+            cursor = await db.execute(
+                """
+                SELECT COUNT(*) FROM sqlite_master 
+                WHERE type='table' AND name IN ('crate_metadata', 'ingestion_status')
+                """
+            )
+            table_count = (await cursor.fetchone())[0]
+
+            if table_count < 2:
+                # Tables don't exist, ingestion not complete
+                return False
+
+            # Check ingestion status
+            cursor = await db.execute(
+                """
+                SELECT s.status 
+                FROM ingestion_status s
+                JOIN crate_metadata cm ON s.crate_id = cm.id
+                LIMIT 1
+                """
+            )
+            row = await cursor.fetchone()
+
+            if not row:
+                # No ingestion status record, assume incomplete
+                return False
+
+            return row[0] == "completed"
+
+    except Exception as e:
+        logger.warning(f"Error checking ingestion completion for {db_path}: {e}")
+        return False
+
+
+async def detect_stalled_ingestions(
+    cache_dir: Path, stale_threshold_seconds: int = 1800
+) -> list[dict]:
+    """Detect stalled ingestions that need recovery.
+
+    Args:
+        cache_dir: Cache directory containing crate databases
+        stale_threshold_seconds: Seconds after which an ingestion is considered stalled
+
+    Returns:
+        List of stalled ingestions requiring recovery
+    """
+    stalled = []
+
+    incomplete = await find_incomplete_ingestions(cache_dir, stale_threshold_seconds)
+
+    for ingestion in incomplete:
+        if ingestion["is_stalled"]:
+            stalled.append(
+                {
+                    "crate_name": ingestion["crate_name"],
+                    "version": ingestion["version"],
+                    "db_path": ingestion["db_path"],
+                    "status": ingestion["status"],
+                    "stalled_since": time.time() - ingestion["updated_at"],
+                    "items_processed": ingestion["items_processed"],
+                    "total_items": ingestion["total_items"],
+                }
+            )
+
+    if stalled:
+        logger.warning(f"Found {len(stalled)} stalled ingestions requiring recovery")
+
+    return stalled
+
+
+async def reset_ingestion_status(db_path: Path, crate_id: int) -> None:
+    """Reset ingestion status to trigger re-ingestion.
+
+    Args:
+        db_path: Path to database
+        crate_id: ID of the crate to reset
+    """
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        await execute_with_retry(
+            db, "DELETE FROM ingestion_status WHERE crate_id = ?", (crate_id,)
+        )
+        await db.commit()
+        logger.info(f"Reset ingestion status for crate_id={crate_id}")

@@ -44,6 +44,9 @@ from .database import (
     execute_with_retry,
     get_db_path,
     init_database,
+    is_ingestion_complete,
+    migrate_add_ingestion_tracking,
+    set_ingestion_status,
     store_crate_metadata,
     store_modules,
     store_reexports,
@@ -2744,21 +2747,16 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
             # Get database path
             db_path = await get_db_path(crate_name, version)
 
-            # Check if already ingested
-            if db_path.exists():
-                logger.info(f"Crate {crate_name}@{version} already ingested")
-                # But check if it's properly initialized
+            # Check if already ingested with proper completion validation
+            if await is_ingestion_complete(db_path):
+                logger.info(f"Crate {crate_name}@{version} already fully ingested")
+                # Run migrations if needed
                 try:
                     async with aiosqlite.connect(db_path) as db:
                         cursor = await db.execute(
                             "SELECT name FROM sqlite_master WHERE type='table' AND name='crate_metadata'"
                         )
-                        if not await cursor.fetchone():
-                            logger.warning(
-                                "Database exists but not initialized, reinitializing..."
-                            )
-                            await init_database(db_path)
-                        else:
+                        if await cursor.fetchone():
                             # Run migrations if needed
                             from .database import (
                                 migrate_add_generics_metadata,
@@ -2769,10 +2767,20 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                             await migrate_database_duplicates(db_path)
                             await migrate_reexports_for_crossrefs(db_path)
                             await migrate_add_generics_metadata(db_path)
+                            await migrate_add_ingestion_tracking(db_path)
                 except Exception as e:
-                    logger.error(f"Error checking database: {e}")
-                    await init_database(db_path)
+                    logger.error(f"Error running migrations: {e}")
                 return db_path
+            elif db_path.exists():
+                # Database exists but ingestion is incomplete - delete and retry
+                logger.warning(
+                    f"Found incomplete ingestion for {crate_name}@{version}, reingesting..."
+                )
+                try:
+                    db_path.unlink()
+                except Exception as e:
+                    logger.error(f"Failed to remove incomplete database: {e}")
+                    raise
 
             # Initialize database
             logger.info(f"Initializing database at {db_path}")
@@ -2794,8 +2802,14 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 documentation,
             )
 
+            # Set initial ingestion status
+            await set_ingestion_status(db_path, crate_id, "started")
+
             # Try to download and process rustdoc JSON
             try:
+                # Update status to downloading
+                await set_ingestion_status(db_path, crate_id, "downloading")
+
                 # Resolve version and get rustdoc URL
                 logger.info(f"Resolving rustdoc URL for {crate_name}@{version}")
 
@@ -2915,6 +2929,11 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     }
                     chunks.append(chunk)
 
+                # Update status to processing with item count
+                await set_ingestion_status(
+                    db_path, crate_id, "processing", total_items=len(chunks)
+                )
+
                 # Generate embeddings and store in streaming fashion with memory monitoring
                 logger.info(
                     f"Generating embeddings for {len(chunks)} items in streaming mode"
@@ -2931,6 +2950,15 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
                 logger.info("Successfully completed streaming ingestion")
 
+                # Update progress with items processed
+                await set_ingestion_status(
+                    db_path,
+                    crate_id,
+                    "processing",
+                    items_processed=len(chunks),
+                    total_items=len(chunks),
+                )
+
                 # Generate example embeddings for dedicated search
                 try:
                     await generate_example_embeddings(db_path, crate_name, version)
@@ -2939,6 +2967,11 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     # Continue - main embeddings are already stored
 
             except Exception as e:
+                # Set failed status with error message
+                await set_ingestion_status(
+                    db_path, crate_id, "failed", error_message=str(e)
+                )
+
                 if is_stdlib_crate(crate_name):
                     # Count items for accurate reporting
                     stdlib_counts = {
@@ -3243,5 +3276,48 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
             # Clean up embedding model to free memory after each crate
             cleanup_embedding_model()
 
+            # Set completion status
+            await set_ingestion_status(db_path, crate_id, "completed")
+
             logger.info(f"Successfully ingested {crate_name}@{version}")
             return db_path
+
+
+async def recover_incomplete_ingestion(
+    crate_name: str, version: str, db_path: Path
+) -> Path:
+    """Recover from an incomplete ingestion by re-ingesting the crate.
+
+    Args:
+        crate_name: Name of the crate
+        version: Version of the crate
+        db_path: Path to the incomplete database
+
+    Returns:
+        Path to the recovered database
+    """
+    logger.info(
+        f"Attempting to recover incomplete ingestion for {crate_name}@{version}"
+    )
+
+    # Acquire lock to prevent concurrent recovery attempts
+    lock = await get_crate_lock(crate_name, version)
+
+    async with lock:
+        # Check if already recovered by another process
+        if await is_ingestion_complete(db_path):
+            logger.info(f"Ingestion already recovered for {crate_name}@{version}")
+            return db_path
+
+        # Delete incomplete database
+        try:
+            if db_path.exists():
+                logger.info(f"Removing incomplete database at {db_path}")
+                db_path.unlink()
+        except Exception as e:
+            logger.error(f"Failed to remove incomplete database: {e}")
+            # Continue anyway - ingest_crate will handle existing file
+
+        # Re-ingest the crate
+        logger.info(f"Re-ingesting {crate_name}@{version}")
+        return await ingest_crate(crate_name, version)

@@ -326,6 +326,28 @@ async def health_check():
             "message": "Pre-ingestion available. Use 'start_pre_ingestion' MCP tool to begin.",
         }
 
+    # Ingestion status monitoring
+    try:
+        from .database import find_incomplete_ingestions
+
+        incomplete = await find_incomplete_ingestions(
+            CACHE_DIR, stale_threshold_seconds=1800
+        )
+        stalled_count = sum(1 for i in incomplete if i.get("is_stalled", False))
+        failed_count = sum(1 for i in incomplete if i.get("status") == "failed")
+
+        subsystems["ingestion_tracking"] = {
+            "status": "healthy" if len(incomplete) == 0 else "warning",
+            "incomplete_count": len(incomplete),
+            "stalled_count": stalled_count,
+            "failed_count": failed_count,
+            "incomplete_ingestions": incomplete[
+                :10
+            ],  # Limit to first 10 for API response
+        }
+    except Exception as e:
+        subsystems["ingestion_tracking"] = {"status": "error", "error": str(e)}
+
     # Embeddings warmup status
     from .ingest import get_warmup_status
 
@@ -1859,6 +1881,73 @@ async def mcp_tool_control_pre_ingestion(
         else None,
         current_stats=current_stats,
     )
+
+
+@app.post(
+    "/admin/recover_ingestions",
+    tags=["admin"],
+    summary="Recover Incomplete Ingestions",
+    response_description="Recovery status for incomplete ingestions",
+)
+@limiter.limit("1/minute")  # Rate limit recovery operations
+async def recover_ingestions(request: Request) -> dict:
+    """
+    Trigger recovery for all stalled/incomplete ingestions.
+
+    This endpoint finds all incomplete ingestions and attempts to recover them
+    by deleting the incomplete database and re-ingesting the crate.
+    """
+    from .database import find_incomplete_ingestions
+    from .ingest import recover_incomplete_ingestion
+
+    # Find all incomplete ingestions
+    incomplete = await find_incomplete_ingestions(
+        CACHE_DIR, stale_threshold_seconds=1800
+    )
+
+    recovery_results = {
+        "total_incomplete": len(incomplete),
+        "recovery_attempted": 0,
+        "recovery_succeeded": 0,
+        "recovery_failed": 0,
+        "details": [],
+    }
+
+    # Attempt recovery for each incomplete ingestion
+    for ingestion in incomplete:
+        if ingestion.get("is_stalled") or ingestion.get("status") == "failed":
+            crate_name = ingestion["crate_name"]
+            version = ingestion["version"]
+            db_path = Path(ingestion["db_path"])
+
+            recovery_results["recovery_attempted"] += 1
+
+            try:
+                # Attempt recovery
+                recovered_path = await recover_incomplete_ingestion(
+                    crate_name, version, db_path
+                )
+
+                recovery_results["recovery_succeeded"] += 1
+                recovery_results["details"].append(
+                    {
+                        "crate": f"{crate_name}@{version}",
+                        "status": "recovered",
+                        "db_path": str(recovered_path),
+                    }
+                )
+
+            except Exception as e:
+                recovery_results["recovery_failed"] += 1
+                recovery_results["details"].append(
+                    {
+                        "crate": f"{crate_name}@{version}",
+                        "status": "failed",
+                        "error": str(e),
+                    }
+                )
+
+    return recovery_results
 
 
 @app.post(
