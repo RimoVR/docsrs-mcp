@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -65,6 +66,11 @@ from .popular_crates import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Health check cache for <10ms response time
+_health_cache = None
+_health_cache_time = 0.0
+HEALTH_CACHE_TTL = 5.0  # 5 second cache TTL
 
 app = FastAPI(
     title="docsrs-mcp",
@@ -236,6 +242,13 @@ async def health_check():
     - Pre-ingestion progress if enabled
     - Subsystem health checks
     """
+    global _health_cache, _health_cache_time
+
+    # Check cache validity
+    current_time = time.time()
+    if _health_cache and (current_time - _health_cache_time) < HEALTH_CACHE_TTL:
+        return _health_cache
+
     base_health = {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
@@ -308,7 +321,10 @@ async def health_check():
                 "details": progress_data,
             }
     else:
-        subsystems["pre_ingestion"] = {"status": "not_initialized"}
+        subsystems["pre_ingestion"] = {
+            "status": "available",
+            "message": "Pre-ingestion available. Use 'start_pre_ingestion' MCP tool to begin.",
+        }
 
     # Embeddings warmup status
     from .ingest import get_warmup_status
@@ -341,6 +357,10 @@ async def health_check():
     elif any(s.get("status") == "warning" for s in subsystems.values()):
         base_health["status"] = "degraded"
 
+    # Update cache
+    _health_cache = base_health
+    _health_cache_time = current_time
+
     return base_health
 
 
@@ -362,7 +382,10 @@ async def pre_ingestion_health():
     """
 
     if not _pre_ingestion_worker:
-        return {"status": "not_initialized", "message": "Pre-ingestion is not enabled"}
+        return {
+            "status": "available",
+            "message": "Pre-ingestion available. Use 'start_pre_ingestion' MCP tool to begin.",
+        }
 
     # Check worker state using proper enum comparison
     worker_state = _pre_ingestion_worker._state
@@ -1676,8 +1699,8 @@ async def start_pre_ingestion_tool(
             logger.info("Force restarting pre-ingestion system")
             # The actual stop would be handled internally
 
-        # Start pre-ingestion in background
-        asyncio.create_task(start_pre_ingestion())
+        # Start pre-ingestion in background with force_start for MCP control
+        asyncio.create_task(start_pre_ingestion(force_start=True))
 
         response_status = "restarted" if (is_running and params.force) else "started"
 
@@ -1902,12 +1925,18 @@ async def list_versions(request: Request, crate_name: str):
     List all locally cached versions of a crate.
 
     Returns a list of all versions that have been previously ingested and cached.
-    Note that this only shows cached versions, not all versions available on crates.io.
+    If the crate hasn't been ingested yet, it will be downloaded and processed automatically
+    using the latest version.
 
     **Parameters**:
     - `crate_name`: Name of the Rust crate to query
+
+    **Note**: First-time ingestion may take 1-10 seconds depending on crate size.
     """
     try:
+        # Ensure crate is ingested (will wait for completion)
+        await ingest_crate(crate_name, "latest")
+
         # For now, just return the current version from the database if it exists
         # In a full implementation, this would query crates.io API
         versions = []

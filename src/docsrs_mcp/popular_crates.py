@@ -1241,13 +1241,17 @@ async def queue_for_ingestion(crate_specs: list[str], concurrency: int = 3):
         await _pre_ingestion_worker.queue.put((priority, crate_spec))
 
 
-async def start_pre_ingestion() -> tuple[
-    PopularCratesManager | None, PreIngestionWorker | None
-]:
-    """Start pre-ingestion and scheduler, return manager and worker for monitoring."""
+async def start_pre_ingestion(
+    force_start: bool = False,
+) -> tuple[PopularCratesManager | None, PreIngestionWorker | None]:
+    """Start pre-ingestion and scheduler, return manager and worker for monitoring.
+
+    Args:
+        force_start: If True, bypass PRE_INGEST_ENABLED check (for MCP runtime control)
+    """
     global _popular_crates_manager, _pre_ingestion_worker, _ingestion_scheduler
 
-    if not config.PRE_INGEST_ENABLED:
+    if not force_start and not config.PRE_INGEST_ENABLED:
         logger.debug("Pre-ingestion is disabled")
         return None, None
 

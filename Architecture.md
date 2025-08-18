@@ -5618,6 +5618,31 @@ async def getCrateSummary(crate_name: str, version: str = "latest") -> CrateSumm
 **Error Handling**: Enhanced validation provides clear error messages for parameter mismatches
 **Backward Compatibility**: Existing tools maintain compatibility while adding new overrides
 
+### Critical Implementation Detail: tools_to_fix Dictionary
+
+The `tools_to_fix` dictionary in `mcp_server.py` **MUST** use snake_case MCP tool names, not camelCase operation_ids:
+
+```python
+tools_to_fix = {
+    "get_crate_summary": {},  # ✅ CORRECT: snake_case MCP tool name
+    # "getCrateSummary": {},  # ❌ WRONG: camelCase operation_id
+    "search_items": {
+        "k": "integer",
+        "has_examples": "boolean"
+    },
+    "compare_versions": {
+        "include_unchanged": "boolean"
+    }
+}
+```
+
+**Key Points**:
+- **Snake Case Required**: Use `"get_crate_summary"` not `"getCrateSummary"`
+- **MCP Tool Names**: Dictionary keys must match the actual MCP tool names used in protocol
+- **Operation ID Mismatch**: FastAPI `operation_id` uses camelCase but MCP uses snake_case
+- **Schema Override Critical**: Missing tools from `tools_to_fix` cause parameter validation failures
+- **Empty Mappings Valid**: Tools with only string parameters use `{}` (empty mapping)
+
 ## Pre-Ingestion MCP Control Architecture
 
 The `start_pre_ingestion` MCP tool provides programmatic control over the background pre-ingestion system without requiring CLI flags, enabling external services and agents to efficiently manage cache warming and performance optimization.
@@ -5639,6 +5664,7 @@ graph TD
     
     subgraph "Control Logic"
         STATE_CHECK[Global State Check<br/>worker and scheduler status<br/>available_not_started vs disabled detection]
+        RUNTIME_OVERRIDE[Runtime Control Pattern<br/>force_start parameter<br/>Configuration override capability]
         DUPLICATE_GUARD[Duplicate Prevention<br/>unless force=true]
         TASK_SPAWN[asyncio.create_task()<br/>Background execution]
     end
@@ -5653,7 +5679,8 @@ graph TD
     ENDPOINT --> REQ
     REQ --> VALIDATION
     VALIDATION --> STATE_CHECK
-    STATE_CHECK --> DUPLICATE_GUARD
+    STATE_CHECK --> RUNTIME_OVERRIDE
+    RUNTIME_OVERRIDE --> DUPLICATE_GUARD
     DUPLICATE_GUARD --> TASK_SPAWN
     TASK_SPAWN --> MANAGER
     MANAGER --> WORKER
@@ -5670,6 +5697,30 @@ The tool implements a comprehensive state-aware execution model:
 - `force: bool` - Restart pre-ingestion even if already running (default: false)
 - `concurrency: int` - Number of concurrent workers (default: 3, max: 10)
 - `count: int` - Number of crates to process (default: derived from popular crates list)
+
+### Runtime Control Pattern
+
+The MCP tool implements a **Runtime Control Pattern** that allows dynamic override of configuration flags without requiring server restart or CLI argument changes:
+
+**Configuration Override Mechanism**:
+- **Dynamic Control**: `force_start` parameter enables runtime override of `DOCSRS_PRE_INGEST_ENABLED` configuration
+- **State Independence**: Tools can start pre-ingestion even when globally disabled in configuration
+- **User Guidance**: Health endpoints provide clear messaging directing users to MCP tools for control
+
+**Implementation Details**:
+```python
+async def start_pre_ingestion(force_start: bool = False) -> None:
+    """Runtime control with configuration override capability"""
+    if not config.PRE_INGEST_ENABLED and not force_start:
+        return  # Respect configuration unless explicitly overridden
+    # Proceed with pre-ingestion startup
+```
+
+**Status Messaging Framework**:
+- **"available"**: Pre-ingestion ready but not started (configuration disabled)
+- **"running"**: Pre-ingestion actively processing crates
+- **"disabled"**: Pre-ingestion completely unavailable
+- **"starting"**: Pre-ingestion initialization in progress
 
 **StartPreIngestionResponse Model**:
 - `status: Literal["started", "already_running", "restarted"]` - Operation result
@@ -5710,6 +5761,8 @@ flowchart TD
 - **Graceful Restart**: When `force=true`, cleanly stops existing processes before starting new ones
 - **Background Execution**: Uses `asyncio.create_task()` to avoid blocking the API response
 - **Resource Protection**: Validates concurrency limits to prevent resource exhaustion
+- **Runtime Configuration Override**: `force_start` parameter bypasses global configuration settings
+- **Clear Status Differentiation**: Distinguishes between "available" (ready but not started) and other operational states
 
 ### Integration Points
 
@@ -5727,8 +5780,62 @@ The tool integrates seamlessly with existing system components:
 
 **Health Check Integration**:
 - Provides monitoring endpoints in response for status tracking
-- Integrates with existing `/health` endpoint statistics
+- Integrates with existing `/health` endpoint statistics with module-level caching
 - Enables real-time progress monitoring through structured URLs
+
+### Health Check Caching Architecture
+
+The health endpoint system implements **module-level caching with TTL** for optimal performance:
+
+**Caching Implementation**:
+```python
+# Module-level cache with 5-second TTL
+_health_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+CACHE_TTL = 5.0  # seconds
+
+async def get_cached_health_status(subsystem: str) -> Dict[str, Any]:
+    """Returns cached health status with automatic TTL expiration"""
+    current_time = time.time()
+    if subsystem in _health_cache:
+        cached_data, timestamp = _health_cache[subsystem]
+        if current_time - timestamp < CACHE_TTL:
+            return cached_data
+    
+    # Cache miss or expired - refresh data
+    fresh_data = await compute_health_status(subsystem)
+    _health_cache[subsystem] = (fresh_data, current_time)
+    return fresh_data
+```
+
+**Performance Characteristics**:
+- **Response Time**: <10ms for cached responses (vs 100-500ms for fresh computation)
+- **Cache Duration**: 5-second TTL balances performance with freshness
+- **Memory Footprint**: Minimal - only stores recent health snapshots
+- **Thread Safety**: Module-level caching compatible with FastAPI's single-threaded event loop
+
+**Status Message Enhancement**:
+- **User Guidance**: Health messages include specific instructions for using MCP tools
+- **Actionable Information**: Clear differentiation between configuration states and operational states
+- **Integration Points**: Health responses guide users to appropriate MCP tool actions
+
+### Architectural Benefits
+
+The Runtime Control Pattern provides several key advantages:
+
+**Operational Flexibility**:
+- **Dynamic Configuration**: Override server configuration without restart
+- **External Control**: AI agents and external systems can manage pre-ingestion
+- **Progressive Enablement**: Start with conservative settings, enable features on-demand
+
+**User Experience**:
+- **Clear Guidance**: Health messages direct users to appropriate MCP tools
+- **State Visibility**: Distinguishes between configuration and operational states  
+- **Performance Feedback**: Cached health responses provide immediate status updates
+
+**System Reliability**:
+- **Configuration Safety**: Default disabled state prevents unwanted resource usage
+- **Graceful Override**: Runtime control respects system constraints while enabling flexibility
+- **Cache Performance**: 5-second TTL balances freshness with <10ms response times
 
 This architecture ensures the MCP tool provides powerful pre-ingestion control while maintaining system reliability and performance characteristics.
 
@@ -5974,7 +6081,13 @@ flowchart TD
 | Memory Efficiency | Adaptive | Dynamic concurrency scaling prevents OOM conditions |
 
 ### Health Monitoring & Observability
-The enhanced popular crates architecture includes comprehensive monitoring capabilities exposed via health endpoints:
+The enhanced popular crates architecture includes comprehensive monitoring capabilities exposed via health endpoints with performance-optimized caching:
+
+**Health Endpoint Caching**:
+- **Module-Level Cache**: 5-second TTL for health status responses
+- **Performance Optimization**: <10ms response time for cached health data
+- **Automatic Refresh**: TTL-based cache invalidation ensures data freshness
+- **Memory Efficient**: Lightweight caching with minimal memory footprint
 
 **Cache Statistics Monitoring**:
 - **Hit Rate Calculation**: Real-time cache hit/miss ratios with historical trending

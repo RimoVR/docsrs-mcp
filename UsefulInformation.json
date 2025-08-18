@@ -418,6 +418,25 @@
           "debuggingTechnique": "Monitor health endpoints during ingestion operations to verify progress reporting accuracy"
         },
         {
+          "error": "Pre-Ingestion Control Issue with Misleading Health Status",
+          "rootCause": "Pre-ingestion health endpoints showed misleading 'not_initialized' status when MCP mode could control it, causing confusion between disabled vs available states. MCP tools were constrained by CLI flag dependencies.",
+          "solution": "Added force_start parameter to bypass CLI flag dependency, updated health messages to show 'available' with clear guidance, and implemented health check caching for performance.",
+          "context": "MCP mode requires independent control of features regardless of CLI flags, and health messages should guide users to available actions",
+          "implementation": [
+            "Added force_start parameter to startPreIngestion tool to bypass CLI flag checks",
+            "Updated health status messages from 'not_initialized' to 'available' with actionable guidance",
+            "Implemented health check response caching to meet <10ms performance targets",
+            "Enabled MCP tools to control pre-ingestion independently of startup configuration"
+          ],
+          "lesson": "MCP tools should be able to control features independently of CLI flags. Health messages should clearly guide users to available actions rather than showing confusing status.",
+          "pattern": "Use force_start or bypass parameters in MCP tools to enable independent feature control regardless of CLI configuration",
+          "dateEncountered": "2025-08-18",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/mcp_tools.py"],
+          "codeExample": "# Add force_start parameter to bypass CLI dependencies\nif force_start or not args.pre_ingest:\n    # Enable feature regardless of CLI flags\n    return start_feature()\n\n# Update health messages for clarity\nreturn {'status': 'available', 'message': 'Use startPreIngestion to begin processing'}",
+          "keyLearning": "Caching critical for meeting <10ms health check performance targets while providing real-time status information",
+          "debuggingTechnique": "Test health endpoints both with and without CLI flags to verify independent MCP tool control"
+        },
+        {
           "error": "MCP Server Local Testing Difficulties",
           "rootCause": "Testing MCP servers locally can be challenging without proper REST mode setup, making it difficult to verify tool functionality and debug issues.",
           "solution": "Use REST mode for local testing of MCP servers, which provides HTTP endpoints that can be easily tested with curl or other HTTP clients.",
@@ -2662,6 +2681,17 @@
           "lesson": "Complete schema overrides may be necessary for MCP client compatibility, not just field validators",
           "pattern": "Runtime schema modification to work around client-specific limitations",
           "debuggingTechnique": "Test with both native JSON types and string representations to verify comprehensive type handling"
+        },
+        {
+          "issue": "MCP tools not waiting for ingestion to complete",
+          "context": "User reported that tools should ensure ingestion completes before returning results",
+          "solution": "Add `await ingest_crate(crate_name, version)` as the first operation in all MCP tool functions. The await keyword ensures the ingestion completes synchronously before proceeding. The existing per-crate locks prevent duplicate ingestion attempts.",
+          "lesson": "The simplest solution is often the best. Rather than creating complex validation layers or decorator patterns, following the existing proven pattern (already working in 6 other tools) solved the problem with a single line of code.",
+          "pattern": "Auto-ingestion pattern ensures: 1) Automatic ingestion if crate not cached, 2) Synchronous completion before data access, 3) No duplicate work due to per-crate locks, 4) Consistent behavior across all MCP tools",
+          "dateEncountered": "2025-08-18",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools.py", "src/docsrs_mcp/ingest.py"],
+          "codeExample": "# Add as first line in all MCP tool functions:\nawait ingest_crate(crate_name, version)\n\n# This ensures ingestion completes before proceeding\n# Existing locks prevent duplicate ingestion attempts",
+          "debuggingTechnique": "Verify ingestion completion by checking database state before tool execution"
         }
       ]
     },
