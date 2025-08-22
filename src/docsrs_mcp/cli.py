@@ -23,6 +23,12 @@ def main() -> None:
         help="Server mode: 'rest' for HTTP API, 'mcp' for MCP protocol via STDIO (default: mcp)",
     )
     parser.add_argument(
+        "--mcp-implementation",
+        choices=["fastmcp", "sdk", "both"],
+        default="fastmcp",
+        help="MCP implementation to use: 'fastmcp' (current), 'sdk' (new), 'both' (parallel validation) (default: fastmcp)",
+    )
+    parser.add_argument(
         "--pre-ingest",
         action="store_true",
         default=False,
@@ -63,7 +69,6 @@ def main() -> None:
 
     # Import modules after setting environment variables to ensure they see the correct config
     from . import config  # noqa: PLC0415
-    from .mcp_server import run_mcp_server  # noqa: PLC0415
 
     # Log startup configuration
     logger.info("Starting docsrs-mcp server with configuration:")
@@ -76,11 +81,31 @@ def main() -> None:
         logger.info(f"  Concurrency: {config.CONCURRENCY} workers")
 
     if args.mode == "mcp":
+        logger.info(f"  MCP Implementation: {args.mcp_implementation}")
+
+    if args.mode == "mcp":
         # Warn if port was specified in MCP mode
         if args.port is not None:
             logger.warning("--port flag is ignored in MCP mode")
-        # Run MCP server with STDIO transport
-        run_mcp_server()
+
+        # Run the appropriate MCP implementation
+        if args.mcp_implementation == "sdk":
+            # Run new SDK implementation
+            import asyncio  # noqa: PLC0415
+
+            from .mcp_sdk_server import run_sdk_server  # noqa: PLC0415
+
+            asyncio.run(run_sdk_server())
+        elif args.mcp_implementation == "both":
+            # Run parallel validation mode
+            from .parallel_validation import run_parallel_validation  # noqa: PLC0415
+
+            run_parallel_validation()
+        else:
+            # Run current FastMCP implementation (default)
+            from .mcp_server import run_mcp_server  # noqa: PLC0415
+
+            run_mcp_server()
     else:
         # Run REST API server
         host = os.getenv("HOST", "0.0.0.0")

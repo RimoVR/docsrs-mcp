@@ -1,0 +1,444 @@
+"""Service layer for crate-related operations."""
+
+import logging
+
+import aiosqlite
+
+from ..database import (
+    get_module_tree as get_module_tree_from_db,
+)
+from ..database import (
+    get_see_also_suggestions,
+    search_embeddings,
+    search_example_embeddings,
+)
+from ..fuzzy_resolver import get_fuzzy_suggestions_with_fallback, resolve_path_alias
+from ..ingest import get_embedding_model, ingest_crate
+from ..models import (
+    CodeExample,
+    CrateModule,
+    SearchResult,
+)
+from ..version_diff import compute_version_diff
+
+logger = logging.getLogger(__name__)
+
+
+class CrateService:
+    """Service for crate-related operations."""
+
+    async def get_crate_summary(
+        self, crate_name: str, version: str | None = None
+    ) -> dict:
+        """Get summary information about a Rust crate.
+
+        Args:
+            crate_name: Name of the crate
+            version: Optional version (defaults to latest)
+
+        Returns:
+            Dictionary containing crate metadata and modules
+        """
+        # Ingest crate if not already done
+        db_path = await ingest_crate(crate_name, version)
+
+        # Fetch crate metadata from database
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute(
+                "SELECT name, version, description, repository, documentation FROM crate_metadata LIMIT 1"
+            )
+            row = await cursor.fetchone()
+
+            if not row:
+                raise ValueError("Crate not found")
+
+            name, version, description, repository, documentation = row
+
+            # Fetch modules with hierarchy information, filtering out noise
+            cursor = await db.execute(
+                """
+                SELECT name, path, parent_id, depth, item_count 
+                FROM modules 
+                WHERE depth <= 3
+                  AND (item_count >= 2 OR depth = 0)
+                  AND path NOT LIKE '%target::%'
+                  AND path NOT LIKE '%.cargo::%'
+                  AND path NOT LIKE '%build::%'
+                  AND path NOT LIKE '%out::%'
+                  AND path NOT LIKE '%tests::%'
+                  AND path NOT LIKE '%benches::%'
+                  AND path NOT LIKE '%examples::%'
+                  AND path NOT LIKE '%deps::%'
+                  AND path NOT LIKE '%__pycache__%'
+                ORDER BY depth ASC, path ASC
+                """
+            )
+
+            all_rows = await cursor.fetchall()
+
+            # Additional filtering in Python for more complex patterns
+            filtered_modules = []
+            for row in all_rows:
+                module_name, path, parent_id, depth, item_count = row
+
+                # Skip internal/private modules (often start with underscore)
+                if module_name.startswith("_") and depth > 0:
+                    continue
+
+                # Skip generated modules
+                if any(
+                    pattern in path.lower()
+                    for pattern in ["generated", "autogen", ".pb.", "proto"]
+                ):
+                    continue
+
+                # Include the module
+                filtered_modules.append(
+                    CrateModule(
+                        name=module_name,
+                        path=path,
+                        parent_id=parent_id,
+                        depth=depth,
+                        item_count=item_count,
+                    )
+                )
+
+            # If we filtered out too many modules, include some key ones back
+            if len(filtered_modules) < 5 and len(all_rows) > 10:
+                cursor = await db.execute(
+                    """
+                    SELECT name, path, parent_id, depth, item_count 
+                    FROM modules 
+                    WHERE (depth <= 1 OR item_count >= 5)
+                      AND path NOT LIKE '%target::%'
+                      AND path NOT LIKE '%.cargo::%'
+                    ORDER BY depth ASC, item_count DESC
+                    LIMIT 20
+                    """
+                )
+                filtered_modules = [
+                    CrateModule(
+                        name=row[0],
+                        path=row[1],
+                        parent_id=row[2],
+                        depth=row[3],
+                        item_count=row[4],
+                    )
+                    for row in await cursor.fetchall()
+                ]
+
+            return {
+                "name": name,
+                "version": version,
+                "description": description or "",
+                "modules": filtered_modules,
+                "repository": repository,
+                "documentation": documentation,
+            }
+
+    async def search_items(
+        self,
+        crate_name: str,
+        query: str,
+        version: str | None = None,
+        k: int = 5,
+        item_type: str | None = None,
+        crate_filter: str | None = None,
+        module_path: str | None = None,
+        has_examples: bool | None = None,
+        min_doc_length: int | None = None,
+        visibility: str | None = None,
+        deprecated: bool | None = None,
+    ) -> list[SearchResult]:
+        """Search for items in a crate's documentation.
+
+        Args:
+            crate_name: Name of the crate
+            query: Search query
+            version: Optional version
+            k: Number of results
+            item_type: Filter by item type
+            crate_filter: Filter by crate
+            module_path: Filter by module path
+            has_examples: Filter by having examples
+            min_doc_length: Minimum documentation length
+            visibility: Filter by visibility
+            deprecated: Filter by deprecation status
+
+        Returns:
+            List of search results
+        """
+        # Ingest crate if not already done
+        db_path = await ingest_crate(crate_name, version)
+
+        # Generate embedding for query
+        model = get_embedding_model()
+        query_embedding = list(model.embed([query]))[0]
+
+        # Search embeddings with filters
+        results = await search_embeddings(
+            db_path,
+            query_embedding,
+            k=k,
+            type_filter=item_type,
+            crate_filter=crate_filter,
+            module_path=module_path,
+            has_examples=has_examples,
+            min_doc_length=min_doc_length,
+            visibility=visibility,
+            deprecated=deprecated,
+        )
+
+        # Get see-also suggestions if we have results
+        suggestions = []
+        if results:
+            # Get the item paths from the main results to exclude from suggestions
+            original_paths = {item_path for _, item_path, _, _ in results}
+
+            # Get suggestions using the same query embedding
+            suggestions = await get_see_also_suggestions(
+                db_path,
+                query_embedding,
+                original_paths,
+                k=10,  # Over-fetch to allow filtering
+                similarity_threshold=0.7,
+                max_suggestions=5,
+            )
+
+        # Convert to response format
+        search_results = []
+        for i, (score, item_path, header, content) in enumerate(results):
+            from ..app import extract_smart_snippet
+
+            result = SearchResult(
+                score=score,
+                item_path=item_path,
+                header=header,
+                snippet=extract_smart_snippet(content),
+            )
+            # Add suggestions only to the first result to avoid redundancy
+            if i == 0 and suggestions:
+                result.suggestions = suggestions
+            search_results.append(result)
+
+        return search_results
+
+    async def get_item_doc(
+        self, crate_name: str, item_path: str, version: str | None = None
+    ) -> dict:
+        """Get complete documentation for a specific item.
+
+        Args:
+            crate_name: Name of the crate
+            item_path: Path to the item
+            version: Optional version
+
+        Returns:
+            Dictionary with item documentation
+        """
+        # Ingest crate if not already done
+        db_path = await ingest_crate(crate_name, version)
+
+        # Try to resolve the path using alias resolution
+        resolved_item_path = await resolve_path_alias(db_path, item_path)
+
+        async with aiosqlite.connect(db_path) as db:
+            # Fetch item documentation with flexible path matching
+            cursor = await db.execute(
+                """
+                SELECT path, content 
+                FROM items 
+                WHERE path = ? OR path = ? OR path LIKE ?
+                """,
+                (
+                    resolved_item_path,
+                    item_path,
+                    f"%::{item_path.replace('::', '%::').split('::')[-1]}",
+                ),
+            )
+            row = await cursor.fetchone()
+
+            if row:
+                return {
+                    "item_path": row[0],
+                    "content": row[1],
+                }
+
+            # If not found, try fuzzy suggestions
+            suggestions = await get_fuzzy_suggestions_with_fallback(db_path, item_path)
+
+            if suggestions:
+                suggestion_text = "\n".join(
+                    [f"- `{s.path}` ({s.type})" for s in suggestions[:5]]
+                )
+                error_message = (
+                    f"Item '{item_path}' not found. Did you mean one of these?\n\n"
+                    f"{suggestion_text}\n\n"
+                    f"Use the exact path from the suggestions above."
+                )
+            else:
+                error_message = (
+                    f"Item '{item_path}' not found in crate '{crate_name}'. "
+                    f"Try searching with search_items first."
+                )
+
+            raise ValueError(error_message)
+
+    async def get_module_tree(
+        self, crate_name: str, version: str | None = None
+    ) -> dict:
+        """Get the module hierarchy tree for a crate.
+
+        Args:
+            crate_name: Name of the crate
+            version: Optional version
+
+        Returns:
+            Dictionary with module tree
+        """
+        # Ingest crate if not already done
+        db_path = await ingest_crate(crate_name, version)
+
+        # Get module tree from database
+        tree = await get_module_tree_from_db(db_path)
+
+        return {
+            "crate_name": crate_name,
+            "version": version or "latest",
+            "tree": tree,
+        }
+
+    async def search_examples(
+        self,
+        crate_name: str,
+        query: str,
+        version: str | None = None,
+        k: int = 5,
+        language: str | None = None,
+    ) -> dict:
+        """Search for code examples in crate documentation.
+
+        Args:
+            crate_name: Name of the crate
+            query: Search query
+            version: Optional version
+            k: Number of results
+            language: Filter by programming language
+
+        Returns:
+            Dictionary with examples
+        """
+        # Ingest crate if not already done
+        db_path = await ingest_crate(crate_name, version)
+
+        # Generate embedding for query
+        model = get_embedding_model()
+        query_embedding = list(model.embed([query]))[0]
+
+        # Search example embeddings
+        results = await search_example_embeddings(
+            db_path, query_embedding, k=k, language_filter=language
+        )
+
+        # Format results
+        examples = []
+        for score, code, source_item, language, context in results:
+            # Join code list into a single string if it's a list
+            if isinstance(code, list):
+                code = "".join(code)
+
+            examples.append(
+                CodeExample(
+                    code=code,
+                    score=score,
+                    source_item=source_item,
+                    language=language,
+                    context=context,
+                )
+            )
+
+        return {
+            "crate_name": crate_name,
+            "version": version or "latest",
+            "query": query,
+            "examples": examples,
+            "total_count": len(examples),
+        }
+
+    async def list_versions(self, crate_name: str) -> dict:
+        """List all available versions of a crate.
+
+        Args:
+            crate_name: Name of the crate
+
+        Returns:
+            Dictionary with version information
+        """
+        # For now, ingest the latest version to ensure we have the crate
+        db_path = await ingest_crate(crate_name, "latest")
+
+        # Get version from the ingested crate
+        async with aiosqlite.connect(db_path) as db:
+            cursor = await db.execute("SELECT version FROM crate_metadata LIMIT 1")
+            row = await cursor.fetchone()
+
+            if row:
+                current_version = row[0]
+            else:
+                current_version = "unknown"
+
+        # In a real implementation, we would query crates.io API for all versions
+        # For now, return the current version
+        return {
+            "crate_name": crate_name,
+            "versions": [
+                {
+                    "version": current_version,
+                    "yanked": False,
+                    "is_latest": True,
+                }
+            ],
+            "latest": current_version,
+        }
+
+    async def compare_versions(
+        self,
+        crate_name: str,
+        version_a: str,
+        version_b: str,
+        categories: list[str] | None = None,
+        include_unchanged: bool = False,
+        max_results: int = 1000,
+    ) -> dict:
+        """Compare two versions of a crate.
+
+        Args:
+            crate_name: Name of the crate
+            version_a: First version
+            version_b: Second version
+            categories: Categories to include
+            include_unchanged: Include unchanged items
+            max_results: Maximum results
+
+        Returns:
+            Dictionary with version diff
+        """
+        # Ingest both versions
+        db_path_a = await ingest_crate(crate_name, version_a)
+        db_path_b = await ingest_crate(crate_name, version_b)
+
+        # Compute diff
+        diff = await compute_version_diff(
+            db_path_a,
+            db_path_b,
+            categories=categories,
+            include_unchanged=include_unchanged,
+            max_results=max_results,
+        )
+
+        return {
+            "crate_name": crate_name,
+            "version_a": version_a,
+            "version_b": version_b,
+            "summary": diff,
+        }

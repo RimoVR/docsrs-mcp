@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 """Test script to verify MCP endpoints handle string parameters correctly."""
 
-import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -10,15 +8,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from docsrs_mcp.models import (
+    CompareVersionsRequest,
     GetCrateSummaryRequest,
-    SearchItemsRequest,
     GetItemDocRequest,
-    SearchExamplesRequest,
     GetModuleTreeRequest,
-    StartPreIngestionRequest,
     IngestCargoFileRequest,
     PreIngestionControlRequest,
-    CompareVersionsRequest,
+    SearchExamplesRequest,
+    SearchItemsRequest,
+    StartPreIngestionRequest,
 )
 
 
@@ -238,7 +236,7 @@ def test_boundary_values():
 
         try:
             req = StartPreIngestionRequest(concurrency="11")
-            print(f"   ❌ concurrency='11' should have failed")
+            print("   ❌ concurrency='11' should have failed")
         except ValueError as e:
             print(f"   ✅ concurrency='11' correctly rejected: {str(e)[:50]}...")
 
@@ -256,7 +254,7 @@ def test_boundary_values():
 
         try:
             req = StartPreIngestionRequest(count="501")
-            print(f"   ❌ count='501' should have failed")
+            print("   ❌ count='501' should have failed")
         except ValueError as e:
             print(f"   ✅ count='501' correctly rejected: {str(e)[:50]}...")
 

@@ -3275,11 +3275,13 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
                                 logger.info(
                                     f"Successfully stored {len(chunks)} fallback items for {crate_name}@{version}"
                                 )
-                                
+
                                 # Update status to completed with SOURCE_EXTRACTION tier
                                 await set_ingestion_status(
-                                    db_path, crate_id, "completed",
-                                    ingestion_tier=IngestionTier.SOURCE_EXTRACTION.value
+                                    db_path,
+                                    crate_id,
+                                    "completed",
+                                    ingestion_tier=IngestionTier.SOURCE_EXTRACTION.value,
                                 )
 
                                 # Skip the basic description fallback since we have real data
@@ -3391,12 +3393,14 @@ STDLIB DOCUMENTATION NOTICE: Limited Fallback Active
                                     logger.warning(
                                         f"Failed to generate example embeddings: {ex_err}"
                                     )
-                                
+
                                 # Update status to completed with SOURCE_EXTRACTION tier
                                 # (latest version fallback is still a form of source extraction)
                                 await set_ingestion_status(
-                                    db_path, crate_id, "completed",
-                                    ingestion_tier=IngestionTier.SOURCE_EXTRACTION.value
+                                    db_path,
+                                    crate_id,
+                                    "completed",
+                                    ingestion_tier=IngestionTier.SOURCE_EXTRACTION.value,
                                 )
 
                                 return db_path
