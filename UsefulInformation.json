@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-18",
+  "lastUpdated": "2025-08-22",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -596,6 +596,78 @@
             "This bug only affected MCP mode because the variable shadowing occurred in the get_crate_summary function"
           ],
           "warningFlags": "Variable shadowing, loop variable naming, tuple unpacking scope issues"
+        },
+        {
+          "error": "MCP Parameter Validation Issues - String vs Numeric Type Coercion",
+          "rootCause": "MCP clients send all parameters as strings, even for numeric fields. Pydantic schema validation fails when expecting proper numeric types despite anyOf patterns.",
+          "solution": "Use string-only schemas with Pydantic field validators using mode='before' for type coercion. Replace anyOf patterns with explicit string types and robust validators.",
+          "context": "MCP tools rejecting valid numeric parameters sent as strings by Claude Code and other MCP clients",
+          "lesson": "MCP protocol inherently sends string parameters - design schemas and validators accordingly rather than fighting the protocol",
+          "pattern": "String-only schemas + mode='before' validators with coercion functions for all numeric parameters",
+          "dateEncountered": "2025-08-19",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools.py", "src/docsrs_mcp/validators.py"],
+          "codeExample": "# Preferred approach - string schema with validator\nclass SearchItemsRequest(BaseModel):\n    k: str = Field(description=\"Number of results to return\")\n    \n    @field_validator('k', mode='before')\n    @classmethod\n    def coerce_k(cls, v):\n        return coerce_to_int_with_bounds(v, min_val=1, max_val=100)\n\n# Avoid - anyOf patterns that MCP clients struggle with\n# k: Union[int, str] = Field(...)",
+          "debuggingTechnique": "Test with curl in --mode rest to isolate MCP client vs server validation issues"
+        },
+        {
+          "error": "Stdlib Documentation Unavailable on docs.rs",
+          "rootCause": "docs.rs does not host stdlib JSON documentation by design. Three-tier ingestion system needed to handle stdlib crates differently from regular crates.",
+          "solution": "Implement three-tier ingestion: docs.rs (primary) → rust-lang.org (stdlib fallback) → local rustup (complete stdlib). Add specialized stdlib detection and handling.",
+          "context": "Users querying stdlib items (std::vec::Vec, core::option::Option) receive minimal fallback instead of complete documentation",
+          "lesson": "External dependencies have architectural limitations - always design fallback strategies for critical functionality",
+          "pattern": "Multi-tier ingestion with source-specific handling based on crate type detection",
+          "dateEncountered": "2025-08-19",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/stdlib_handling.py"],
+          "codeExample": "# Three-tier ingestion pattern\nasync def ingest_crate(crate_name: str, version: str):\n    if is_stdlib_crate(crate_name):\n        # Tier 3: Try local rustup first for complete docs\n        if json_data := await try_local_rustup_json(crate_name):\n            return await process_complete_stdlib_json(json_data)\n        # Tier 2: Fallback to rust-lang.org\n        elif json_data := await try_rust_lang_org(crate_name, version):\n            return await process_stdlib_json(json_data)\n        # Tier 1: Minimal fallback items\n        else:\n            return create_stdlib_fallback_documentation(crate_name)\n    else:\n        # Regular crates use docs.rs\n        return await ingest_from_docs_rs(crate_name, version)",
+          "debuggingTechnique": "Use 'rustup component add --toolchain nightly rust-docs-json' to verify complete local stdlib documentation availability"
+        },
+        {
+          "error": "Module Tree Pollution with Dependencies",
+          "rootCause": "Module tree includes dependency crates alongside actual crate modules, making navigation confusing. No distinction between owned modules and external dependencies.",
+          "solution": "Add is_dependency flag to modules table during ingestion. Filter dependency modules from tree navigation while preserving them for cross-crate search.",
+          "context": "Users browsing module trees see overwhelming number of dependency modules mixed with actual crate structure",
+          "lesson": "User-facing views should be filtered and curated - raw data structure is not always appropriate for presentation",
+          "pattern": "Database schema enhancement with presentation-layer filtering based on user intent",
+          "dateEncountered": "2025-08-19",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/mcp_tools.py"],
+          "codeExample": "# Enhanced module ingestion with dependency detection\nCREATE TABLE modules (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    path TEXT NOT NULL,\n    crate_id INTEGER,\n    is_dependency BOOLEAN DEFAULT FALSE,  -- New field\n    FOREIGN KEY (crate_id) REFERENCES crates (id)\n);\n\n# Krate-based filtering during ingestion\ndef process_rustdoc_json(json_data: dict, target_crate: str):\n    for item_id, item in json_data.get('index', {}).items():\n        is_dep = item.get('crate_id', 0) != 0  # Non-zero = dependency\n        # Store dependency info for filtering\n        modules.append({\n            'name': item['name'],\n            'is_dependency': is_dep\n        })",
+          "debuggingTechnique": "Compare crate_id field in rustdoc JSON index - 0 indicates owned items, non-zero indicates dependencies"
+        },
+        {
+          "error": "Search System Limitations - No Regex, Cross-Crate, or Stability Filtering",
+          "rootCause": "Current search only supports basic text matching within single crates. Missing advanced filtering capabilities that users expect from documentation systems.",
+          "solution": "Implement parallel search federation with new search modes: regex patterns, cross-crate scope, stability filters (stable/unstable/deprecated), and result ranking.",
+          "context": "Users cannot perform advanced searches like 'all Vec implementations across ecosystem' or 'stable APIs only'",
+          "lesson": "Search is a core user experience - invest in comprehensive search capabilities early in development",
+          "pattern": "Federated search architecture with mode-specific processors and result aggregation",
+          "dateEncountered": "2025-08-19",
+          "relatedFiles": ["src/docsrs_mcp/search.py", "src/docsrs_mcp/mcp_tools.py"],
+          "codeExample": "# Enhanced search with multiple modes\nclass SearchMode(Enum):\n    TEXT = \"text\"           # Basic text search (current)\n    REGEX = \"regex\"         # Regex pattern matching\n    CROSS_CRATE = \"cross\"   # Search across all crates\n    STABILITY = \"stable\"    # Filter by stability level\n\nasync def federated_search(query: str, mode: SearchMode, filters: dict):\n    tasks = []\n    if mode == SearchMode.CROSS_CRATE:\n        # Parallel search across all ingested crates\n        for crate in await get_all_crates():\n            tasks.append(search_in_crate(query, crate.name, filters))\n    elif mode == SearchMode.REGEX:\n        # Compile regex and search with pattern matching\n        pattern = re.compile(query)\n        tasks.append(regex_search(pattern, filters))\n    \n    results = await asyncio.gather(*tasks)\n    return rank_and_deduplicate(results)",
+          "debuggingTechnique": "Profile search performance with concurrent.futures for optimal parallelization strategy"
+        },
+        {
+          "error": "Missing Type System Navigation - No Trait Implementation Discovery",
+          "rootCause": "Database schema lacks trait relationship storage. Users cannot discover what types implement specific traits or find trait bounds.",
+          "solution": "Extract and store trait relationships during ingestion. Add new database tables for traits, implementations, and bounds with dedicated MCP tools for navigation.",
+          "context": "Users asking 'what implements Iterator?' or 'what traits does Vec implement?' cannot get answers",
+          "lesson": "Type system relationships are core to Rust documentation - must be first-class citizens in data model",
+          "pattern": "Relationship-first database design with specialized navigation tools for type system exploration",
+          "dateEncountered": "2025-08-19",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/trait_analysis.py"],
+          "codeExample": "# New database tables for trait relationships\nCREATE TABLE traits (\n    id INTEGER PRIMARY KEY,\n    name TEXT NOT NULL,\n    path TEXT NOT NULL,\n    crate_id INTEGER,\n    FOREIGN KEY (crate_id) REFERENCES crates (id)\n);\n\nCREATE TABLE trait_implementations (\n    id INTEGER PRIMARY KEY,\n    trait_id INTEGER,\n    implementor_type TEXT NOT NULL,\n    implementor_crate_id INTEGER,\n    is_conditional BOOLEAN DEFAULT FALSE,\n    where_clause TEXT,\n    FOREIGN KEY (trait_id) REFERENCES traits (id)\n);\n\n# MCP tool for trait discovery\nasync def find_trait_implementations(trait_name: str) -> List[dict]:\n    \"\"\"Find all types that implement a specific trait\"\"\"\n    query = '''\n        SELECT ti.implementor_type, c.name as crate_name, ti.where_clause\n        FROM trait_implementations ti\n        JOIN traits t ON ti.trait_id = t.id\n        JOIN crates c ON ti.implementor_crate_id = c.id\n        WHERE t.name = ?\n    '''\n    return await db.fetch_all(query, [trait_name])",
+          "debuggingTechnique": "Parse rustdoc JSON 'impls' section to extract trait implementation relationships"
+        },
+        {
+          "error": "Version Comparison NoneType Errors in semantic_changes",
+          "rootCause": "Version comparison logic assumes non-None values but encounters None when version data is missing or malformed. Insufficient defensive programming.",
+          "solution": "Add comprehensive None checking with safe string operations. Use pattern: (value or '').method() for safe operations on potentially None strings.",
+          "context": "Version comparison crashes when analyzing crates with missing or incomplete version metadata",
+          "lesson": "Always assume external data can be None or malformed - defensive programming is essential for data processing systems",
+          "pattern": "Defensive None checking with safe fallback operations for all external data",
+          "dateEncountered": "2025-08-19",
+          "relatedFiles": ["src/docsrs_mcp/version_analysis.py", "src/docsrs_mcp/semantic_changes.py"],
+          "codeExample": "# Defensive version comparison\ndef safe_version_compare(version_a: Optional[str], version_b: Optional[str]) -> int:\n    \"\"\"Compare versions with None safety\"\"\"\n    # Safe string operations with fallback\n    clean_a = (version_a or '').strip()\n    clean_b = (version_b or '').strip()\n    \n    # Handle empty/None cases\n    if not clean_a and not clean_b:\n        return 0\n    elif not clean_a:\n        return -1\n    elif not clean_b:\n        return 1\n    \n    # Actual comparison logic\n    return semver.compare(clean_a, clean_b)\n\n# Apply pattern throughout codebase\ndef extract_version_info(metadata: dict) -> dict:\n    return {\n        'version': (metadata.get('version') or '').strip(),\n        'yanked': bool(metadata.get('yanked')),\n        'created_at': (metadata.get('created_at') or '').strip()\n    }",
+          "debuggingTechnique": "Add logging for None values encountered during version processing to identify data quality issues"
         }
       ]
     },
@@ -1820,6 +1892,78 @@
           "dateEncountered": "2025-08-16",
           "relatedFiles": ["src/docsrs_mcp/mcp_server.py", "src/docsrs_mcp/mcp_tools.py", "src/docsrs_mcp/models.py"],
           "impact": "All MCP clients receive incorrect crate names, affecting user experience and tool reliability"
+        },
+        {
+          "error": "MCP SDK v3.0 migration failure - version doesn't exist",
+          "context": "Initially planned to migrate to MCP SDK v3.0 but discovered it doesn't exist",
+          "solution": "Use MCP SDK 1.13.1 (August 2025) which incorporates FastMCP 1.0 functionality",
+          "prevention": "Always verify library version existence before planning migrations",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["pyproject.toml"],
+          "impact": "Simplifies migration as FastMCP patterns are preserved in official SDK",
+          "lesson": "Official SDK 1.13.1 maintains backward compatibility with FastMCP 1.0 patterns"
+        },
+        {
+          "error": "MCP SDK 1.13.1 memory leak causing OOM",
+          "context": "Confirmed memory leak in MCP SDK 1.13.1 causing continuous growth until out of memory",
+          "solution": "Implement connection recycling and monitor server memory usage actively",
+          "workaround": "Use background processes with nohup and PID capture for testing to avoid terminal hanging",
+          "prevention": "Monitor memory usage in production and implement automatic restart policies",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "impact": "Critical issue requiring active memory monitoring in production environments",
+          "codeExample": "# Background process testing pattern:\nnohup uv run docsrs-mcp > server.log 2>&1 & echo $!\nSERVER_PID=$!\n# Monitor and kill when needed:\nkill $SERVER_PID"
+        },
+        {
+          "error": "Inconsistent exception handling in MCP SDK decorators",
+          "context": "Errors sent as successful responses in @app.call_tool decorators instead of proper exceptions",
+          "solution": "Use proper error handling with McpError for consistency across all MCP tools",
+          "prevention": "Always use McpError for validation failures and other tool-level errors",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools.py"],
+          "codeExample": "# Correct error handling pattern:\ntry:\n    return await service.operation(...)\nexcept ValidationError as e:\n    raise McpError(f'Validation failed: {e}')\nexcept Exception as e:\n    raise McpError(f'Operation failed: {e}')",
+          "impact": "Ensures consistent error reporting across all MCP client implementations"
+        },
+        {
+          "error": "Parameter validation issues with Claude Code MCP client",
+          "context": "String-only schema edge cases causing validation failures with specific MCP clients",
+          "solution": "Official SDK handles this natively with type hints - no manual override needed",
+          "prevention": "Use @mcp.tool() decorator with proper type annotations for automatic parameter handling",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools.py"],
+          "lesson": "Official SDK's built-in type coercion eliminates need for manual anyOf schema patterns",
+          "impact": "Simplifies MCP tool development and improves client compatibility"
+        },
+        {
+          "error": "Large files exceeding 500 LOC maintainability limit",
+          "context": "app.py (2047 LOC), models.py (1800+ LOC), database.py (1000+ LOC) becoming difficult to maintain",
+          "solution": "Implement service layer pattern - split into focused modules under 400 LOC each",
+          "prevention": "Regular refactoring to maintain module size limits and logical separation",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/models.py", "src/docsrs_mcp/database.py"],
+          "proposedStructure": "services/, database/, models/ directories with logical separation",
+          "impact": "Improves code maintainability and reduces complexity for future development"
+        },
+        {
+          "error": "Server hanging on macOS Python 3.12 with KqueueSelector",
+          "context": "MCP server process hanging due to KqueueSelector logging issues on macOS",
+          "solution": "Use background processes with proper PID management for testing",
+          "prevention": "Never use bare 'uv run docsrs-mcp &' - requires manual interruption that can crash terminal",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "codeExample": "# Correct background process pattern:\nnohup uv run docsrs-mcp > server.log 2>&1 & echo $!\n# Store PID:\nSERVER_PID=$(nohup uv run docsrs-mcp > server.log 2>&1 & echo $!)\n# Check logs:\ntail -f server.log\n# Clean shutdown:\nkill $SERVER_PID",
+          "impact": "Enables reliable server testing without terminal hanging or process management issues"
+        },
+        {
+          "error": "FastMCP vs Official SDK naming confusion",
+          "context": "FastMCP 2.0 is separate from official SDK despite similar naming conventions",
+          "solution": "Use official MCP SDK 1.13.1 which includes FastMCP 1.0 functionality - import from 'mcp.server.fastmcp'",
+          "prevention": "Verify import paths and understand library relationships before implementation",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/app.py"],
+          "clarification": "Official SDK 1.13.1 includes FastMCP 1.0 functionality; FastMCP 2.0 is separate enhanced toolkit",
+          "impact": "Ensures correct library usage and avoids dependency conflicts",
+          "importPattern": "from mcp.server.fastmcp import FastMCP  # Official SDK with FastMCP 1.0 features"
         }
       ]
     },
@@ -3137,6 +3281,62 @@
             "popularityBonus": "Hit count tracking enables TTL extension for popular queries",
             "storageOverhead": "Minimal - store (timestamp, results, ttl) tuple per cache entry"
           }
+        },
+        {
+          "pattern": "MCP Parameter Schema Design",
+          "implementation": "String-only schemas with comprehensive field validators",
+          "description": "Design MCP schemas for maximum client compatibility using string types with robust validation",
+          "details": {
+            "schema_pattern": "Use string types for all parameters including numeric values",
+            "validation_pattern": "@field_validator('param', mode='before') with coercion functions",
+            "avoid": "anyOf patterns and complex type unions that MCP clients struggle with",
+            "testing": "Test with curl in --mode rest to isolate client vs server validation issues"
+          }
+        },
+        {
+          "pattern": "Three-Tier Ingestion Architecture",
+          "implementation": "Multi-source fallback with specialized handling per source type",
+          "description": "Handle different documentation sources with appropriate fallback strategies",
+          "details": {
+            "tier1": "Primary source (docs.rs) for regular crates",
+            "tier2": "Secondary source (rust-lang.org) for stdlib crates",
+            "tier3": "Local source (rustup) for complete stdlib documentation",
+            "detection": "Use is_stdlib_crate() for routing decisions",
+            "graceful_degradation": "Provide minimal fallback when external sources fail"
+          }
+        },
+        {
+          "pattern": "Defensive None Checking",
+          "implementation": "Safe string operations with fallback for external data",
+          "description": "Protect against None and malformed data from external APIs",
+          "details": {
+            "safe_pattern": "(value or '').method() for string operations on potentially None values",
+            "validation": "Check for None before performing operations",
+            "logging": "Log None encounters for data quality monitoring",
+            "fallbacks": "Provide sensible defaults for missing data"
+          }
+        },
+        {
+          "pattern": "Database Schema Evolution",
+          "implementation": "Add metadata fields for enhanced filtering and presentation",
+          "description": "Enhance database schema to support advanced features without breaking existing functionality",
+          "details": {
+            "metadata_fields": "Add is_dependency, stability_level, trait_bounds flags",
+            "backward_compatibility": "Use DEFAULT values for new columns",
+            "filtering": "Enable presentation-layer filtering based on user intent",
+            "indexing": "Add indexes for new filtering capabilities"
+          }
+        },
+        {
+          "pattern": "Federated Search Architecture",
+          "implementation": "Parallel search with mode-specific processors and result aggregation",
+          "description": "Scale search capabilities across multiple dimensions and data sources",
+          "details": {
+            "parallelization": "Use asyncio.gather for concurrent searches across crates",
+            "mode_routing": "Route to specialized processors based on search mode",
+            "result_federation": "Aggregate and rank results from multiple sources",
+            "performance": "Profile with concurrent.futures for optimal parallelization"
+          }
         }
       ]
     },
@@ -3214,6 +3414,42 @@
         "filter_patterns": ["::__", "_internal", "deps::", "std::", "core::"],
         "solution_pattern": "Apply post-processing filters to remove non-user-relevant modules from results"
       }
+    },
+    "searchCapabilities": {
+      "issue": "Search system lacks regex patterns, cross-crate search, and stability filtering",
+      "impact": "Users cannot perform advanced searches expected from modern documentation systems",
+      "workaround": "Implement federated search with parallel processing across multiple crates and search modes",
+      "details": {
+        "missing_features": ["regex pattern matching", "cross-crate search", "stability level filtering", "trait implementation discovery"],
+        "planned_architecture": "Parallel search federation with mode-specific processors and result ranking"
+      }
+    },
+    "typeSystemNavigation": {
+      "issue": "No trait implementation discovery or type relationship navigation",
+      "impact": "Users cannot explore Rust's type system relationships through the documentation",
+      "workaround": "Extract and store trait relationships during ingestion with dedicated navigation tools",
+      "details": {
+        "missing_relationships": ["trait implementations", "trait bounds", "associated types", "generic constraints"],
+        "database_requirements": "New tables for traits, implementations, and relationship mapping"
+      }
+    },
+    "stdlibDocumentationGaps": {
+      "issue": "docs.rs does not provide stdlib JSON documentation, limiting stdlib coverage",
+      "impact": "Stdlib queries return minimal fallback instead of complete documentation",
+      "workaround": "Three-tier ingestion: docs.rs → rust-lang.org → local rustup for complete stdlib",
+      "details": {
+        "current_coverage": "62 items (std), 68 items (core), 43 items (alloc) in fallback",
+        "complete_solution": "Local rust-docs-json component provides full stdlib documentation"
+      }
+    },
+    "mcpProtocolStringCoercion": {
+      "issue": "MCP protocol sends all parameters as strings regardless of intended type",
+      "impact": "Numeric parameter validation fails despite proper schema definitions",
+      "workaround": "Use string-only schemas with mode='before' validators for type coercion",
+      "details": {
+        "affected_parameters": ["numeric limits", "boolean flags", "enum values"],
+        "solution_pattern": "String schemas + Pydantic field validators with coercion functions"
+      }
     }
   },
   "debuggingTips": {
@@ -3231,7 +3467,16 @@
       "Test tools with both Claude Code and Claude Desktop to identify client-specific compatibility issues",
       "Add defensive null checking in version comparison functions to prevent PointerToNowhere errors",
       "Filter internal/dependency modules from search results using pattern matching",
-      "For Claude Code compatibility: avoid anyOf, use string parameters with @field_validator coercion"
+      "For Claude Code compatibility: avoid anyOf, use string parameters with @field_validator coercion",
+      "Use three-tier ingestion pattern for handling different documentation sources (docs.rs → rust-lang.org → local)",
+      "Implement krate-based filtering to distinguish owned modules from dependency modules",
+      "Apply (value or '').method() pattern for safe string operations on potentially None external data",
+      "Test stdlib documentation with 'rustup component add --toolchain nightly rust-docs-json'",
+      "Use asyncio.gather for parallel search federation across multiple crates and modes",
+      "Add is_dependency flags to database schema for clean presentation layer filtering",
+      "Profile search performance with concurrent.futures to optimize parallelization strategy",
+      "Extract trait relationships from rustdoc JSON 'impls' section for type system navigation",
+      "Implement graceful degradation with enhanced user guidance when external sources fail"
     ],
     "vectorSearch": [
       "Check embedding dimensions match (384 for BAAI/bge-small-en-v1.5)",

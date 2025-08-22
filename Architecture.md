@@ -16,7 +16,7 @@ graph TB
         CLI[CLI Entry Point<br/>--mode, --port, --concurrency flags<br/>Environment variable conversion]
         CONFIG[Config Module<br/>Environment variable loading<br/>Unified configuration source]
         API[FastAPI Application<br/>startup: asyncio.create_task]
-        MCP[MCP Server Module<br/>FastMCP wrapper<br/>startup: PreIngestionWorker]
+        MCP[MCP Server Module<br/>Official Python MCP SDK (v3.0)<br/>@mcp.tool() decorators<br/>startup: PreIngestionWorker]
         RL[Rate Limiter<br/>30 req/s per IP]
         IW[Ingest Worker]
         Queue[asyncio.Queue]
@@ -68,6 +68,10 @@ graph LR
             TOOLDOCS[tool_documentation.py<br/>Enhanced MCP tool descriptions<br/>Tutorial metadata<br/>Token-efficient patterns]
             VALIDATION[validation.py<br/>Centralized validation utilities<br/>Precompiled regex patterns<br/>Type coercion functions]
             NAV[navigation.py<br/>Module tree operations<br/>Hierarchy traversal]
+            TYPENAV[type_navigation.py<br/>Trait resolution and type navigation<br/>Method disambiguation<br/>Generic constraint analysis]
+            PATTERN[pattern_extraction.py<br/>Usage pattern recognition<br/>Code example analysis<br/>Frequency scoring]
+            CROSSREF[cross_reference_resolver.py<br/>Cross-crate dependency resolution<br/>Import path analysis<br/>Re-export tracking]
+            IMPORTS[import_suggestion_engine.py<br/>Import path optimization<br/>Feature flag analysis<br/>Usage frequency ranking]
             MW[middleware.py<br/>Rate limiting]
             EXPORT[export.py<br/>Documentation export endpoints<br/>FastAPI endpoint patterns]
             VERSIONDIFF[Version Diff Service<br/>Documentation version comparison<br/>FastAPI endpoint patterns]
@@ -97,7 +101,7 @@ graph LR
         end
         
         subgraph "Server Layer"
-            MCP_SERVER[mcp_server.py<br/>FastMCP wrapper<br/>STDIO transport<br/>stderr logging]
+            MCP_SERVER[mcp_server.py<br/>Official Python MCP SDK (v3.0)<br/>Native @mcp.tool() decorators<br/>STDIO transport<br/>stderr logging]
         end
         
         subgraph "Utilities"
@@ -114,6 +118,10 @@ graph LR
     APP --> MW
     ROUTES --> ING
     ROUTES --> NAV
+    ROUTES --> TYPENAV
+    ROUTES --> PATTERN
+    ROUTES --> CROSSREF
+    ROUTES --> IMPORTS
     ROUTES --> TOOLDOCS
     ROUTES --> FUZZY
     ROUTES --> EXPORT
@@ -139,6 +147,146 @@ graph LR
     MCP_SERVER --> APP
 ```
 
+## MCP Server Architecture (v3.0)
+
+### Migration from FastMCP to Official Python MCP SDK
+
+The docsrs-mcp server is migrating from FastMCP 2.11.1 to the official Python MCP SDK to eliminate schema override workarounds and adopt the official implementation. This migration maintains dual-mode compatibility while providing a cleaner, more maintainable architecture.
+
+#### Key Migration Benefits
+
+- **Official SDK Adoption**: Replace third-party FastMCP with Anthropic's official Python MCP SDK
+- **Schema Override Elimination**: Remove complex `override_fastmcp_schemas()` workarounds
+- **Native @mcp.tool() Decorators**: Use official decorators instead of FastAPI-to-MCP conversion
+- **Maintained Compatibility**: Preserve dual-mode operation (MCP + REST) with backward compatibility
+- **Simplified Architecture**: Cleaner codebase without FastMCP conversion layers
+
+### Modular Structure
+
+The migration introduces a modular architecture with clear separation of concerns and optimized line-of-code (LOC) distribution:
+
+```
+src/docsrs_mcp/
+├── models/
+│   ├── mcp.py           # MCP-specific models and schemas (200-300 LOC)
+│   ├── requests.py      # Request validation models (400-500 LOC)
+│   ├── responses.py     # Response formatting models (400-500 LOC)
+│   └── validation.py    # Shared validation utilities (300-400 LOC)
+├── ingestion/
+│   ├── core.py          # Core ingestion logic (400-500 LOC)
+│   ├── embeddings.py    # Embedding generation and management (300-400 LOC)
+│   ├── processors.py    # Document processing pipeline (400-500 LOC)
+│   └── cache.py         # Ingestion caching and optimization (300-400 LOC)
+├── database/
+│   ├── core.py          # Database operations and connections (300-400 LOC)
+│   ├── search.py        # Vector search and ranking (400-500 LOC)
+│   └── schema.py        # Database schema and migrations (300-400 LOC)
+└── api/
+    ├── health.py        # Health check endpoints and monitoring (200-300 LOC)
+    ├── tools.py         # MCP tool implementations (400-500 LOC)
+    └── admin.py         # Administrative endpoints (200-300 LOC)
+```
+
+### Migration Pattern
+
+The migration follows a systematic approach that preserves all existing functionality:
+
+#### 1. Decorator Migration
+```python
+# Before (FastMCP conversion)
+@app.post("/mcp/tools/search_items")
+async def search_items_endpoint(request: SearchRequest):
+    # Business logic
+    return response
+
+# After (Official MCP SDK)
+@mcp.tool()
+async def search_items(query: str, crate_name: str, version: str = "latest") -> str:
+    # Same business logic, different interface
+    return json.dumps(response)
+```
+
+#### 2. Schema Simplification
+- Remove `override_fastmcp_schemas()` workarounds
+- Use native MCP tool descriptions and parameter definitions
+- Maintain string-first parameter handling for client compatibility
+
+#### 3. Backward Compatibility
+- Preserve all existing tool names and parameter structures
+- Maintain REST mode via FastAPI endpoints
+- Use `__init__.py` re-exports to prevent import breakage
+
+### Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        MCP_CLIENT[MCP Clients<br/>Claude Code, etc.]
+        REST_CLIENT[REST Clients<br/>curl, Postman, etc.]
+    end
+    
+    subgraph "v3.0 MCP Server Architecture"
+        CLI[CLI Entry Point<br/>--mode flag selection]
+        
+        subgraph "MCP Mode (Official SDK)"
+            OFFICIAL_SDK[Official Python MCP SDK<br/>@mcp.tool() decorators]
+            STDIO[STDIO Transport<br/>JSON-RPC protocol]
+        end
+        
+        subgraph "REST Mode (FastAPI)"
+            FASTAPI[FastAPI Server<br/>HTTP endpoints]
+            UVICORN[Uvicorn ASGI Server]
+        end
+        
+        subgraph "Shared Business Logic"
+            MODELS[models/ package<br/>Pydantic schemas & validation]
+            INGEST[ingestion/ package<br/>Document processing pipeline]
+            DATABASE[database/ package<br/>SQLite + vector operations]
+            API_TOOLS[api/ package<br/>Tool implementations]
+        end
+    end
+    
+    subgraph "External Systems"
+        DOCS_RS[docs.rs CDN]
+        SQLITE[(SQLite + VSS<br/>Vector database)]
+    end
+    
+    MCP_CLIENT -->|JSON-RPC| CLI
+    REST_CLIENT -->|HTTP| CLI
+    
+    CLI -->|--mode mcp| OFFICIAL_SDK
+    CLI -->|--mode rest| FASTAPI
+    
+    OFFICIAL_SDK --> STDIO
+    FASTAPI --> UVICORN
+    
+    OFFICIAL_SDK --> MODELS
+    FASTAPI --> MODELS
+    
+    MODELS --> INGEST
+    MODELS --> DATABASE
+    MODELS --> API_TOOLS
+    
+    INGEST -->|download| DOCS_RS
+    DATABASE -->|store/query| SQLITE
+```
+
+### Implementation Timeline
+
+1. **Phase 1**: Create modular structure with current FastMCP implementation
+2. **Phase 2**: Implement official MCP SDK alongside FastMCP (dual implementation)
+3. **Phase 3**: Migrate tool-by-tool from FastMCP to official SDK
+4. **Phase 4**: Remove FastMCP dependencies and schema override code
+5. **Phase 5**: Optimize and refactor with official SDK patterns
+
+### Compatibility Guarantees
+
+- **API Stability**: All existing tool names and parameters remain unchanged
+- **REST Mode**: FastAPI endpoints continue to function identically
+- **Configuration**: Environment variables and CLI flags unchanged
+- **Database**: No schema changes required
+- **Performance**: Equivalent or improved performance characteristics
+
 ## Configuration Flow
 
 The docsrs-mcp server implements a unified configuration architecture where CLI arguments are converted to environment variables before module imports, ensuring both REST and MCP modes use identical configuration patterns.
@@ -150,7 +298,7 @@ graph TB
     subgraph "CLI Entry Point (cli.py)"
         CLI_ARGS[CLI Arguments<br/>--port, --concurrency, --pre-ingest]
         ENV_CONV[Environment Variable Conversion<br/>DOCSRS_PORT, DOCSRS_CONCURRENCY<br/>DOCSRS_PRE_INGEST_ENABLED]
-        MODULE_IMPORT[Module Imports<br/>config.py, mcp_server.py]
+        MODULE_IMPORT[Module Imports<br/>config.py, mcp_server.py (v3.0)]
     end
     
     subgraph "Configuration Module (config.py)"
@@ -161,7 +309,7 @@ graph TB
     
     subgraph "Runtime Modes"
         REST_MODE[REST Mode<br/>FastAPI + uvicorn]
-        MCP_MODE[MCP Mode<br/>FastMCP + STDIO]
+        MCP_MODE[MCP Mode<br/>Official MCP SDK + STDIO]
     end
     
     subgraph "Background Services"
@@ -258,6 +406,57 @@ sequenceDiagram
 | `DOCSRS_PRE_INGEST_ENABLED` | `--pre-ingest` | `false` | boolean | Enable background pre-ingestion |
 
 **Note**: All configuration variables support environment variable overrides, allowing deployment flexibility without CLI modifications.
+
+## MCP SDK Migration Architecture (Planned)
+
+### Module Structure Refactoring
+The migration will reorganize the codebase from monolithic files to a modular service-oriented architecture:
+
+```
+src/docsrs_mcp/
+├── mcp_tools.py         (<300 LOC) - MCP tool definitions using @mcp.tool()
+├── rest_api.py          (<400 LOC) - FastAPI endpoints
+├── services/            - Business logic layer
+│   ├── crate_service.py    (<400 LOC)
+│   ├── search_service.py   (<400 LOC)
+│   ├── ingestion_service.py (<400 LOC)
+│   └── comparison_service.py (<300 LOC)
+├── database/            - Data access layer
+│   ├── connection.py    (<300 LOC)
+│   ├── operations.py    (<400 LOC)
+│   └── cache.py         (<300 LOC)
+├── models/              - Data models layer
+│   ├── requests.py      (<400 LOC)
+│   ├── responses.py     (<400 LOC)
+│   └── validators.py    (<400 LOC)
+├── mcp_server.py        (<200 LOC) - MCP entry point
+└── app.py               (<200 LOC) - FastAPI entry point
+```
+
+### Key Architectural Changes:
+1. **Service Layer Pattern**: Extract business logic into focused service modules, shared between MCP and REST modes
+2. **Decorator-based Tools**: Use @mcp.tool() from official SDK for automatic schema generation
+3. **Elimination of Workarounds**: Remove 180+ lines of override_fastmcp_schemas() complexity
+4. **Dual-Mode Preservation**: Maintain REST and MCP modes with shared service layer
+5. **Native SDK Integration**: Use mcp.server.fastmcp.FastMCP from official SDK 1.13.1
+
+### Data Flow (Post-Migration):
+```mermaid
+graph TD
+    A[MCP Client] --> B[mcp_tools.py]
+    C[REST Client] --> D[rest_api.py]
+    B --> E[Service Layer]
+    D --> E
+    E --> F[Database Layer]
+    E --> G[Models/Validators]
+    F --> H[SQLite + Vec]
+```
+
+### Technology Stack Update:
+- FastMCP 2.11.1 → Official MCP SDK 1.13.1
+- Schema overrides → Native SDK schema generation
+- Monolithic files → Modular service architecture
+- Manual tool registration → @mcp.tool() decorators
 
 ## Data Flow
 
@@ -474,8 +673,112 @@ erDiagram
     
     EXAMPLE_EMBEDDINGS ||--|| VEC_EXAMPLE_EMBEDDINGS : "vector indexed by rowid"
     EXAMPLE_EMBEDDINGS ||--o{ EXAMPLE_EMBEDDINGS : "deduplication via example_hash"
+    TRAIT_IMPLEMENTATIONS {
+        INTEGER id PK
+        TEXT trait_path "fully qualified trait path (e.g., std::fmt::Debug)"
+        TEXT impl_type_path "implementing type path (e.g., Vec<T>)"
+        TEXT crate_name "crate containing the implementation"
+        TEXT crate_version "crate version"
+        TEXT generic_constraints "generic bounds and where clauses - DEFAULT NULL"
+        TEXT impl_signature "complete impl signature - DEFAULT NULL"
+        BOOLEAN is_blanket "blanket implementation flag - DEFAULT 0"
+        TEXT item_id "rustdoc ID for the impl block - DEFAULT NULL"
+    }
+    
+    TYPE_METHODS {
+        INTEGER id PK
+        TEXT type_path "fully qualified type path"
+        TEXT method_name "method name"
+        TEXT method_signature "complete method signature"
+        TEXT visibility "pub, pub(crate), private - DEFAULT 'pub'"
+        TEXT method_type "inherent, trait, associated - DEFAULT 'inherent'"
+        TEXT trait_source "trait providing method if trait method - DEFAULT NULL"
+        TEXT crate_name "crate containing the method"
+        TEXT crate_version "crate version"
+        TEXT item_id "rustdoc ID for the method - DEFAULT NULL"
+        TEXT safety_info "unsafe information and requirements - DEFAULT NULL"
+    }
+    
+    ASSOCIATED_ITEMS {
+        INTEGER id PK
+        TEXT container_path "trait or type containing the item"
+        TEXT item_name "associated item name"
+        TEXT item_type "type, const, fn"
+        TEXT item_signature "complete signature"
+        TEXT default_impl "default implementation if any - DEFAULT NULL"
+        TEXT crate_name "crate containing the item"
+        TEXT crate_version "crate version"
+        TEXT item_id "rustdoc ID - DEFAULT NULL"
+    }
+    
+    GENERIC_CONSTRAINTS {
+        INTEGER id PK
+        TEXT item_path "path of generic item"
+        TEXT constraint_type "type_param, lifetime, const_param"
+        TEXT constraint_name "parameter name"
+        TEXT bounds "trait bounds or constraints - DEFAULT NULL"
+        TEXT default_type "default type if any - DEFAULT NULL"
+        TEXT crate_name "crate containing the constraint"
+        TEXT crate_version "crate version"
+    }
+    
+    IMPORT_PATHS {
+        INTEGER id PK
+        TEXT item_path "fully qualified item path"
+        TEXT suggested_import "suggested import statement"
+        TEXT import_style "use, extern_crate, mod"
+        INTEGER usage_frequency "frequency score - DEFAULT 1"
+        TEXT crate_name "crate providing the item"
+        TEXT crate_version "crate version"
+        TEXT feature_flags "required feature flags - DEFAULT NULL"
+    }
+    
+    RE_EXPORTS {
+        INTEGER id PK
+        TEXT original_path "original item path"
+        TEXT exported_path "re-exported path"
+        TEXT exporting_crate "crate doing the re-export"
+        TEXT exporting_version "exporting crate version"
+        TEXT original_crate "crate of original item"
+        BOOLEAN is_public "public re-export flag - DEFAULT 1"
+        TEXT visibility "pub, pub(crate), etc - DEFAULT 'pub'"
+    }
+    
+    CRATE_DEPENDENCIES {
+        INTEGER id PK
+        TEXT crate_name "dependent crate name"
+        TEXT crate_version "dependent crate version"
+        TEXT dependency_name "dependency crate name"
+        TEXT dependency_version "dependency version constraint"
+        TEXT dependency_type "normal, dev, build - DEFAULT 'normal'"
+        BOOLEAN optional "optional dependency flag - DEFAULT 0"
+        TEXT features "enabled features - DEFAULT NULL"
+    }
+    
+    USAGE_PATTERNS {
+        INTEGER id PK
+        TEXT item_path "item being used"
+        TEXT pattern_type "construction, method_call, trait_usage, generic_usage"
+        TEXT pattern_description "human-readable pattern description"
+        TEXT code_example "example usage code"
+        INTEGER frequency_score "usage frequency - DEFAULT 1"
+        TEXT context "usage context (test, example, doc) - DEFAULT NULL"
+        TEXT crate_source "crate where pattern was found"
+        TEXT version_source "version where pattern was found"
+    }
+    
     CRATE_METADATA ||--o{ REEXPORTS : "contains"
     CRATE_METADATA ||--o{ INGESTION_CHECKPOINTS : "tracks"
+    CRATE_METADATA ||--o{ TRAIT_IMPLEMENTATIONS : "contains"
+    CRATE_METADATA ||--o{ TYPE_METHODS : "contains"
+    CRATE_METADATA ||--o{ ASSOCIATED_ITEMS : "contains"
+    CRATE_METADATA ||--o{ GENERIC_CONSTRAINTS : "contains"
+    CRATE_METADATA ||--o{ IMPORT_PATHS : "provides"
+    CRATE_METADATA ||--o{ RE_EXPORTS : "exports"
+    CRATE_METADATA ||--o{ CRATE_DEPENDENCIES : "depends_on"
+    CRATE_METADATA ||--o{ USAGE_PATTERNS : "demonstrates"
+    TRAIT_IMPLEMENTATIONS ||--|| TYPE_METHODS : "provides_methods"
+    ASSOCIATED_ITEMS ||--|| GENERIC_CONSTRAINTS : "may_have_constraints"
     META ||--|| CRATE_METADATA : "describes"
 ```
 
@@ -972,7 +1275,7 @@ graph TB
     MCP_SERVER --> STDERR_LOG
     FASTAPI --> STDOUT_LOG
     
-    MCP_SERVER -->|FastMCP.from_fastapi()| CORE
+    MCP_SERVER -->|Official MCP SDK (v3.0)| CORE
     FASTAPI --> CORE
     
     CORE --> INGEST
@@ -1002,6 +1305,16 @@ async def tool_handler(crate_name: str, **kwargs):
 - `get_examples`: Auto-ingests before example retrieval
 - `search_examples`: Auto-ingests before example search
 - `get_item_signature`: Auto-ingests before signature lookup
+- `search_with_regex`: Auto-ingests before regex pattern search
+- `search_cross_crate`: Auto-ingests before cross-crate search
+- `get_trait_implementors`: Auto-ingests before trait implementation lookup
+- `get_type_traits`: Auto-ingests before type trait discovery
+- `resolve_method`: Auto-ingests before method resolution
+- `suggest_imports`: Auto-ingests before import suggestion
+- `get_full_signature`: Auto-ingests before complete signature retrieval
+- `get_safety_info`: Auto-ingests before safety information extraction
+- `extract_patterns`: Auto-ingests before usage pattern extraction
+- `get_learning_path`: Auto-ingests before learning path generation
 - `get_module_tree`: Auto-ingests before tree traversal
 - `getCrateSummary`: Auto-ingests before summary generation
 
@@ -1013,6 +1326,16 @@ graph TD
         GET_EX[get_examples<br/>Auto-ingest → Code example retrieval<br/>Input: item_id or query<br/>Output: relevant code examples]
         SEARCH_EX[search_examples<br/>Auto-ingest → Semantic code example search<br/>Smart snippet extraction with fallback<br/>Input: query, language filter<br/>Output: scored code examples with deduplication]
         GET_SIG[get_item_signature<br/>Auto-ingest → Item signature retrieval<br/>Input: item_path<br/>Output: complete signature]
+        SEARCH_REGEX[search_with_regex<br/>Auto-ingest → Advanced regex pattern search<br/>Input: regex_pattern, scope, case_sensitive<br/>Output: matching items with context]
+        SEARCH_CROSS_CRATE[search_cross_crate<br/>Auto-ingest → Cross-crate dependency search<br/>Input: item_path, include_transitive<br/>Output: usage across crate ecosystem]
+        GET_TRAIT_IMPL[get_trait_implementors<br/>Auto-ingest → Trait implementation discovery<br/>Input: trait_path, include_blanket<br/>Output: implementing types and details]
+        GET_TYPE_TRAITS[get_type_traits<br/>Auto-ingest → Type trait discovery<br/>Input: type_path, include_derived<br/>Output: implemented traits with sources]
+        RESOLVE_METHOD[resolve_method<br/>Auto-ingest → Method resolution with disambiguation<br/>Input: type_path, method_name, signature_hint<br/>Output: resolved method with trait source]
+        SUGGEST_IMPORTS[suggest_imports<br/>Auto-ingest → Import path suggestions<br/>Input: item_path, target_crate<br/>Output: ranked import suggestions]
+        GET_FULL_SIG[get_full_signature<br/>Auto-ingest → Complete signature with generics<br/>Input: item_path, expand_generics<br/>Output: full signature with constraints]
+        GET_SAFETY_INFO[get_safety_info<br/>Auto-ingest → Safety information extraction<br/>Input: item_path<br/>Output: unsafe requirements and guarantees]
+        EXTRACT_PATTERNS[extract_patterns<br/>Auto-ingest → Usage pattern extraction<br/>Input: item_path, pattern_types<br/>Output: common usage patterns with examples]
+        GET_LEARNING_PATH[get_learning_path<br/>Auto-ingest → Learning progression generation<br/>Input: target_concept, user_level<br/>Output: structured learning path with resources]
         INGEST_TOOL[ingest_crate<br/>Manual crate ingestion<br/>Input: crate name/version<br/>Output: ingestion status with completion tracking]
         START_PRE_INGEST[start_pre_ingestion<br/>Start pre-ingestion system<br/>Input: force, concurrency, count<br/>Output: status, message, stats, monitoring]
         GET_MOD_TREE[get_module_tree<br/>Auto-ingest → Module hierarchy navigation<br/>Input: crate, version, module_path<br/>Output: hierarchical tree structure]
@@ -1020,7 +1343,7 @@ graph TD
     end
     
     subgraph "MCP Protocol"
-        FASTMCP[FastMCP.from_fastapi()<br/>Automatic REST → MCP conversion<br/>anyOf schema generation]
+        OFFICIAL_MCP[Official Python MCP SDK<br/>Native @mcp.tool() decorators<br/>Clean schema generation]
         STDIO_TRANSPORT[STDIO Transport<br/>JSON-RPC messages]
     end
     
@@ -1034,6 +1357,16 @@ graph TD
         REST_START_PRE[POST /mcp/tools/start_pre_ingestion<br/>Pre-ingestion control endpoint<br/>MCP-controllable without CLI flags]
         REST_MOD_TREE[POST /get_module_tree<br/>Module tree endpoint]
         REST_CRATE_SUMMARY[POST /getCrateSummary<br/>Crate summary endpoint with schema override]
+        REST_SEARCH_REGEX[POST /search_with_regex<br/>Advanced regex search endpoint]
+        REST_CROSS_CRATE[POST /search_cross_crate<br/>Cross-crate dependency search endpoint]
+        REST_TRAIT_IMPL[POST /get_trait_implementors<br/>Trait implementation discovery endpoint]
+        REST_TYPE_TRAITS[POST /get_type_traits<br/>Type trait discovery endpoint]
+        REST_RESOLVE_METHOD[POST /resolve_method<br/>Method resolution endpoint]
+        REST_SUGGEST_IMPORTS[POST /suggest_imports<br/>Import suggestion endpoint]
+        REST_FULL_SIG[POST /get_full_signature<br/>Complete signature retrieval endpoint]
+        REST_SAFETY_INFO[POST /get_safety_info<br/>Safety information endpoint]
+        REST_EXTRACT_PATTERNS[POST /extract_patterns<br/>Usage pattern extraction endpoint]
+        REST_LEARNING_PATH[POST /get_learning_path<br/>Learning progression endpoint]
         HEALTH[GET /health<br/>Enhanced liveness probe with ingestion status<br/>Reports: available_not_started vs disabled states<br/>Incomplete/stalled ingestion counts]
         RECOVER[POST /recover<br/>Manual ingestion recovery endpoint<br/>Rate limited: 10 requests/minute per IP]
     end
@@ -1041,21 +1374,506 @@ graph TD
     FASTMCP --> SEARCH_DOC
     FASTMCP --> NAV_MOD
     FASTMCP --> GET_EX
+    FASTMCP --> SEARCH_EX
     FASTMCP --> GET_SIG
+    FASTMCP --> SEARCH_REGEX
+    FASTMCP --> SEARCH_CROSS_CRATE
+    FASTMCP --> GET_TRAIT_IMPL
+    FASTMCP --> GET_TYPE_TRAITS
+    FASTMCP --> RESOLVE_METHOD
+    FASTMCP --> SUGGEST_IMPORTS
+    FASTMCP --> GET_FULL_SIG
+    FASTMCP --> GET_SAFETY_INFO
+    FASTMCP --> EXTRACT_PATTERNS
+    FASTMCP --> GET_LEARNING_PATH
     FASTMCP --> INGEST_TOOL
     FASTMCP --> START_PRE_INGEST
     FASTMCP --> GET_MOD_TREE
+    FASTMCP --> GET_CRATE_SUMMARY
     SEARCH_DOC -->|converts| REST_SEARCH_DOC
     NAV_MOD -->|converts| REST_NAV
     GET_EX -->|converts| REST_EXAMPLES
     SEARCH_EX -->|converts| REST_SEARCH_EX
     GET_SIG -->|converts| REST_SIG
+    SEARCH_REGEX -->|converts| REST_SEARCH_REGEX
+    SEARCH_CROSS_CRATE -->|converts| REST_CROSS_CRATE
+    GET_TRAIT_IMPL -->|converts| REST_TRAIT_IMPL
+    GET_TYPE_TRAITS -->|converts| REST_TYPE_TRAITS
+    RESOLVE_METHOD -->|converts| REST_RESOLVE_METHOD
+    SUGGEST_IMPORTS -->|converts| REST_SUGGEST_IMPORTS
+    GET_FULL_SIG -->|converts| REST_FULL_SIG
+    GET_SAFETY_INFO -->|converts| REST_SAFETY_INFO
+    EXTRACT_PATTERNS -->|converts| REST_EXTRACT_PATTERNS
+    GET_LEARNING_PATH -->|converts| REST_LEARNING_PATH
     INGEST_TOOL -->|converts| REST_INGEST
     START_PRE_INGEST -->|converts| REST_START_PRE
     GET_MOD_TREE -->|converts| REST_MOD_TREE
     GET_CRATE_SUMMARY -->|converts| REST_CRATE_SUMMARY
     STDIO_TRANSPORT --> FASTMCP
 ```
+
+## Enhanced Type Navigation and Cross-Reference Architecture
+
+### Type Navigation Module (type_navigation.py)
+
+The type navigation module provides comprehensive trait resolution, method disambiguation, and generic constraint analysis capabilities:
+
+```mermaid
+graph TD
+    subgraph "Type Navigation Components"
+        TRAIT_RESOLVER[TraitResolver<br/>trait implementation discovery<br/>blanket implementation handling<br/>orphan rule validation]
+        METHOD_DISAMBIGUATOR[MethodDisambiguator<br/>method resolution with trait sources<br/>signature-based disambiguation<br/>generic method specialization]
+        GENERIC_ANALYZER[GenericAnalyzer<br/>constraint extraction<br/>bound validation<br/>default type handling]
+        TYPE_HIERARCHY[TypeHierarchy<br/>inheritance tracking<br/>trait object resolution<br/>associated type mapping]
+    end
+    
+    subgraph "Database Integration"
+        TRAIT_IMPL_DB[(trait_implementations table)]
+        TYPE_METHODS_DB[(type_methods table)]
+        ASSOC_ITEMS_DB[(associated_items table)]
+        GENERIC_CONSTRAINTS_DB[(generic_constraints table)]
+    end
+    
+    TRAIT_RESOLVER --> TRAIT_IMPL_DB
+    METHOD_DISAMBIGUATOR --> TYPE_METHODS_DB
+    GENERIC_ANALYZER --> GENERIC_CONSTRAINTS_DB
+    TYPE_HIERARCHY --> ASSOC_ITEMS_DB
+```
+
+### Pattern Extraction Module
+
+Advanced usage pattern recognition and code analysis:
+
+```mermaid
+graph TD
+    subgraph "Pattern Extraction Pipeline"
+        PATTERN_DETECTOR[PatternDetector<br/>common usage identification<br/>construction patterns<br/>method call patterns]
+        FREQUENCY_ANALYZER[FrequencyAnalyzer<br/>usage frequency scoring<br/>popularity metrics<br/>context weighting]
+        CODE_ANALYZER[CodeAnalyzer<br/>AST pattern matching<br/>semantic analysis<br/>idiom recognition]
+        EXAMPLE_EXTRACTOR[ExampleExtractor<br/>representative code selection<br/>minimal example generation<br/>complexity scoring]
+    end
+    
+    subgraph "Pattern Storage"
+        USAGE_PATTERNS_DB[(usage_patterns table)]
+        EXAMPLES_DB[(examples table)]
+        EMBEDDINGS_DB[(embeddings table)]
+    end
+    
+    PATTERN_DETECTOR --> USAGE_PATTERNS_DB
+    FREQUENCY_ANALYZER --> USAGE_PATTERNS_DB
+    CODE_ANALYZER --> EXAMPLES_DB
+    EXAMPLE_EXTRACTOR --> EMBEDDINGS_DB
+```
+
+### Cross-Reference Resolver
+
+Cross-crate dependency resolution and import path analysis:
+
+```mermaid
+graph TD
+    subgraph "Cross-Reference Components"
+        DEPENDENCY_RESOLVER[DependencyResolver<br/>transitive dependency analysis<br/>version constraint handling<br/>feature flag resolution]
+        IMPORT_ANALYZER[ImportAnalyzer<br/>import path optimization<br/>re-export resolution<br/>visibility analysis]
+        USAGE_TRACKER[UsageTracker<br/>cross-crate usage detection<br/>API surface analysis<br/>breaking change detection]
+    end
+    
+    subgraph "Cross-Reference Storage"
+        CRATE_DEPS_DB[(crate_dependencies table)]
+        RE_EXPORTS_DB[(re_exports table)]
+        IMPORT_PATHS_DB[(import_paths table)]
+    end
+    
+    DEPENDENCY_RESOLVER --> CRATE_DEPS_DB
+    IMPORT_ANALYZER --> RE_EXPORTS_DB
+    USAGE_TRACKER --> IMPORT_PATHS_DB
+```
+
+### Import Suggestion Engine
+
+Intelligent import path recommendations:
+
+```mermaid
+graph TD
+    subgraph "Import Suggestion Pipeline"
+        PATH_OPTIMIZER[PathOptimizer<br/>shortest path calculation<br/>canonical path preference<br/>std library prioritization]
+        FEATURE_ANALYZER[FeatureAnalyzer<br/>required feature detection<br/>optional dependency handling<br/>cfg attribute analysis]
+        POPULARITY_SCORER[PopularityScorer<br/>usage frequency weighting<br/>ecosystem adoption metrics<br/>maintenance status scoring]
+    end
+    
+    subgraph "Suggestion Data"
+        IMPORT_PATHS_DB[(import_paths table)]
+        CRATE_METADATA_DB[(crate_metadata table)]
+        USAGE_PATTERNS_DB[(usage_patterns table)]
+    end
+    
+    PATH_OPTIMIZER --> IMPORT_PATHS_DB
+    FEATURE_ANALYZER --> CRATE_METADATA_DB
+    POPULARITY_SCORER --> USAGE_PATTERNS_DB
+```
+
+## Enhanced Data Flow for Trait Resolution
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant MCP_Tools as MCP Tool Layer
+    participant TypeNav as Type Navigation
+    participant DB as Database
+    participant Ingestion as Ingestion Pipeline
+    
+    Client->>MCP_Tools: get_trait_implementors(trait_path)
+    MCP_Tools->>TypeNav: resolve_trait_implementations()
+    TypeNav->>DB: query trait_implementations table
+    
+    alt Data not found
+        DB-->>TypeNav: empty result
+        TypeNav->>Ingestion: trigger auto-ingestion
+        Ingestion->>DB: enhanced trait extraction
+        Note over Ingestion,DB: Extract impl blocks<br/>Parse generic constraints<br/>Index trait bounds
+        Ingestion-->>TypeNav: ingestion complete
+        TypeNav->>DB: retry query
+    end
+    
+    DB-->>TypeNav: trait implementation data
+    TypeNav->>TypeNav: enrich with method information
+    TypeNav->>DB: query type_methods for implementors
+    DB-->>TypeNav: method signatures
+    TypeNav-->>MCP_Tools: complete trait implementation map
+    MCP_Tools-->>Client: formatted trait implementors
+```
+
+## Enhanced Ingestion Pipeline with Stdlib Handling
+
+```mermaid
+graph TD
+    subgraph "Enhanced Ingestion Flow"
+        RUSTDOC_JSON[Rustdoc JSON<br/>Primary extraction path]
+        SOURCE_EXTRACT[Source Extraction<br/>Fallback via CDN]
+        DESC_ONLY[Description Only<br/>Minimal fallback]
+        
+        TRAIT_EXTRACTOR[Trait Implementation Extractor<br/>impl block parsing<br/>generic constraint analysis<br/>blanket implementation detection]
+        METHOD_EXTRACTOR[Method Extractor<br/>inherent method detection<br/>trait method association<br/>signature normalization]
+        PATTERN_EXTRACTOR[Pattern Extractor<br/>usage pattern recognition<br/>code example analysis<br/>idiom detection]
+        STDLIB_ENHANCER[Stdlib Enhancer<br/>comprehensive stdlib coverage<br/>trait implementation synthesis<br/>method documentation]
+    end
+    
+    subgraph "Enhanced Schema Population"
+        TRAIT_IMPL_TABLE[(trait_implementations)]
+        TYPE_METHODS_TABLE[(type_methods)]
+        ASSOC_ITEMS_TABLE[(associated_items)]
+        GENERIC_CONSTRAINTS_TABLE[(generic_constraints)]
+        USAGE_PATTERNS_TABLE[(usage_patterns)]
+    end
+    
+    RUSTDOC_JSON --> TRAIT_EXTRACTOR
+    SOURCE_EXTRACT --> METHOD_EXTRACTOR
+    DESC_ONLY --> PATTERN_EXTRACTOR
+    
+    TRAIT_EXTRACTOR --> TRAIT_IMPL_TABLE
+    METHOD_EXTRACTOR --> TYPE_METHODS_TABLE
+    TRAIT_EXTRACTOR --> ASSOC_ITEMS_TABLE
+    METHOD_EXTRACTOR --> GENERIC_CONSTRAINTS_TABLE
+    PATTERN_EXTRACTOR --> USAGE_PATTERNS_TABLE
+    
+    STDLIB_ENHANCER --> TRAIT_IMPL_TABLE
+    STDLIB_ENHANCER --> TYPE_METHODS_TABLE
+```
+
+## Cross-Crate Search Architecture
+
+```mermaid
+graph TD
+    subgraph "Cross-Crate Search Components"
+        QUERY_ROUTER[QueryRouter<br/>scope determination<br/>crate filtering<br/>dependency traversal]
+        CRATE_INDEXER[CrateIndexer<br/>dependency graph building<br/>version resolution<br/>feature flag handling]
+        RESULT_AGGREGATOR[ResultAggregator<br/>cross-crate result merging<br/>relevance scoring<br/>deduplication]
+    end
+    
+    subgraph "Search Targets"
+        LOCAL_CRATE[Local Crate<br/>direct search]
+        DIRECT_DEPS[Direct Dependencies<br/>immediate dependencies]
+        TRANSITIVE_DEPS[Transitive Dependencies<br/>full dependency tree]
+        ECOSYSTEM[Ecosystem<br/>docs.rs corpus]
+    end
+    
+    subgraph "Search Indices"
+        CRATE_DEPS_IDX[(crate_dependencies index)]
+        RE_EXPORTS_IDX[(re_exports index)]
+        EMBEDDINGS_IDX[(embeddings vector index)]
+    end
+    
+    QUERY_ROUTER --> LOCAL_CRATE
+    QUERY_ROUTER --> DIRECT_DEPS
+    QUERY_ROUTER --> TRANSITIVE_DEPS
+    CRATE_INDEXER --> CRATE_DEPS_IDX
+    QUERY_ROUTER --> RE_EXPORTS_IDX
+    RESULT_AGGREGATOR --> EMBEDDINGS_IDX
+```
+
+## Pattern Extraction Workflow
+
+```mermaid
+graph LR
+    subgraph "Pattern Detection Flow"
+        SOURCE_CODE[Source Code<br/>Examples & Documentation]
+        AST_PARSER[AST Parser<br/>Syntax tree analysis]
+        PATTERN_MATCHER[Pattern Matcher<br/>Template matching<br/>Idiom recognition]
+        FREQUENCY_SCORER[Frequency Scorer<br/>Usage statistics<br/>Popularity weighting]
+        PATTERN_DB[(Pattern Database)]
+    end
+    
+    subgraph "Pattern Types"
+        CONSTRUCTION[Construction Patterns<br/>Type initialization<br/>Builder patterns<br/>Factory methods]
+        METHOD_CALLS[Method Call Patterns<br/>Chaining patterns<br/>Error handling<br/>Iterator usage]
+        TRAIT_USAGE[Trait Usage Patterns<br/>Implementation idioms<br/>Generic constraints<br/>Associated types]
+    end
+    
+    SOURCE_CODE --> AST_PARSER
+    AST_PARSER --> PATTERN_MATCHER
+    PATTERN_MATCHER --> CONSTRUCTION
+    PATTERN_MATCHER --> METHOD_CALLS
+    PATTERN_MATCHER --> TRAIT_USAGE
+    CONSTRUCTION --> FREQUENCY_SCORER
+    METHOD_CALLS --> FREQUENCY_SCORER
+    TRAIT_USAGE --> FREQUENCY_SCORER
+    FREQUENCY_SCORER --> PATTERN_DB
+```
+
+## Implementation Phases for Enhanced Architecture
+
+### Phase 1: Enhanced Database Schema Implementation
+
+**Database Schema Updates**:
+```sql
+-- New tables for enhanced type navigation
+CREATE TABLE trait_implementations (
+    id INTEGER PRIMARY KEY,
+    trait_path TEXT NOT NULL,
+    impl_type_path TEXT NOT NULL,
+    crate_name TEXT NOT NULL,
+    crate_version TEXT NOT NULL,
+    generic_constraints TEXT DEFAULT NULL,
+    impl_signature TEXT DEFAULT NULL,
+    is_blanket BOOLEAN DEFAULT 0,
+    item_id TEXT DEFAULT NULL,
+    UNIQUE(trait_path, impl_type_path, crate_name, crate_version)
+);
+
+CREATE TABLE type_methods (
+    id INTEGER PRIMARY KEY,
+    type_path TEXT NOT NULL,
+    method_name TEXT NOT NULL,
+    method_signature TEXT NOT NULL,
+    visibility TEXT DEFAULT 'pub',
+    method_type TEXT DEFAULT 'inherent',
+    trait_source TEXT DEFAULT NULL,
+    crate_name TEXT NOT NULL,
+    crate_version TEXT NOT NULL,
+    item_id TEXT DEFAULT NULL,
+    safety_info TEXT DEFAULT NULL
+);
+
+-- Additional tables for comprehensive coverage
+CREATE TABLE associated_items (
+    id INTEGER PRIMARY KEY,
+    container_path TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    item_type TEXT NOT NULL,
+    item_signature TEXT NOT NULL,
+    default_impl TEXT DEFAULT NULL,
+    crate_name TEXT NOT NULL,
+    crate_version TEXT NOT NULL,
+    item_id TEXT DEFAULT NULL
+);
+
+CREATE TABLE usage_patterns (
+    id INTEGER PRIMARY KEY,
+    item_path TEXT NOT NULL,
+    pattern_type TEXT NOT NULL,
+    pattern_description TEXT NOT NULL,
+    code_example TEXT NOT NULL,
+    frequency_score INTEGER DEFAULT 1,
+    context TEXT DEFAULT NULL,
+    crate_source TEXT NOT NULL,
+    version_source TEXT NOT NULL
+);
+```
+
+**Integration Points**:
+- Database migration scripts for schema updates
+- Backward compatibility with existing embeddings table
+- Index optimization for new search patterns
+
+### Phase 2: Enhanced Module Architecture
+
+**New Module Structure**:
+```python
+# docsrs_mcp/type_navigation.py - Trait and type resolution
+class TraitResolver:
+    """Handles trait implementation discovery and resolution"""
+    
+class MethodDisambiguator:
+    """Resolves method calls with trait context"""
+    
+class GenericAnalyzer:
+    """Analyzes generic constraints and bounds"""
+
+# docsrs_mcp/pattern_extraction.py - Usage pattern analysis
+class PatternDetector:
+    """Identifies common usage patterns in code"""
+    
+class FrequencyAnalyzer:
+    """Scores pattern frequency and popularity"""
+
+# docsrs_mcp/cross_reference_resolver.py - Cross-crate analysis
+class DependencyResolver:
+    """Handles transitive dependency analysis"""
+    
+class ImportAnalyzer:
+    """Optimizes import paths and suggestions"""
+
+# docsrs_mcp/import_suggestion_engine.py - Import optimization
+class PathOptimizer:
+    """Calculates optimal import paths"""
+    
+class FeatureAnalyzer:
+    """Analyzes required features and dependencies"""
+```
+
+### Phase 3: Enhanced MCP Tool Implementation
+
+**New MCP Tools**:
+1. **search_with_regex**: Advanced pattern search with regex support
+2. **search_cross_crate**: Cross-crate dependency and usage search
+3. **get_trait_implementors**: Discover all implementations of a trait
+4. **get_type_traits**: Find all traits implemented by a type
+5. **resolve_method**: Disambiguate method calls with trait context
+6. **suggest_imports**: Intelligent import path suggestions
+7. **get_full_signature**: Complete signatures with generic constraints
+8. **get_safety_info**: Extract unsafe usage requirements
+9. **extract_patterns**: Common usage pattern extraction
+10. **get_learning_path**: Generate structured learning progressions
+
+**Tool Integration Pattern**:
+```python
+@app.tool()
+async def get_trait_implementors(
+    trait_path: str,
+    crate_name: str = None,
+    include_blanket: bool = True
+) -> TraitImplementorsResponse:
+    """Find all types implementing a specific trait"""
+    # Auto-ingestion pattern
+    await ingest_crate(crate_name)
+    
+    # Enhanced trait resolution
+    resolver = TraitResolver(db_connection)
+    implementations = await resolver.get_implementations(
+        trait_path, 
+        include_blanket=include_blanket
+    )
+    
+    return TraitImplementorsResponse(implementations=implementations)
+```
+
+### Phase 4: Enhanced Ingestion Pipeline
+
+**Trait and Method Extraction**:
+```python
+class EnhancedTraitExtractor:
+    """Extracts trait implementations from rustdoc JSON"""
+    
+    def extract_impl_blocks(self, rustdoc_json: dict) -> List[TraitImpl]:
+        """Parse impl blocks for trait implementations"""
+        
+    def extract_generic_constraints(self, impl_data: dict) -> List[GenericConstraint]:
+        """Extract generic bounds and where clauses"""
+        
+    def detect_blanket_implementations(self, impl_data: dict) -> bool:
+        """Identify blanket implementations"""
+
+class EnhancedMethodExtractor:
+    """Extracts method signatures and associations"""
+    
+    def extract_inherent_methods(self, type_data: dict) -> List[Method]:
+        """Extract methods directly implemented on types"""
+        
+    def extract_trait_methods(self, impl_data: dict) -> List[Method]:
+        """Extract methods from trait implementations"""
+        
+    def analyze_method_safety(self, method_data: dict) -> SafetyInfo:
+        """Extract unsafe requirements and guarantees"""
+```
+
+## Enhanced Integration Architecture
+
+### Cross-Module Data Flow
+
+```mermaid
+graph TD
+    subgraph "Enhanced Tool Layer"
+        NEW_TOOLS[10 New MCP Tools<br/>Trait/Type/Pattern Tools]
+        EXISTING_TOOLS[Existing MCP Tools<br/>Search/Navigation Tools]
+    end
+    
+    subgraph "Enhanced Processing Layer"
+        TYPE_NAV[Type Navigation Module]
+        PATTERN_EXT[Pattern Extraction Module]
+        CROSS_REF[Cross-Reference Resolver]
+        IMPORT_SUG[Import Suggestion Engine]
+    end
+    
+    subgraph "Enhanced Data Layer"
+        NEW_SCHEMA[8 New Database Tables]
+        EXISTING_SCHEMA[Existing Schema]
+        VECTOR_INDICES[Enhanced Vector Indices]
+    end
+    
+    subgraph "Enhanced Ingestion Layer"
+        TRAIT_EXTRACT[Trait Implementation Extractor]
+        METHOD_EXTRACT[Method Signature Extractor]
+        PATTERN_DETECT[Pattern Detection Engine]
+        STDLIB_ENHANCE[Enhanced Stdlib Processing]
+    end
+    
+    NEW_TOOLS --> TYPE_NAV
+    NEW_TOOLS --> PATTERN_EXT
+    NEW_TOOLS --> CROSS_REF
+    NEW_TOOLS --> IMPORT_SUG
+    
+    TYPE_NAV --> NEW_SCHEMA
+    PATTERN_EXT --> NEW_SCHEMA
+    CROSS_REF --> NEW_SCHEMA
+    IMPORT_SUG --> NEW_SCHEMA
+    
+    TRAIT_EXTRACT --> NEW_SCHEMA
+    METHOD_EXTRACT --> NEW_SCHEMA
+    PATTERN_DETECT --> NEW_SCHEMA
+    STDLIB_ENHANCE --> NEW_SCHEMA
+    
+    EXISTING_TOOLS --> EXISTING_SCHEMA
+    NEW_SCHEMA -.->|extends| EXISTING_SCHEMA
+```
+
+### Performance and Scalability Considerations
+
+**Enhanced Indexing Strategy**:
+- Composite indexes on (trait_path, crate_name, crate_version)
+- Method lookup indexes on (type_path, method_name)
+- Pattern frequency indexes for ranking
+- Cross-crate dependency indexes for traversal
+
+**Memory Management**:
+- Lazy loading of trait implementation data
+- Cached method resolution results with TTL
+- Pattern extraction with streaming processing
+- Cross-crate search with result pagination
+
+**Query Optimization**:
+- Prepared statements for common trait queries
+- Batch processing for method extraction
+- Parallel pattern analysis across crates
+- Efficient cross-reference resolution algorithms
 
 ## Documentation Architecture
 
@@ -1471,8 +2289,9 @@ mindmap
       slowapi (rate limiting)
       OpenAPI auto-generation
       
-    MCP Integration
-      FastMCP (REST to MCP conversion)
+    MCP Integration (v3.0)
+      Official Python MCP SDK
+      Native @mcp.tool() decorators
       STDIO transport
       JSON-RPC protocol
       stderr-only logging
@@ -3517,6 +4336,8 @@ This ensures maximum compatibility across all MCP client implementations while m
 
 ### FastMCP Schema Override Pattern
 
+> **Note**: This section documents the current FastMCP implementation. **In v3.0 migration to the official Python MCP SDK, this entire workaround system will be eliminated** as the official SDK provides native compatibility without requiring schema overrides.
+
 The system implements a critical workaround for Claude Code MCP client compatibility limitations through runtime schema override functionality.
 
 #### The Problem
@@ -3893,11 +4714,11 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - `--mode rest`: Launches HTTP server
 - Single entry point in cli.py handles mode dispatch
 
-**FastMCP Integration**
-- `FastMCP.from_fastapi()` automatically converts REST endpoints to MCP tools
-- No changes required to existing FastAPI route handlers
-- Preserves all business logic, validation, and error handling
-- Maintains compatibility with existing FastAPI middleware
+**MCP Integration (v3.0)**
+- Official Python MCP SDK with native `@mcp.tool()` decorators
+- Clean separation between MCP and REST implementations
+- Eliminates FastMCP conversion layer complexity
+- Maintains all business logic, validation, and error handling patterns
 - Generates MCP-compatible JSON schemas with string-only parameters for maximum compatibility
 - **String Parameter Support**: Manifest generation uses consistent string types with examples
 - **Type Coercion System**: Pydantic field validators handle string-to-type conversion after JSON validation

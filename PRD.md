@@ -1,7 +1,7 @@
 # Product & Technical Requirements Document (PRD + TRD)
 
 **Project:** **docsrs-mcp** — a minimal, self-hostable Model Context Protocol (MCP) server that lets AI agents query Rust crate documentation without API keys.
-**Revision:** v1.0 (2025-08-04)
+**Revision:** v3.0 (2025-08-22)
 **Owner:** Solo hobby developer
 
 ---
@@ -49,6 +49,11 @@ all through the open MCP tool-calling standard, **without** proprietary services
 - Enhanced MCP tool descriptions with embedded tutorials for better AI agent usability
 - Fuzzy path matching improvements with enhanced scoring algorithms for better item path resolution
 
+**Critical Migration Requirement (v3.0 - HIGHEST PRIORITY):**
+- **Migration from FastMCP to Official Python MCP SDK**: Replace FastMCP 2.11.1 with official Python MCP SDK to achieve true MCP client compatibility and eliminate persistent schema override workarounds
+- **Code Modularization**: Refactor all files to be under 500 LOC for maintainability and adherence to coding standards
+- **Client Compatibility Resolution**: Remove complex schema override workarounds required for Claude Code integration
+
 **Planned features (v1.2+):**
 - Documentation snippets with context (200+ char with surrounding content)
 - Cross-reference support (parse and resolve intra-doc links)
@@ -56,7 +61,26 @@ all through the open MCP tool-calling standard, **without** proprietary services
 - Export capabilities (JSON, Markdown formats)
 - Enhanced batch operations (memory-aware, transaction-safe)
 
-## 3.1 · Critical Bug Fixes Required
+**Comprehensive Enhancement Plan (v2.0+):**
+- Enhanced parameter validation with MCP client compatibility fixes
+- Documentation quality improvements with stdlib excellence
+- Advanced search capabilities including fuzzy/typo-tolerant search
+- Type system navigation with trait implementations discovery
+- Code intelligence features with full type information
+- Cross-reference capabilities with import resolution
+- Development workflow enhancement with progressive detail levels
+
+## 3.1 · Critical Issues to Address
+
+**🚨 CRITICAL INFRASTRUCTURE ISSUE - BLOCKING MULTIPLE FEATURES:**
+
+0. **FastMCP Compatibility Crisis** (HIGHEST PRIORITY - BLOCKING ALL CLIENT INTEGRATION)
+   - **Problem**: Current FastMCP 2.11.1 integration causes persistent MCP client compatibility issues, especially with Claude Code
+   - **Impact**: Requires complex schema override workarounds, unpredictable client behavior, and prevents seamless integration with standard MCP clients
+   - **Root Cause**: FastMCP implementation diverges from official MCP specification in parameter validation and schema handling
+   - **Additional Issue**: Files exceeding 500 LOC violate maintainability standards and make debugging/modification difficult
+   - **Fix Required**: Complete migration to Official Python MCP SDK with simultaneous code modularization
+   - **Priority**: HIGHEST - This blocks multiple other features and fixes, must be completed before v3.0 release
 
 **🚨 URGENT - BROKEN FUNCTIONALITY:**
 
@@ -147,7 +171,8 @@ all through the open MCP tool-calling standard, **without** proprietary services
         cache/*.db
 ```
 
-**Runtime stack**: Python 3.10+, FastAPI, Uvicorn + uvloop, `sqlite-vss` (FAISS), FastEmbed (ONNX model `BAAI/bge-small-en-v1.5`, 384 d), RapidFuzz (fuzzy path matching).
+**Runtime stack**: Python 3.10+, Official Python MCP SDK (replacing FastMCP), FastAPI, Uvicorn + uvloop, `sqlite-vss` (FAISS), FastEmbed (ONNX model `BAAI/bge-small-en-v1.5`, 384 d), RapidFuzz (fuzzy path matching).
+**Architecture**: Modular codebase with all files under 500 LOC for maintainability.
 **Launch**: `uvx` executes console-script directly from PyPI or a Git ref (zero install).
 
 ---
@@ -298,7 +323,186 @@ async def pre_ingest_popular_crates(crate_list: List[str], concurrency: int = 3)
 - **Transaction Safety:** ACID-compliant batch operations with rollback support
 - **Progress Tracking:** Detailed progress reporting for long-running batch operations
 
-### 6.3 FastAPI application (`docsrs_mcp.app`)
+### 6.3 Comprehensive Enhancement Plan (v2.0+)
+
+#### 6.3.1 Enhanced Parameter Validation
+
+**Purpose:** Fix all MCP client compatibility issues and ensure robust parameter handling across all tools.
+
+**Critical Requirements:**
+- **MCP Client Compatibility:** Fix parameter validation failures that cause tool discovery errors
+- **Pre-ingestion Tools:** Ensure all pre-ingestion configuration parameters validate properly
+- **Comprehensive Error Messages:** Provide clear, actionable error messages for all validation failures
+- **Type Flexibility:** Accept both integer and string types for numeric parameters using anyOf patterns
+- **Boolean Parameter Consistency:** Standardize boolean parameter declarations across all tools
+
+**Performance Targets:**
+- All parameter validation completes in <10ms
+- Error messages provide specific guidance for correction
+- 100% compatibility with standard MCP clients
+
+**Success Metrics:**
+- Zero MCP manifest validation failures
+- All numeric parameters (k, limit, offset) accept both int/string types
+- Pre-ingestion startup succeeds with all parameter combinations
+- Error messages include suggested corrections
+
+#### 6.3.2 Documentation Quality Improvements
+
+**Purpose:** Achieve excellent stdlib documentation quality and enhance filtering capabilities.
+
+**Technical Requirements:**
+- **Stdlib Excellence:** Leverage rust-lang.org documentation for comprehensive standard library coverage
+- **Module Tree Filtering:** Exclude dependency documentation to focus on target crate content
+- **Version Comparison:** Fix NoneType errors in version comparison functionality
+- **Documentation Completeness:** Ensure all public APIs have accessible documentation
+
+**Performance Targets:**
+- Standard library queries respond in <200ms
+- Module filtering reduces result noise by >80%
+- Version comparison operations complete without errors
+
+**Success Metrics:**
+- std library items fully searchable and retrievable
+- Dependency modules properly filtered from results
+- Version comparison handles all edge cases gracefully
+- Documentation coverage >95% for ingested crates
+
+#### 6.3.3 Advanced Search Capabilities
+
+**Purpose:** Implement comprehensive search features including fuzzy matching, regex patterns, and cross-crate search.
+
+**Technical Requirements:**
+- **Fuzzy/Typo-Tolerant Search:** Intelligent fuzzy matching with configurable tolerance levels
+- **Regex Pattern Matching:** Full regex support for complex query patterns
+- **Cross-Crate Search:** Simultaneous search across multiple crates with result aggregation
+- **Stability Filtering:** Filter results by stability level (stable/unstable/experimental)
+- **Advanced Ranking:** Multi-factor relevance scoring including popularity and recency
+
+**Performance Targets:**
+- Fuzzy search completes in <300ms across 10k+ items
+- Regex queries process in <500ms for complex patterns
+- Cross-crate search handles 5+ crates simultaneously in <1s
+
+**Success Metrics:**
+- Fuzzy search accuracy >90% for common typos
+- Regex patterns support full PCRE syntax
+- Cross-crate results properly ranked and deduplicated
+- Stability filtering reduces unstable API noise
+
+#### 6.3.4 Type System Navigation
+
+**Purpose:** Provide deep type system insights including trait implementations and generic constraints.
+
+**Technical Requirements:**
+- **Trait Implementations Discovery:** Find all types implementing specific traits
+- **Method Resolution:** Show available methods with trait scope information
+- **Generic Constraints:** Display generic bounds and lifetime parameters
+- **Associated Types/Constants:** Navigate trait associated items
+- **Type Relationships:** Visualize inheritance and implementation hierarchies
+
+**Performance Targets:**
+- Trait implementation queries complete in <400ms
+- Method resolution handles complex generic types in <200ms
+- Type relationship traversal supports 3+ levels deep
+
+**Success Metrics:**
+- All trait implementations discoverable through search
+- Method signatures include full generic information
+- Associated types properly linked to trait definitions
+- Generic constraints clearly displayed with bounds
+
+### 6.4.1 Critical Infrastructure Migration (v3.0)
+
+**Purpose:** Replace FastMCP with Official Python MCP SDK and modularize codebase for maintainability.
+
+**Technical Requirements:**
+- **MCP SDK Migration:** Complete replacement of FastMCP 2.11.1 with official Python MCP SDK
+- **Client Compatibility:** Eliminate all schema override workarounds required for Claude Code integration
+- **Code Modularization:** Refactor all source files to be under 500 LOC
+- **Backward Compatibility:** Maintain all existing API functionality during migration
+- **Testing:** Comprehensive validation with multiple MCP clients to ensure universal compatibility
+
+**Performance Targets:**
+- Migration completes without functionality loss
+- All existing performance benchmarks maintained or improved
+- Reduced client integration complexity
+- Improved maintainability through modular architecture
+
+**Success Metrics:**
+- **Elimination of Schema Override Workarounds:** 100% removal of Claude Code compatibility hacks
+- **Universal MCP Client Compatibility:** Support for all standard MCP clients without custom modifications
+- **Code Quality Standards:** All source files under 500 LOC for improved maintainability
+- **Zero Regression:** All existing functionality works identically after migration
+- **Performance Maintenance:** No degradation in response times or resource usage
+
+#### 6.3.5 Code Intelligence Features
+
+**Purpose:** Extract and present comprehensive code intelligence including full signatures and safety information.
+
+**Technical Requirements:**
+- **Full Function Signatures:** Complete type information with generic parameters
+- **Error Type Extraction:** Identify and categorize error types and propagation
+- **Unsafe Code Indicators:** Clear marking of unsafe blocks and functions
+- **Feature Flag Requirements:** Display required feature flags for APIs
+- **Documentation Links:** Cross-reference to relevant documentation sections
+
+**Performance Targets:**
+- Signature extraction completes in <100ms per item
+- Error type analysis processes in <150ms
+- Feature flag detection handles complex feature matrices
+
+**Success Metrics:**
+- Function signatures include all generic bounds
+- Error types properly categorized (recoverable/unrecoverable)
+- Unsafe code clearly marked with safety documentation
+- Feature requirements accurately identified
+
+#### 6.3.6 Cross-Reference Capabilities
+
+**Purpose:** Provide comprehensive cross-reference support for navigation and understanding dependencies.
+
+**Technical Requirements:**
+- **Import Resolution Assistance:** Help resolve import paths and suggest alternatives
+- **Re-exports Visibility:** Show re-exported items and their original locations
+- **Dependency Trees:** Visualize dependency relationships and version constraints
+- **Version Compatibility:** Check compatibility across dependency versions
+- **Usage Examples:** Find real-world usage patterns in ecosystem
+
+**Performance Targets:**
+- Import resolution suggestions in <200ms
+- Dependency tree generation completes in <500ms
+- Version compatibility checks process in <300ms
+
+**Success Metrics:**
+- Import suggestions >85% accuracy for common cases
+- Re-exports properly traced to original definitions
+- Dependency trees include version constraint information
+- Compatibility checks prevent version conflicts
+
+#### 6.3.7 Development Workflow Enhancement
+
+**Purpose:** Support development workflows with progressive disclosure and pattern extraction.
+
+**Technical Requirements:**
+- **Progressive Detail Levels:** Support summary → detailed → expert views
+- **Pattern Extraction:** Identify common usage patterns and idioms
+- **Migration Path Generation:** Generate migration guides between versions
+- **Interactive Exploration:** Support drill-down navigation through complex types
+- **Context Preservation:** Maintain context across related queries
+
+**Performance Targets:**
+- Detail level switching in <50ms
+- Pattern extraction completes in <400ms across large codebases
+- Migration path generation processes in <1s for major version changes
+
+**Success Metrics:**
+- Progressive disclosure reduces cognitive load
+- Pattern extraction identifies 80%+ of common idioms
+- Migration paths include specific code transformation steps
+- Context preservation enables seamless exploration workflows
+
+### 6.4 FastAPI application (`docsrs_mcp.app`)
 
 | Route                          | Method | Purpose                                           | Response                                         |
 | ------------------------------ | ------ | ------------------------------------------------- | ------------------------------------------------ |
@@ -315,7 +519,7 @@ Responses validate against in-repo JSON Schema before send (pydantic). MCP manif
 
 ---
 
-### 6.4 Ingestion pipeline (`ingest.py`)
+### 6.5 Ingestion pipeline (`ingest.py`)
 
 | Step                                                                                                                                                                                                                             | Detail                                                                                                                                                                                                                                                |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -358,7 +562,7 @@ Responses validate against in-repo JSON Schema before send (pydantic). MCP manif
 
 ---
 
-### 6.5 Vector search query
+### 6.6 Vector search query
 
 ```sql
 SELECT id,
@@ -377,7 +581,7 @@ LIMIT :k;
 
 ---
 
-### 6.6 Concurrency & performance
+### 6.7 Concurrency & performance
 
 * Single Uvicorn worker avoids duplicating the 45 MiB ONNX model.
 * All embedding calls `asyncio.to_thread`, keeping the event loop non-blocking.
@@ -386,7 +590,7 @@ LIMIT :k;
 
 ---
 
-### 6.7 Security
+### 6.8 Security
 
 * **Origin allow-list:** only fetch from `https://docs.rs/…`.
 * **Size caps:** 30 MiB compressed / 100 MiB decompressed.
@@ -407,7 +611,7 @@ LIMIT :k;
 
 ---
 
-### 6.8 CLI entry point
+### 6.9 CLI entry point
 
 ```python
 # Current implementation
@@ -443,7 +647,7 @@ def main() -> None:
     cli()
 ```
 
-### 6.9 Packaging (uv-native)
+### 6.10 Packaging (uv-native)
 
 ```toml
 [project]
@@ -481,7 +685,7 @@ dev-dependencies = [
 - `uv sync` - Install locked dependencies
 - `uv build` - Create wheel/sdist for PyPI
 
-### 6.10 Zero-install launch
+### 6.11 Zero-install launch
 
 ```bash
 uvx --from "git+https://github.com/<user>/docsrs-mcp.git" docsrs-mcp --port 8000
@@ -496,7 +700,7 @@ uvx docsrs-mcp@latest
 | Category          | Requirement                                                                            |
 | ----------------- | -------------------------------------------------------------------------------------- |
 | **Portability**   | CPython 3.10+; CI on Ubuntu 22.04, macOS 14, Windows 11 (GitHub Actions).              |
-| **Performance**   | All search operations: ≤ 500 ms P95 (warm) across expanded dataset; ≤ 3 s cold ingest for crates ≤ 10 MiB compressed with full item indexing. Warm embeddings: <100ms for all operations through pre-warming optimization. |
+| **Performance**   | All search operations: ≤ 500 ms P95 (warm) across expanded dataset; ≤ 3 s cold ingest for crates ≤ 10 MiB compressed with full item indexing. Warm embeddings: <100ms for all operations through pre-warming optimization. Enhanced search capabilities: fuzzy search <300ms, regex queries <500ms, cross-crate search <1s for 5+ crates. |
 | **Memory**        | ≤ 1 GiB RSS incl. ONNX & FAISS under 10 k vectors (with pre-ingestion enabled).       |
 | **Disk**          | Cache auto-evicts to ≤ 2 GiB (priority-aware LRU for pre-ingested crates).            |
 | **Availability**  | Stateless web layer; cache can be rebuilt.                                             |
@@ -544,6 +748,18 @@ uvx docsrs-mcp@latest
 19. **Tutorial integration**: All MCP tool descriptions include embedded tutorials accessible via `/mcp/manifest` with ≤ 200 tokens per tool.
 20. **Performance**: Pre-ingested popular crates (tokio, serde, clap) respond in ≤ 100ms for search and summary operations.
 21. **Cache priority**: Pre-ingested crates are retained longer during LRU eviction compared to on-demand crates.
+
+**Comprehensive Enhancement Acceptance Criteria (v2.0+):**
+22. **MCP SDK Migration**: Official Python MCP SDK successfully replaces FastMCP with zero schema override workarounds required.
+23. **Code Modularization**: All source files under 500 LOC with maintained functionality and improved maintainability.
+24. **Client Compatibility**: 100% compatibility with Claude Code and other standard MCP clients without custom modifications.
+25. **Parameter Validation**: All MCP tools accept both integer and string types for numeric parameters without validation errors.
+26. **Documentation Quality**: Standard library items fully searchable with >95% coverage and proper filtering of dependency modules.
+27. **Advanced Search**: Fuzzy search achieves >90% accuracy for common typos, regex patterns support full PCRE syntax.
+28. **Type System Navigation**: All trait implementations discoverable, method signatures include full generic information.
+29. **Code Intelligence**: Function signatures display complete type information, unsafe code clearly marked.
+30. **Cross-Reference**: Import resolution suggestions achieve >85% accuracy, dependency trees include version constraints.
+31. **Workflow Enhancement**: Progressive detail levels reduce cognitive load, pattern extraction identifies 80%+ of common idioms.
 
 ---
 

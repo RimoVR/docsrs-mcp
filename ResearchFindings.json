@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-16",
+    "lastUpdated": "2025-08-22",
     "compressionVersion": "1.1",
     "originalTokens": 47800,
     "legend": {
@@ -41,6 +41,7 @@
     "globals": {
       "versions": {
         "fastmcp": "2.11.1",
+        "official_mcp_sdk": "1.13.1",
         "sqlitevec": "0.1.0+",
         "aiohttp": "3.9.5",
         "fastembed": "0.7.1",
@@ -192,6 +193,127 @@
             "performance_impact": "Minimal - override runs once at startup, no runtime overhead after initialization"
           }
         }
+      }
+    },
+    "official_python_mcp_sdk_migration": {
+      "overview": "Research on migrating from FastMCP to official Python MCP SDK",
+      "research_date": "2025-08-22",
+      "context": "Investigation of official SDK migration path for improved compatibility",
+      "key_findings": {
+        "fastmcp_incorporation": "FastMCP 1.0 incorporated into official SDK as 'from mcp.server.fastmcp import FastMCP'",
+        "decorator_pattern": "Official SDK provides @mcp.tool() decorators for cleaner tool definitions",
+        "compatibility_improvement": "Better Claude Code compatibility expected without schema override hacks",
+        "transport_support": "Supports stdio, SSE, and StreamableHTTP transports",
+        "python_requirement": "Python 3.10+ requirement aligns with current project setup"
+      },
+      "migration_strategy": {
+        "approach": "Parallel implementation allows safe testing before switchover",
+        "modularization": "Provides natural break points for refactoring",
+        "business_logic": "Business logic remains unchanged, only interface layer changes"
+      },
+      "security_considerations": {
+        "stdio_vulnerabilities": "Stdio transport has known vulnerabilities (avoid in production)",
+        "authentication_gap": "Official SDK lacks built-in authentication (implement custom TokenVerifier)",
+        "production_transport": "StreamableHTTP preferred for future production deployments"
+      },
+      "performance_expectations": {
+        "stdio_latency": "Microsecond-level latency (same as current)",
+        "regression_risk": "No performance regression expected for local MCP operations",
+        "validation_overhead": "Potential for better performance without double validation overhead"
+      },
+      "version_information": {
+        "current_fastmcp": "#{fastmcp}",
+        "target_sdk": "mcp>=#{official_mcp_sdk} (official SDK)",
+        "installation": "uv add 'mcp[cli]'"
+      },
+      "implementation_benefits": {
+        "cleaner_apis": "Decorator-based tool definitions more readable",
+        "better_integration": "Native MCP protocol compliance",
+        "reduced_workarounds": "Eliminates need for schema override hacks",
+        "future_proof": "Aligned with official MCP ecosystem evolution"
+      },
+      "migration_priorities": {
+        "phase_1": "Parallel implementation with official SDK alongside FastMCP",
+        "phase_2": "Comprehensive testing with actual MCP clients",
+        "phase_3": "Performance benchmarking and validation", 
+        "phase_4": "Production switchover after validation"
+      }
+    },
+    "official_mcp_python_sdk_research": {
+      "overview": "Comprehensive research on official MCP Python SDK for accurate migration planning",
+      "research_date": "2025-08-22",
+      "context": "Detailed investigation of actual SDK version, features, and implementation patterns",
+      "version_correction": {
+        "assumed_version": "v3.0 (incorrect assumption)",
+        "actual_version": "1.13.1 (August 2025)",
+        "no_v3_exists": "No v3.0 version exists despite initial assumptions",
+        "version_history": "FastMCP 1.0 incorporated into official SDK in 2024"
+      },
+      "installation_details": {
+        "primary_method": "pip install 'mcp[cli]' or uv add 'mcp[cli]'",
+        "python_requirements": "Python >=3.10",
+        "license": "MIT License",
+        "maintainer": "Anthropic, PBC",
+        "github_repo": "https://github.com/modelcontextprotocol/python-sdk",
+        "pypi_package": "https://pypi.org/project/mcp/"
+      },
+      "sdk_features": {
+        "fastmcp_integration": "FastMCP 1.0 incorporated into official SDK in 2024",
+        "tool_registration": "@mcp.tool() decorator with automatic schema generation",
+        "structured_output": "Native support for Pydantic models, TypedDicts, classes with type hints",
+        "transport_modes": "STDIO (local) and HTTP/SSE (remote) dual-mode support",
+        "context_injection": "Progress reporting via ctx.report_progress()",
+        "automatic_schemas": "SDK handles string conversion automatically"
+      },
+      "migration_patterns": {
+        "import_statement": "from mcp.server.fastmcp import FastMCP, Context",
+        "tool_decorator": "@mcp.tool() with automatic schema generation",
+        "function_signature": "async def tool_name(param: str, optional: Optional[int] = None) -> dict",
+        "documentation": "Tool description for auto-documentation via docstring",
+        "type_hints": "Use type hints for automatic schema generation"
+      },
+      "claude_code_integration": {
+        "configuration": "JSON with mcpServers object",
+        "scopes": "local (project), project (.mcp.json), user (cross-project)",
+        "authentication": "OAuth 2.0 for remote servers",
+        "parameter_handling": "SDK handles string conversion automatically",
+        "transport_preference": "STDIO for local development, HTTP for remote"
+      },
+      "performance_characteristics": {
+        "warm_search": "<50ms with proper caching",
+        "memory_usage": "Monitor for known leak issue (1.13.1)",
+        "concurrency": "Async/await patterns recommended",
+        "transport_choice": "STDIO for local, HTTP for remote",
+        "comparison_to_fastmcp": "Similar performance, potentially better validation"
+      },
+      "best_practices": {
+        "type_hints": "Use type hints for automatic schema generation",
+        "structured_output": "Implement structured output with Pydantic models",
+        "stdout_prohibition": "Never write to stdout in STDIO mode (use stderr)",
+        "configuration": "Use environment variables for configuration",
+        "error_handling": "Implement proper error handling with McpError",
+        "background_testing": "Use nohup for background process testing"
+      },
+      "documentation_references": {
+        "github": "https://github.com/modelcontextprotocol/python-sdk",
+        "quickstart": "https://modelcontextprotocol.io/quickstart/server",
+        "pypi": "https://pypi.org/project/mcp/",
+        "claude_code_docs": "https://docs.anthropic.com/en/docs/claude-code/mcp",
+        "specification": "https://spec.modelcontextprotocol.io/specification/"
+      },
+      "important_caveats": {
+        "version_confusion": "No v3.0 version exists despite initial assumptions",
+        "fastmcp_separation": "FastMCP 2.0 is separate from official SDK",
+        "memory_leak": "Memory leak confirmed in 1.13.1 - implement monitoring",
+        "testing_requirement": "Use nohup for background process testing",
+        "validation_differences": "Validation behavior may differ from FastMCP standalone"
+      },
+      "migration_readiness": {
+        "sdk_maturity": "Production ready as of 1.13.1",
+        "feature_parity": "Full feature parity with FastMCP standalone",
+        "compatibility_improvements": "Expected better Claude Code compatibility",
+        "migration_risk": "Low risk - same underlying FastMCP implementation",
+        "rollback_strategy": "Can maintain both implementations during transition"
       }
     },
     "vector_search": {
@@ -1339,7 +1461,17 @@
       "Implement systematic tool audit with ingest_crate() verification across all MCP endpoints",
       "Use atomic state management for ingestion completion tracking beyond simple file existence",
       "Standardize schema across all ingestion tiers to maintain version comparison accuracy",
-      "Implement completion verification at each ingestion stage: download, parse, embed, cross-reference"
+      "Implement completion verification at each ingestion stage: download, parse, embed, cross-reference",
+      "Use Ajv with compiled schemas for high-performance JSON Schema validation",
+      "Implement application-layer validation separate from JSON Schema structure validation",
+      "Use cargo-modules for workspace-aware Rust module dependency analysis",
+      "Apply petgraph algorithms for efficient module relationship traversal",
+      "Integrate HIR-based semantic analysis for type system navigation",
+      "Use tower-lsp async handlers with proper capability negotiation",
+      "Implement CancellationToken patterns for cooperative LSP operation cancellation",
+      "Apply progressive timeout strategies for complex LSP analysis operations",
+      "Use rustup rust-docs-json component for complete standard library JSON access",
+      "Implement structured error responses with field-level context for validation failures"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",
@@ -1365,10 +1497,10 @@
     }
   },
   "stats": {
-    "original_tokens": 47800,
-    "compressed_tokens_estimate": 16200,
-    "compression_ratio": "66.1%",
-    "token_reduction": 31600,
+    "original_tokens": 52400,
+    "compressed_tokens_estimate": 18900,
+    "compression_ratio": "63.9%",
+    "token_reduction": 33500,
     "preservation": {
       "technical_details": "100%",
       "library_versions": "100%", 

@@ -1,7 +1,7 @@
 {
   "taskManagement": {
-    "description": "Task tracking for docsrs-mcp development",
-    "lastUpdated": "2025-08-16T12:00:00Z",
+    "description": "Task tracking for docsrs-mcp development with comprehensive 20-day enhancement plan",
+    "lastUpdated": "2025-08-22T16:30:00Z",
     "priorities": [
       "critical",
       "high",
@@ -887,6 +887,395 @@
     ],
     "critical": [
       {
+        "id": "sdk-migration-research",
+        "title": "GROUP 1: Research & Planning Bundle - SDK Migration Research",
+        "description": "Research official MCP SDK, create comprehensive migration checklist, and design new module structure for SDK-based implementation",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "MEDIUM",
+        "sessionGroup": 1,
+        "estimatedHours": "2-3",
+        "canBundleWith": ["sdk-migration-setup"],
+        "dependencies": [],
+        "effort": "medium",
+        "impact": "critical",
+        "relatedTasks": [
+          "sdk-migration-setup",
+          "sdk-migration-split-models",
+          "sdk-migration-split-api",
+          "sdk-migration-split-ingest",
+          "sdk-migration-split-database",
+          "sdk-migration-tools",
+          "sdk-migration-testing",
+          "sdk-migration-cleanup"
+        ],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-research.1",
+            "title": "Research official MCP SDK features and patterns",
+            "description": "Study the official MCP SDK documentation, examples, and best practices",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-research.2", 
+            "title": "Create comprehensive migration checklist",
+            "description": "Document all components that need migration and potential gotchas",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-research.3",
+            "title": "Design new module structure",
+            "description": "Plan the modular architecture for SDK-based implementation",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-setup",
+        "title": "GROUP 2: SDK Setup & Initial Implementation",
+        "description": "Install official MCP SDK, create parallel module structure alongside existing FastMCP, and implement basic MCP server functionality",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "HIGH",
+        "sessionGroup": 2,
+        "estimatedHours": "4-5",
+        "canBundleWith": [],
+        "dependencies": ["sdk-migration-research"],
+        "effort": "large",
+        "impact": "critical",
+        "relatedTasks": [
+          "sdk-migration-split-models",
+          "sdk-migration-split-api",
+          "sdk-migration-split-ingest",
+          "sdk-migration-split-database",
+          "sdk-migration-tools"
+        ],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-setup.1",
+            "title": "Install official MCP SDK",
+            "description": "Add official MCP SDK dependency to pyproject.toml",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-setup.2",
+            "title": "Create parallel module structure",
+            "description": "Set up new modular structure alongside existing FastMCP implementation",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-setup.3",
+            "title": "Implement basic MCP server",
+            "description": "Create minimal MCP server using official SDK as foundation",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-split-models",
+        "title": "GROUP 3: Simple Modularization Bundle - Split models.py",
+        "description": "Split models.py (~1000 lines) into 4 focused modules: request_models.py, response_models.py, database_models.py, and validation_models.py",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "LOW-MEDIUM",
+        "sessionGroup": 3,
+        "estimatedHours": "1.5-2",
+        "canBundleWith": ["sdk-migration-split-api"],
+        "dependencies": ["sdk-migration-setup"],
+        "effort": "medium",
+        "impact": "high",
+        "relatedTasks": ["sdk-migration-split-api"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-split-models.1",
+            "title": "Create request_models.py",
+            "description": "Extract all MCP request models and validation schemas",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-models.2",
+            "title": "Create response_models.py", 
+            "description": "Extract all MCP response models and output schemas",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-models.3",
+            "title": "Create database_models.py",
+            "description": "Extract database table models and SQLAlchemy definitions",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-models.4",
+            "title": "Create validation_models.py",
+            "description": "Extract validation functions and utility models",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-split-api",
+        "title": "GROUP 3: Simple Modularization Bundle - Split app.py",
+        "description": "Split app.py (~2000 lines) into 3 focused modules: server.py, endpoints.py, and middleware.py with clear separation of concerns",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "LOW-MEDIUM",
+        "sessionGroup": 3,
+        "estimatedHours": "1.5-2",
+        "canBundleWith": ["sdk-migration-split-models"],
+        "dependencies": ["sdk-migration-split-models"],
+        "effort": "medium",
+        "impact": "high",
+        "relatedTasks": ["sdk-migration-split-models"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-split-api.1",
+            "title": "Create server.py",
+            "description": "Extract MCP server initialization and configuration",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-api.2",
+            "title": "Create endpoints.py",
+            "description": "Extract all MCP tool endpoint implementations",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-api.3",
+            "title": "Create middleware.py",
+            "description": "Extract error handling, logging, and middleware components",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-split-ingest",
+        "title": "GROUP 4: Complex Modularization - Split ingest.py (High Complexity)",
+        "description": "Split ingest.py (3500+ lines) into 4 focused modules: ingest_coordinator.py, extractors/, processors/, and validators/ with careful dependency management",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "HIGH",
+        "sessionGroup": 4,
+        "estimatedHours": "4-5",
+        "canBundleWith": [],
+        "dependencies": ["sdk-migration-split-api"],
+        "effort": "large",
+        "impact": "critical",
+        "relatedTasks": ["sdk-migration-split-database"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-split-ingest.1",
+            "title": "Create ingest_coordinator.py",
+            "description": "Extract main ingestion orchestration and workflow logic",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-ingest.2",
+            "title": "Create extractors/ module",
+            "description": "Extract data extraction logic (docs.rs, source code, metadata)",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-ingest.3",
+            "title": "Create processors/ module",
+            "description": "Extract processing logic (embeddings, parsing, transformation)",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-ingest.4",
+            "title": "Create validators/ module",
+            "description": "Extract validation logic and schema checking",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-split-database",
+        "title": "GROUP 5: Complex Modularization - Split database.py (High Complexity)",
+        "description": "Split database.py into 3 focused modules: connection_manager.py, vector_search.py, and data_access.py with special attention to vector search complexity",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "HIGH",
+        "sessionGroup": 5,
+        "estimatedHours": "3-4",
+        "canBundleWith": [],
+        "dependencies": ["sdk-migration-split-ingest"],
+        "effort": "large",
+        "impact": "critical",
+        "relatedTasks": ["sdk-migration-tools"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-split-database.1",
+            "title": "Create connection_manager.py",
+            "description": "Extract database connection, initialization, and migration logic",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-database.2",
+            "title": "Create vector_search.py",
+            "description": "Extract vector embedding storage, retrieval, and search functionality",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-split-database.3",
+            "title": "Create data_access.py",
+            "description": "Extract CRUD operations and data access patterns",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-tools",
+        "title": "GROUP 6: Tool Migration Bundle - Migrate MCP Tools",
+        "description": "Migrate all 9 MCP tools from FastMCP format to official SDK @mcp.tool() decorators with proper type hints and validation",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "HIGH",
+        "sessionGroup": 6,
+        "estimatedHours": "4-5",
+        "canBundleWith": [],
+        "dependencies": ["sdk-migration-split-database"],
+        "effort": "large",
+        "impact": "critical",
+        "relatedTasks": ["sdk-migration-testing"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-tools.1",
+            "title": "Migrate search tools",
+            "description": "Convert searchSymbols, searchExamples, and searchDocumentation tools",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-tools.2",
+            "title": "Migrate retrieval tools",
+            "description": "Convert getCrateSummary, getCrateVersions, and getStdLibrary tools",
+            "status": "pending", 
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-tools.3",
+            "title": "Migrate analysis tools",
+            "description": "Convert analyzeVersionDifference, getSourceCode, and pre-ingestion tools",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-testing",
+        "title": "GROUP 7: Testing & Validation Bundle",
+        "description": "Comprehensive testing of SDK migration including Claude Code compatibility, performance benchmarks, and test suite updates",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "MEDIUM",
+        "sessionGroup": 7,
+        "estimatedHours": "3-4",
+        "canBundleWith": ["sdk-migration-cleanup"],
+        "dependencies": ["sdk-migration-tools"],
+        "effort": "medium",
+        "impact": "high",
+        "relatedTasks": ["sdk-migration-cleanup"],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-testing.1",
+            "title": "Claude Code compatibility testing",
+            "description": "Test all MCP tools with Claude Code to ensure proper integration",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-testing.2",
+            "title": "Performance benchmarks",
+            "description": "Compare SDK vs FastMCP performance for all operations",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-testing.3",
+            "title": "Update test suite",
+            "description": "Update all unit and integration tests for new module structure",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-cleanup",
+        "title": "GROUP 8: Cleanup Bundle - Finalization",
+        "description": "Remove FastMCP dependencies, update documentation, and perform final validation of SDK migration",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "LOW",
+        "sessionGroup": 8,
+        "estimatedHours": "2",
+        "canBundleWith": ["sdk-migration-testing"],
+        "dependencies": ["sdk-migration-testing"],
+        "effort": "small",
+        "impact": "medium",
+        "relatedTasks": [],
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "sdk-migration-cleanup.1",
+            "title": "Remove FastMCP dependencies",
+            "description": "Clean up pyproject.toml and remove unused FastMCP code",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-cleanup.2",
+            "title": "Update documentation",
+            "description": "Update README, Architecture.md, and other docs for SDK-based implementation",
+            "status": "pending",
+            "progress": 0
+          },
+          {
+            "id": "sdk-migration-cleanup.3",
+            "title": "Final validation",
+            "description": "Comprehensive testing and validation of completed migration",
+            "status": "pending",
+            "progress": 0
+          }
+        ]
+      },
+      {
         "id": "fix-examples-1",
         "title": "Fix searchExamples character fragmentation bug",
         "description": "Fix iteration bug in generate_example_embeddings that causes string to be split into characters",
@@ -1691,6 +2080,142 @@
           "implementation": "Enhanced source extraction, schema standardization, comparison engine updates",
           "scope": "Fallback ingestion system and version comparison engine"
         }
+      },
+      {
+        "id": "mcp-sdk-migration",
+        "title": "Migrate from FastMCP 2.11.1 to Official MCP SDK 1.13.1",
+        "description": "Complete migration from FastMCP to official MCP SDK with modular refactoring to files under 500 LOC, maintaining performance and eliminating schema override workarounds",
+        "status": "pending",
+        "priority": "critical",
+        "progress": 0,
+        "complexity": "HIGH",
+        "estimatedHours": "24 hours (3 days)",
+        "dependencies": [],
+        "relatedTasks": [
+          "sdk-migration-research",
+          "sdk-migration-setup",
+          "sdk-migration-split-models",
+          "sdk-migration-split-api",
+          "sdk-migration-split-ingest",
+          "sdk-migration-split-database",
+          "sdk-migration-tools",
+          "sdk-migration-testing",
+          "sdk-migration-cleanup"
+        ],
+        "roadblocks": [
+          "MCP SDK 1.13.1 has known memory leak issues",
+          "Parameter validation edge cases with Claude Code",
+          "Files currently exceed 500 LOC (app.py: 2047, models.py: 1800+, database.py: 1000+)"
+        ],
+        "successCriteria": [
+          "All files under 500 LOC",
+          "Zero schema override workarounds",
+          "Performance maintained (≤500ms P95, ≤1 GiB RSS)",
+          "Zero functional regression",
+          "Claude Code compatibility without modifications"
+        ],
+        "keyDiscovery": "MCP SDK v3.0 doesn't exist - latest is 1.13.1 (August 2025) which incorporates FastMCP 1.0 functionality",
+        "subtasks": [
+          {
+            "id": "mcp-sdk-migration.1",
+            "title": "Update dependencies - Add mcp>=1.13.1",
+            "description": "Day 1 Morning - Add official MCP SDK dependency and update pyproject.toml",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 1,
+            "schedule": "Day 1 Morning"
+          },
+          {
+            "id": "mcp-sdk-migration.2",
+            "title": "Create modular directory structure (services/, database/, models/)",
+            "description": "Day 1 Morning - Set up new directory structure with services/, database/, and models/ subdirectories",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 1,
+            "schedule": "Day 1 Morning"
+          },
+          {
+            "id": "mcp-sdk-migration.3",
+            "title": "Extract business logic to service modules",
+            "description": "Day 1 Afternoon - Move business logic from app.py to focused service modules",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 3,
+            "schedule": "Day 1 Afternoon"
+          },
+          {
+            "id": "mcp-sdk-migration.4",
+            "title": "Split database.py into connection, operations, cache modules",
+            "description": "Day 1 Afternoon - Break down database.py into smaller, focused modules",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 2,
+            "schedule": "Day 1 Afternoon"
+          },
+          {
+            "id": "mcp-sdk-migration.5",
+            "title": "Split models.py into requests, responses, validators",
+            "description": "Day 1 Afternoon - Separate models.py into request, response, and validation modules",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 2,
+            "schedule": "Day 1 Afternoon"
+          },
+          {
+            "id": "mcp-sdk-migration.6",
+            "title": "Create mcp_tools.py with @mcp.tool() decorators",
+            "description": "Day 2 Morning - Implement MCP tools using official SDK decorators",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 3,
+            "schedule": "Day 2 Morning"
+          },
+          {
+            "id": "mcp-sdk-migration.7",
+            "title": "Remove override_fastmcp_schemas() workaround",
+            "description": "Day 2 Morning - Eliminate all schema override workarounds now that official SDK is used",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 1,
+            "schedule": "Day 2 Morning"
+          },
+          {
+            "id": "mcp-sdk-migration.8",
+            "title": "Update mcp_server.py for official SDK",
+            "description": "Day 2 Afternoon - Refactor server initialization and configuration for official SDK",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 3,
+            "schedule": "Day 2 Afternoon"
+          },
+          {
+            "id": "mcp-sdk-migration.9",
+            "title": "Create rest_api.py for FastAPI endpoints",
+            "description": "Day 2 Afternoon - Separate REST API endpoints into dedicated module",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 2,
+            "schedule": "Day 2 Afternoon"
+          },
+          {
+            "id": "mcp-sdk-migration.10",
+            "title": "Test MCP tools and REST endpoints",
+            "description": "Day 3 Morning - Comprehensive testing of both MCP and REST functionality",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 3,
+            "schedule": "Day 3 Morning"
+          },
+          {
+            "id": "mcp-sdk-migration.11",
+            "title": "Run quality checks and performance validation",
+            "description": "Day 3 Afternoon - Validate file sizes, performance metrics, and functional regression testing",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 2,
+            "schedule": "Day 3 Afternoon"
+          }
+        ]
       }
     ],
     "medium": [
@@ -3193,6 +3718,337 @@
           "resolution": "Added validation to detect insufficient ingestion and provide clear error messages",
           "testing": "Verified fix prevents misleading '0 changes' results"
         }
+      }
+    ],
+    "20-day-enhancement-plan": [
+      {
+        "id": "phase-1-core-fixes",
+        "title": "Phase 1: Core Fixes (Days 1-2)",
+        "description": "Fix fundamental issues with numeric parameter validation, MCP client compatibility, version comparison, and error handling",
+        "status": "pending",
+        "progress": 0,
+        "phase": 1,
+        "duration": "2 days",
+        "dependencies": [],
+        "relatedTasks": [],
+        "priority": "critical",
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "fix-numeric-validation",
+            "title": "Fix all numeric parameter validations",
+            "description": "Ensure all numeric parameters (limit, offset, page_size) are properly validated and handled",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "test-mcp-clients",
+            "title": "Test with MCP clients",
+            "description": "Comprehensive testing with various MCP clients to ensure compatibility",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 4
+          },
+          {
+            "id": "fix-version-compare",
+            "title": "Fix compare versions errors",
+            "description": "Resolve version comparison issues in version_diff functionality",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 4
+          },
+          {
+            "id": "enhance-error-handling",
+            "title": "Add comprehensive error handling",
+            "description": "Implement robust error handling throughout the application",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 2
+          }
+        ]
+      },
+      {
+        "id": "phase-2-documentation",
+        "title": "Phase 2: Documentation Enhancement (Days 3-5)",
+        "description": "Integrate rust-lang.org documentation, add rustup detection, implement pre-caching, and add dependency filtering",
+        "status": "pending",
+        "progress": 0,
+        "phase": 2,
+        "duration": "3 days",
+        "dependencies": ["phase-1-core-fixes"],
+        "relatedTasks": [],
+        "priority": "high",
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "rust-lang-integration",
+            "title": "Implement rust-lang.org integration",
+            "description": "Add support for fetching standard library documentation from rust-lang.org",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 12
+          },
+          {
+            "id": "rustup-json-detection",
+            "title": "Add rustup JSON detection",
+            "description": "Implement detection of local rustup installations and their documentation",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "stdlib-precaching",
+            "title": "Pre-cache stdlib items",
+            "description": "Implement pre-caching mechanism for standard library items",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "dependency-filtering",
+            "title": "Implement dependency filtering",
+            "description": "Add filtering capabilities for dependency-based searches",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          }
+        ]
+      },
+      {
+        "id": "phase-3-advanced-search",
+        "title": "Phase 3: Advanced Search (Days 6-8)",
+        "description": "Enhance search capabilities with fuzzy search, regex matching, cross-crate search, and stability filtering",
+        "status": "pending",
+        "progress": 0,
+        "phase": 3,
+        "duration": "3 days",
+        "dependencies": ["phase-2-documentation"],
+        "relatedTasks": [],
+        "priority": "high",
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "fix-fuzzy-search",
+            "title": "Fix fuzzy search implementation",
+            "description": "Improve fuzzy search algorithm for better matching accuracy",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 8
+          },
+          {
+            "id": "add-regex-matching",
+            "title": "Add regex matching",
+            "description": "Implement regex-based search patterns for advanced queries",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "cross-crate-search",
+            "title": "Implement cross-crate search",
+            "description": "Enable searching across multiple crates simultaneously",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 10
+          },
+          {
+            "id": "stability-filtering",
+            "title": "Add stability filtering",
+            "description": "Filter results based on Rust stability annotations (stable, beta, nightly)",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          }
+        ]
+      },
+      {
+        "id": "phase-4-type-system",
+        "title": "Phase 4: Type System Navigation (Days 9-12)",
+        "description": "Build comprehensive type system navigation with trait tables, resolution system, method resolution, and associated items",
+        "status": "pending",
+        "progress": 0,
+        "phase": 4,
+        "duration": "4 days",
+        "dependencies": ["phase-3-advanced-search"],
+        "relatedTasks": [],
+        "priority": "high",
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "trait-implementation-tables",
+            "title": "Create trait implementation tables",
+            "description": "Build database tables and indexes for trait implementation relationships",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 12
+          },
+          {
+            "id": "trait-resolution-system",
+            "title": "Build trait resolution system",
+            "description": "Implement system for resolving trait implementations and bounds",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 16
+          },
+          {
+            "id": "method-resolution",
+            "title": "Add method resolution",
+            "description": "Implement method resolution for types including inherent and trait methods",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 12
+          },
+          {
+            "id": "associated-items",
+            "title": "Implement associated items",
+            "description": "Handle associated types, constants, and functions in trait and impl blocks",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 8
+          }
+        ]
+      },
+      {
+        "id": "phase-5-code-intelligence",
+        "title": "Phase 5: Code Intelligence (Days 13-15)",
+        "description": "Enhance code intelligence with full signature parsing, safety information, error type identification, and feature requirements",
+        "status": "pending",
+        "progress": 0,
+        "phase": 5,
+        "duration": "3 days",
+        "dependencies": ["phase-4-type-system"],
+        "relatedTasks": [],
+        "priority": "medium",
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "parse-full-signatures",
+            "title": "Parse full signatures",
+            "description": "Implement comprehensive parsing of function and method signatures",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 10
+          },
+          {
+            "id": "safety-information",
+            "title": "Extract safety information",
+            "description": "Parse and categorize unsafe code blocks and safety documentation",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 8
+          },
+          {
+            "id": "error-types",
+            "title": "Identify error types",
+            "description": "Parse and categorize error types and Result return patterns",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "feature-requirements",
+            "title": "Parse feature requirements",
+            "description": "Extract and track cargo feature requirements for APIs",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          }
+        ]
+      },
+      {
+        "id": "phase-6-cross-references",
+        "title": "Phase 6: Cross-References (Days 16-18)",
+        "description": "Build comprehensive cross-referencing system with import resolver, re-export tracking, dependency graphs, and migration suggestions",
+        "status": "pending",
+        "progress": 0,
+        "phase": 6,
+        "duration": "3 days",
+        "dependencies": ["phase-5-code-intelligence"],
+        "relatedTasks": [],
+        "priority": "medium",
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "import-resolver",
+            "title": "Build import resolver",
+            "description": "Create system for resolving use statements and module paths",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 12
+          },
+          {
+            "id": "track-reexports",
+            "title": "Track re-exports",
+            "description": "Monitor and index pub use re-exports across crates",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 8
+          },
+          {
+            "id": "dependency-graphs",
+            "title": "Create dependency graphs",
+            "description": "Build visual and queryable dependency relationship graphs",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 10
+          },
+          {
+            "id": "migration-suggestions",
+            "title": "Add migration suggestions",
+            "description": "Provide suggestions for API migrations and deprecation handling",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          }
+        ]
+      },
+      {
+        "id": "phase-7-workflow-enhancement",
+        "title": "Phase 7: Workflow Enhancement (Days 19-20)",
+        "description": "Final phase focusing on user experience with progressive detail levels, usage patterns, learning paths, and comprehensive testing",
+        "status": "pending",
+        "progress": 0,
+        "phase": 7,
+        "duration": "2 days",
+        "dependencies": ["phase-6-cross-references"],
+        "relatedTasks": [],
+        "priority": "medium",
+        "roadblocks": [],
+        "subtasks": [
+          {
+            "id": "progressive-detail-levels",
+            "title": "Add progressive detail levels",
+            "description": "Implement tiered information disclosure based on user preferences",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "usage-patterns",
+            "title": "Extract usage patterns",
+            "description": "Analyze and surface common usage patterns from documentation",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "learning-paths",
+            "title": "Create learning paths",
+            "description": "Generate suggested learning sequences for complex APIs",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 4
+          },
+          {
+            "id": "final-testing-polish",
+            "title": "Final testing and polish",
+            "description": "Comprehensive testing, performance optimization, and final polish",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 4
+          }
+        ]
       }
     ]
   }
