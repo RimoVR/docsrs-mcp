@@ -247,7 +247,8 @@
         "assumed_version": "v3.0 (incorrect assumption)",
         "actual_version": "1.13.1 (August 2025)",
         "no_v3_exists": "No v3.0 version exists despite initial assumptions",
-        "version_history": "FastMCP 1.0 incorporated into official SDK in 2024"
+        "version_history": "FastMCP 1.0 incorporated into official SDK in 2024",
+        "current_status": "SDK 1.13.1 is current official version with FastMCP 1.0 integrated"
       },
       "installation_details": {
         "primary_method": "pip install 'mcp[cli]' or uv add 'mcp[cli]'",
@@ -259,18 +260,21 @@
       },
       "sdk_features": {
         "fastmcp_integration": "FastMCP 1.0 incorporated into official SDK in 2024",
-        "tool_registration": "@mcp.tool() decorator with automatic schema generation",
+        "tool_registration": "@server.tool() decorator pattern for tool registration",
+        "import_pattern": "from mcp.server import Server",
         "structured_output": "Native support for Pydantic models, TypedDicts, classes with type hints",
         "transport_modes": "STDIO (local) and HTTP/SSE (remote) dual-mode support",
         "context_injection": "Progress reporting via ctx.report_progress()",
-        "automatic_schemas": "SDK handles string conversion automatically"
+        "parameter_handling": "Native support for string parameters from MCP clients"
       },
       "migration_patterns": {
-        "import_statement": "from mcp.server.fastmcp import FastMCP, Context",
-        "tool_decorator": "@mcp.tool() with automatic schema generation",
+        "import_statement": "from mcp.server import Server",
+        "server_creation": "server = Server('docsrs-mcp')",
+        "tool_decorator": "@server.tool() decorator pattern for tool registration",
         "function_signature": "async def tool_name(param: str, optional: Optional[int] = None) -> dict",
         "documentation": "Tool description for auto-documentation via docstring",
-        "type_hints": "Use type hints for automatic schema generation"
+        "type_hints": "Use type hints for automatic schema generation",
+        "service_layer_extraction": "Extract business logic for reuse across implementations"
       },
       "claude_code_integration": {
         "configuration": "JSON with mcpServers object",
@@ -281,7 +285,10 @@
       },
       "performance_characteristics": {
         "warm_search": "<50ms with proper caching",
-        "memory_usage": "Monitor for known leak issue (1.13.1)",
+        "memory_leak_confirmed": "Known memory leak in SDK 1.13.1 (GitHub issues #1076, #756)",
+        "leak_pattern": "Continuous tool calls cause memory accumulation",
+        "mitigation_strategy": "Server rotation every 1000 calls recommended",
+        "transport_alternative": "Use stdio transport instead of HTTP to reduce leak impact",
         "concurrency": "Async/await patterns recommended",
         "transport_choice": "STDIO for local, HTTP for remote",
         "comparison_to_fastmcp": "Similar performance, potentially better validation"
@@ -303,7 +310,9 @@
       },
       "important_caveats": {
         "version_confusion": "No v3.0 version exists despite initial assumptions",
-        "fastmcp_separation": "FastMCP 2.0 is separate from official SDK",
+        "fastmcp_separation": "FastMCP 2.11.1 has enhanced features not in SDK",
+        "api_divergence": "FastMCP vs SDK differences require code changes, not just imports",
+        "schema_override_obsolete": "Schema override workaround no longer needed with SDK",
         "memory_leak": "Memory leak confirmed in 1.13.1 - implement monitoring",
         "testing_requirement": "Use nohup for background process testing",
         "validation_differences": "Validation behavior may differ from FastMCP standalone"
@@ -313,7 +322,83 @@
         "feature_parity": "Full feature parity with FastMCP standalone",
         "compatibility_improvements": "Expected better Claude Code compatibility",
         "migration_risk": "Low risk - same underlying FastMCP implementation",
-        "rollback_strategy": "Can maintain both implementations during transition"
+        "rollback_strategy": "Can maintain both implementations during transition",
+        "parallel_implementation": "Service layer extraction enables safe parallel deployment",
+        "feature_flag_rollout": "Gradual cutover with validation using feature flags",
+        "parameter_validation_required": "Type conversion and bounds checking for string parameters"
+      }
+    },
+    "sdk_migration_detailed_findings": {
+      "overview": "Detailed research findings on Python MCP SDK 1.13.1 migration",
+      "research_date": "2025-08-22",
+      "context": "Comprehensive SDK migration analysis with implementation patterns",
+      "current_sdk_version": {
+        "version": "1.13.1",
+        "status": "Current official version",
+        "fastmcp_integration": "FastMCP 1.0 integrated natively",
+        "import_pattern": "from mcp.server import Server",
+        "decorator_pattern": "@server.tool() for tool registration"
+      },
+      "memory_leak_analysis": {
+        "confirmed_issue": "Memory leak in SDK 1.13.1",
+        "github_issues": ["#1076", "#756"],
+        "leak_mechanism": "Continuous tool calls cause memory accumulation",
+        "impact_assessment": "Production servers affected with high call volumes",
+        "mitigation_strategies": {
+          "server_rotation": "Rotate server instance every 1000 calls",
+          "transport_selection": "Use stdio transport instead of HTTP",
+          "monitoring_required": "Implement memory usage monitoring",
+          "restart_automation": "Automated restart triggers based on memory thresholds"
+        }
+      },
+      "migration_implementation_patterns": {
+        "service_layer_extraction": {
+          "purpose": "Enable business logic reuse across implementations",
+          "pattern": "Extract core functionality to service classes",
+          "benefit": "Interface layer changes without business logic modification"
+        },
+        "parallel_deployment": {
+          "strategy": "Run FastMCP and SDK implementations side by side",
+          "validation": "Compare responses and performance metrics",
+          "safety": "Safe testing before complete switchover"
+        },
+        "feature_flag_controlled_rollout": {
+          "mechanism": "Use feature flags to control SDK vs FastMCP usage",
+          "gradual_migration": "Percentage-based traffic routing",
+          "rollback_capability": "Instant rollback if issues detected"
+        }
+      },
+      "parameter_compatibility_analysis": {
+        "sdk_expectation": "SDK expects string parameters from MCP clients",
+        "type_conversion_required": {
+          "boolean_handling": "Handle 'true'/'false' strings from clients",
+          "integer_conversion": "Convert numeric strings with bounds checking",
+          "validation_layer": "Implement validation for type conversion"
+        },
+        "client_behavior": {
+          "claude_code": "Sends string parameters consistently",
+          "claude_desktop": "Mixed parameter types depending on context",
+          "mcp_inspector": "Form-based input sends string values"
+        }
+      },
+      "fastmcp_vs_sdk_differences": {
+        "enhanced_features": "FastMCP 2.11.1 has features not available in SDK",
+        "api_changes": "Code changes required beyond simple import substitution",
+        "schema_override_obsolete": "Schema override workaround unnecessary with SDK",
+        "validation_improvements": "SDK provides better native validation patterns",
+        "breaking_changes": {
+          "decorator_syntax": "@server.tool() vs @fastmcp.tool()",
+          "server_initialization": "Server() constructor vs FastMCP.from_fastapi()",
+          "transport_configuration": "Different transport setup patterns"
+        }
+      },
+      "implementation_recommendations": {
+        "business_logic_separation": "Extract to service layer for reusability",
+        "gradual_migration": "Implement parallel systems with feature flags",
+        "memory_monitoring": "Implement comprehensive memory leak monitoring",
+        "parameter_validation": "Add robust string-to-type conversion logic",
+        "testing_strategy": "Test with actual MCP clients, not synthetic tests",
+        "rollback_preparation": "Maintain FastMCP implementation during transition"
       }
     },
     "vector_search": {

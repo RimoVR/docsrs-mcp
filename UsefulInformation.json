@@ -1964,6 +1964,66 @@
           "clarification": "Official SDK 1.13.1 includes FastMCP 1.0 functionality; FastMCP 2.0 is separate enhanced toolkit",
           "impact": "Ensures correct library usage and avoids dependency conflicts",
           "importPattern": "from mcp.server.fastmcp import FastMCP  # Official SDK with FastMCP 1.0 features"
+        },
+        {
+          "error": "MCP SDK memory leak with continuous tool calls",
+          "context": "SDK 1.13.1 has memory leak that accumulates with each tool call, causing server memory growth from 200MB to 1.5GB+ over time",
+          "solution": "Implement server rotation every 1000 calls using MCPServerRunner class with psutil monitoring. Alternative: Set MCP_MAX_CALLS=1000 and MCP_MAX_MEMORY_MB=512 environment variables for automatic rotation",
+          "prevention": "Monitor memory usage and implement rotation patterns for long-running MCP servers with high call volumes",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/server_runner.py", "src/docsrs_mcp/app.py"],
+          "workaround": "MCPServerRunner class provides automatic server lifecycle management with configurable memory thresholds",
+          "codeExample": "# Environment variable approach:\nMCP_MAX_CALLS=1000\nMCP_MAX_MEMORY_MB=512\n\n# Programmatic approach:\nclass MCPServerRunner:\n    def __init__(self, max_calls=1000, max_memory_mb=512):\n        self.call_count = 0\n        self.max_calls = max_calls\n        self.max_memory_mb = max_memory_mb\n        \n    def should_rotate(self) -> bool:\n        memory_mb = psutil.Process().memory_info().rss / (1024 * 1024)\n        return self.call_count >= self.max_calls or memory_mb > self.max_memory_mb"
+        },
+        {
+          "error": "MCP parameter validation: clients send typed parameters as strings",
+          "context": "MCP clients send string parameters like k='3' and enabled='true' but SDK expects proper types, causing validation failures",
+          "solution": "Implement validate_int_parameter() and validate_bool_parameter() utilities that accept strings, validate, convert, and provide sensible defaults. Use pattern: accept strings, validate, convert, provide defaults",
+          "prevention": "Always use parameter validation utilities for MCP tools instead of assuming correct types from clients",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/validators.py", "src/docsrs_mcp/models.py"],
+          "pattern": "String input → validation → type conversion → default handling",
+          "codeExample": "def validate_int_parameter(value: Any, field_name: str, min_val: int = None, max_val: int = None, default: int = None) -> Optional[int]:\n    if value is None:\n        return default\n    if isinstance(value, int):\n        return value\n    if isinstance(value, str):\n        try:\n            converted = int(value)\n            if min_val is not None and converted < min_val:\n                raise ValueError(f'{field_name} must be >= {min_val}')\n            if max_val is not None and converted > max_val:\n                raise ValueError(f'{field_name} must be <= {max_val}')\n            return converted\n        except ValueError as e:\n            raise ValueError(f'Invalid {field_name}: {e}')\n    raise ValueError(f'{field_name} must be an integer or string, got {type(value)}')"
+        },
+        {
+          "error": "Service layer benefits for dual MCP implementation",
+          "context": "Implementing both FastMCP and SDK implementations without code duplication",
+          "solution": "Create service layer that enables dual implementation: business logic remains transport-agnostic, simplifies testing and maintenance, allows gradual migration with feature flags",
+          "prevention": "Always design with service layer abstraction when supporting multiple MCP implementations or transport protocols",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/services/", "src/docsrs_mcp/app.py"],
+          "benefits": [
+            "Enables dual implementation without code duplication",
+            "Business logic remains transport-agnostic", 
+            "Simplifies testing and maintenance",
+            "Allows gradual migration with feature flags"
+          ],
+          "architecturePattern": "Service Layer → Transport Adapters (FastMCP/SDK) → MCP Protocol"
+        },
+        {
+          "error": "Parallel validation technique for regression testing",
+          "context": "Need to validate that SDK migration doesn't introduce regressions compared to FastMCP implementation",
+          "solution": "Run both implementations simultaneously, compare outputs for regression testing using subprocess for isolation and JSON-RPC for communication. Test with identical inputs and compare responses",
+          "prevention": "Use parallel validation during any major transport or protocol migration to ensure behavioral consistency",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["tests/test_parallel_validation.py", "src/docsrs_mcp/testing/"],
+          "technique": "Subprocess isolation + JSON-RPC communication + output comparison",
+          "codeExample": "# Run both implementations in parallel\nasync def compare_implementations(tool_name: str, parameters: dict):\n    fastmcp_result = await run_fastmcp_subprocess(tool_name, parameters)\n    sdk_result = await run_sdk_subprocess(tool_name, parameters)\n    \n    # Compare outputs\n    assert fastmcp_result.status_code == sdk_result.status_code\n    assert normalize_response(fastmcp_result.data) == normalize_response(sdk_result.data)"
+        },
+        {
+          "error": "CLI testing commands for MCP implementation comparison",
+          "context": "Need easy commands to test different MCP implementations during development and migration",
+          "solution": "Implement CLI flags for testing: --mcp-implementation fastmcp/sdk/both for comparing implementations, --mode rest for HTTP testing. Use both flag to run parallel validation",
+          "prevention": "Provide clear testing commands and implementation selection during migration phases",
+          "dateEncountered": "2025-08-22",
+          "relatedFiles": ["src/docsrs_mcp/cli.py", "src/docsrs_mcp/app.py"],
+          "testingCommands": {
+            "fastmcp": "uv run docsrs-mcp --mcp-implementation fastmcp",
+            "sdk": "uv run docsrs-mcp --mcp-implementation sdk", 
+            "comparison": "uv run docsrs-mcp --mcp-implementation both",
+            "rest": "uv run docsrs-mcp --mode rest"
+          },
+          "usagePattern": "Start with FastMCP, migrate to SDK, validate with both, deprecate FastMCP"
         }
       ]
     },
@@ -3635,7 +3695,13 @@
       "Validation flow order: MCP manifest anyOf → FastMCP JSON Schema → Pydantic field validators → Type coercion",
       "CRITICAL BUG: start_pre_ingestion is the ONLY tool without anyOf patterns - add consistent anyOf patterns to all tools with parameters",
       "Schema consistency: All MCP tools must have matching anyOf patterns between manifest schema and Pydantic validators",
-      "Memory management: FastEmbed global singleton causes memory leaks - implement explicit ONNX Runtime cleanup"
+      "Memory management: FastEmbed global singleton causes memory leaks - implement explicit ONNX Runtime cleanup",
+      "SDK memory leak mitigation: Use MCPServerRunner with rotation every 1000 calls or set MCP_MAX_CALLS=1000 environment variable",
+      "Parameter validation pattern: Use validate_int_parameter() and validate_bool_parameter() utilities for string-to-type conversion with MCP clients",
+      "Service layer architecture: Implement service layer abstraction for dual FastMCP/SDK support with transport-agnostic business logic",
+      "Parallel validation testing: Run both implementations with subprocess isolation and JSON-RPC communication for regression testing",
+      "Implementation selection: Use --mcp-implementation fastmcp/sdk/both flag for testing during migration phases",
+      "Memory monitoring: Monitor process memory with psutil.Process().memory_info().rss to detect SDK memory leaks early"
     ],
     "queryPreprocessing": [
       "Check for whitespace-only queries before stripping to provide specific error messages",

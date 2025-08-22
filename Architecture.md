@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a dual-mode architecture with a FastAPI web layer that can operate in either MCP mode (default) or REST mode. The MCP mode uses STDIO transport for AI clients, while REST mode requires an explicit flag. The system includes a comprehensive asynchronous ingestion pipeline with enhanced rustdoc JSON processing for complete documentation extraction, a SQLite-based vector storage system with intelligent caching and example management, and a dedicated code example extraction and semantic search system.
+The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a service layer architecture with dual MCP implementation support, enabling both FastMCP 2.11.1 (with schema overrides) and Official Python MCP SDK 1.13.1 (native support) through a --mcp-implementation CLI flag. The system includes comprehensive memory leak mitigation with automatic server restarts, string-first parameter handling for broad client compatibility, and transport-agnostic business services (CrateService and IngestionService) that decouple core functionality from MCP/REST layers. The architecture maintains a comprehensive asynchronous ingestion pipeline with enhanced rustdoc JSON processing, SQLite-based vector storage with intelligent caching, and dedicated code example extraction systems.
 
 ## High-Level Architecture
 
@@ -12,12 +12,24 @@ graph TB
         AI[AI Agent/LLM]
     end
     
-    subgraph "Dual-Mode Server"
-        CLI[CLI Entry Point<br/>--mode, --port, --concurrency flags<br/>Environment variable conversion]
+    subgraph "Service Layer Architecture"
+        CLI[CLI Entry Point<br/>--mode, --mcp-implementation flags<br/>Environment variable conversion]
         CONFIG[Config Module<br/>Environment variable loading<br/>Unified configuration source]
+        
+        subgraph "MCP Implementations"
+            FASTMCP[FastMCP 2.11.1<br/>Schema overrides]
+            OFFICIAL[Official Python MCP SDK 1.13.1<br/>Native @mcp.tool() decorators]
+            RUNNER[MCPServerRunner<br/>Memory leak mitigation<br/>1000 calls/1GB restart]
+        end
+        
         API[FastAPI Application<br/>startup: asyncio.create_task]
-        MCP[MCP Server Module<br/>Official Python MCP SDK (v3.0)<br/>@mcp.tool() decorators<br/>startup: PreIngestionWorker]
         RL[Rate Limiter<br/>30 req/s per IP]
+        
+        subgraph "Business Services"
+            CRATE_SVC[CrateService<br/>Search, docs, versions]
+            INGEST_SVC[IngestionService<br/>Pipeline management<br/>Pre-ingestion control]
+        end
+        
         IW[Ingest Worker]
         Queue[asyncio.Queue]
         PCM[PopularCratesManager<br/>Multi-tier cache with msgpack<br/>Circuit breaker & statistics<br/>Semaphore(3) concurrency]
@@ -25,6 +37,7 @@ graph TB
     
     subgraph "External Services"
         DOCS[docs.rs CDN]
+        PSUTIL[psutil<br/>Process monitoring]
     end
     
     subgraph "Storage"
@@ -39,20 +52,29 @@ graph TB
     
     AI -->|MCP STDIO/REST POST| CLI
     CLI -->|env vars| CONFIG
-    CONFIG -->|--mode rest| RL
-    CONFIG -->|MCP mode (default)| MCP
-    MCP --> API
-    MCP -->|startup| PCM
+    CLI -->|--mcp-implementation| FASTMCP
+    CLI -->|--mcp-implementation| OFFICIAL
+    CLI -->|--mode rest| RL
+    
+    FASTMCP --> RUNNER
+    OFFICIAL --> RUNNER
+    RUNNER -->|monitor| PSUTIL
+    
+    RUNNER --> CRATE_SVC
+    RUNNER --> INGEST_SVC
     RL --> API
-    API -->|startup| PCM
-    API -->|enqueue| Queue
+    API --> CRATE_SVC
+    API --> INGEST_SVC
+    
+    INGEST_SVC -->|startup| PCM
+    INGEST_SVC -->|enqueue| Queue
     Queue -->|dequeue| IW
     PCM -->|pre-ingest| Queue
     PCM -->|popular list| DOCS
     IW -->|version resolve + download| DOCS
     IW -->|embed text| EMB
     IW -->|store vectors| CACHE
-    API -->|query| CACHE
+    CRATE_SVC -->|query| CACHE
     CACHE --> META
 ```
 
@@ -61,6 +83,18 @@ graph TB
 ```mermaid
 graph LR
     subgraph "docsrs_mcp Package"
+        subgraph "Service Layer"
+            CRATE_SVC[crate_service.py<br/>CrateService class<br/>Search, documentation, versions<br/>Transport-agnostic business logic]
+            INGEST_SVC[ingestion_service.py<br/>IngestionService class<br/>Pipeline management<br/>Pre-ingestion control<br/>Cargo file processing]
+            MCP_RUNNER[mcp_runner.py<br/>MCPServerRunner class<br/>Memory leak mitigation<br/>1000 calls/1GB restart<br/>Process health monitoring]
+            PARAM_VAL[parameter_validation.py<br/>String parameter utilities<br/>Type conversion functions<br/>Boolean/integer validation]
+        end
+        
+        subgraph "MCP Implementations"
+            FASTMCP_SVR[fastmcp_server.py<br/>FastMCP 2.11.1 implementation<br/>Schema override support<br/>Compatibility layer]
+            OFFICIAL_SVR[official_server.py<br/>Official MCP SDK 1.13.1<br/>Native @mcp.tool() decorators<br/>Standard protocol support]
+        end
+        
         subgraph "Web Layer"
             APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata<br/>search_examples endpoint]
             ROUTES[routes.py<br/>Enhanced MCP endpoints<br/>Comprehensive docstrings<br/>Fuzzy path resolution]
@@ -126,8 +160,20 @@ graph LR
     ROUTES --> FUZZY
     ROUTES --> EXPORT
     ROUTES --> VERSIONDIFF
+    
+    %% Service Layer Connections
+    FASTMCP_SVR --> MCP_RUNNER
+    OFFICIAL_SVR --> MCP_RUNNER
+    MCP_RUNNER --> PARAM_VAL
+    PARAM_VAL --> CRATE_SVC
+    PARAM_VAL --> INGEST_SVC
+    ROUTES --> CRATE_SVC
+    ROUTES --> INGEST_SVC
+    
+    %% Legacy MCP Server Connection
     MCP_SERVER --> POPULAR
     APP --> POPULAR
+    INGEST_SVC --> POPULAR
     POPULAR --> ING
     POPULAR --> PRIORITY
     PRIORITY --> ING
@@ -149,42 +195,118 @@ graph LR
 
 ## MCP Server Architecture (v3.0)
 
-### Migration from FastMCP to Official Python MCP SDK
+### Service Layer Pattern Implementation
 
-The docsrs-mcp server is migrating from FastMCP 2.11.1 to the official Python MCP SDK to eliminate schema override workarounds and adopt the official implementation. This migration maintains dual-mode compatibility while providing a cleaner, more maintainable architecture.
+The docsrs-mcp server implements a service layer pattern that decouples business logic from transport layers (MCP/REST). This architecture provides clean separation of concerns and enables dual MCP implementation support.
+
+#### Core Services
+
+- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management
+- **IngestionService**: Manages the complete ingestion pipeline, pre-ingestion workflows, and cargo file processing
+- **Transport Layer Decoupling**: Business logic is independent of whether accessed via MCP or REST
+
+### Dual MCP Implementation Architecture
+
+The system now supports two parallel MCP implementations to ensure compatibility and enable gradual migration:
+
+#### Implementation Options
+
+- **FastMCP 2.11.1**: Current implementation with schema overrides for compatibility
+- **Official Python MCP SDK 1.13.1**: New native implementation with full protocol support
+- **CLI Control**: `--mcp-implementation` flag selects which implementation to run
+- **Parallel Validation**: Both implementations can run in comparison mode for testing
 
 #### Key Migration Benefits
 
-- **Official SDK Adoption**: Replace third-party FastMCP with Anthropic's official Python MCP SDK
+- **Official SDK Adoption**: Native support for Anthropic's official Python MCP SDK
 - **Schema Override Elimination**: Remove complex `override_fastmcp_schemas()` workarounds
 - **Native @mcp.tool() Decorators**: Use official decorators instead of FastAPI-to-MCP conversion
 - **Maintained Compatibility**: Preserve dual-mode operation (MCP + REST) with backward compatibility
 - **Simplified Architecture**: Cleaner codebase without FastMCP conversion layers
 
+### Memory Leak Mitigation
+
+The architecture includes comprehensive memory management to handle long-running server instances:
+
+#### MCPServerRunner Class
+
+- **Automatic Restart**: Server restarts after 1000 tool calls or 1GB memory usage
+- **Process Health Monitoring**: Uses psutil to track memory consumption and process health
+- **Graceful Shutdown**: Ensures clean state transitions during restarts
+- **Recovery Mechanisms**: Automatic recovery from memory leaks or process issues
+
+#### Monitoring Thresholds
+
+- **Tool Call Limit**: 1000 calls before restart
+- **Memory Limit**: 1GB RSS memory usage before restart
+- **Health Check Interval**: Continuous monitoring with configurable intervals
+
+### Parameter Handling Architecture
+
+The system implements robust parameter handling for MCP client compatibility:
+
+#### String-First Parameter Design
+
+- **All MCP Tools**: Accept string parameters for maximum client compatibility
+- **Validation Utilities**: Convert strings to proper types (bool, int, float)
+- **Boolean Handling**: Supports "true"/"false" string conversion
+- **Numeric Conversion**: Handles numeric strings with validation
+
+#### Validation Pipeline
+
+```python
+# Example parameter validation
+def validate_boolean(value: str) -> bool:
+    if value.lower() in ('true', '1', 'yes'):
+        return True
+    elif value.lower() in ('false', '0', 'no'):
+        return False
+    raise ValueError(f"Invalid boolean: {value}")
+
+def validate_integer(value: str, min_val: int = None, max_val: int = None) -> int:
+    try:
+        result = int(value)
+        if min_val is not None and result < min_val:
+            raise ValueError(f"Value {result} below minimum {min_val}")
+        if max_val is not None and result > max_val:
+            raise ValueError(f"Value {result} above maximum {max_val}")
+        return result
+    except ValueError as e:
+        raise ValueError(f"Invalid integer: {value} - {e}")
+```
+
 ### Modular Structure
 
-The migration introduces a modular architecture with clear separation of concerns and optimized line-of-code (LOC) distribution:
+The service layer architecture introduces clear separation of concerns with business logic decoupled from transport layers:
 
 ```
 src/docsrs_mcp/
+├── services/
+│   ├── crate_service.py      # CrateService: search, docs, versions (500-600 LOC)
+│   ├── ingestion_service.py  # IngestionService: pipeline management (400-500 LOC)
+│   └── mcp_runner.py         # MCPServerRunner: memory management (200-300 LOC)
+├── mcp/
+│   ├── fastmcp_server.py     # FastMCP 2.11.1 implementation (300-400 LOC)
+│   ├── official_server.py    # Official MCP SDK 1.13.1 implementation (300-400 LOC)
+│   └── parameter_validation.py # String parameter handling utilities (200-300 LOC)
 ├── models/
-│   ├── mcp.py           # MCP-specific models and schemas (200-300 LOC)
-│   ├── requests.py      # Request validation models (400-500 LOC)
-│   ├── responses.py     # Response formatting models (400-500 LOC)
-│   └── validation.py    # Shared validation utilities (300-400 LOC)
+│   ├── mcp.py               # MCP-specific models and schemas (200-300 LOC)
+│   ├── requests.py          # Request validation models (400-500 LOC)
+│   ├── responses.py         # Response formatting models (400-500 LOC)
+│   └── validation.py        # Shared validation utilities (300-400 LOC)
 ├── ingestion/
-│   ├── core.py          # Core ingestion logic (400-500 LOC)
-│   ├── embeddings.py    # Embedding generation and management (300-400 LOC)
-│   ├── processors.py    # Document processing pipeline (400-500 LOC)
-│   └── cache.py         # Ingestion caching and optimization (300-400 LOC)
+│   ├── core.py              # Core ingestion logic (400-500 LOC)
+│   ├── embeddings.py        # Embedding generation and management (300-400 LOC)
+│   ├── processors.py        # Document processing pipeline (400-500 LOC)
+│   └── cache.py             # Ingestion caching and optimization (300-400 LOC)
 ├── database/
-│   ├── core.py          # Database operations and connections (300-400 LOC)
-│   ├── search.py        # Vector search and ranking (400-500 LOC)
-│   └── schema.py        # Database schema and migrations (300-400 LOC)
+│   ├── core.py              # Database operations and connections (300-400 LOC)
+│   ├── search.py            # Vector search and ranking (400-500 LOC)
+│   └── schema.py            # Database schema and migrations (300-400 LOC)
 └── api/
-    ├── health.py        # Health check endpoints and monitoring (200-300 LOC)
-    ├── tools.py         # MCP tool implementations (400-500 LOC)
-    └── admin.py         # Administrative endpoints (200-300 LOC)
+    ├── health.py            # Health check endpoints and monitoring (200-300 LOC)
+    ├── tools.py             # MCP tool implementations (400-500 LOC)
+    └── admin.py             # Administrative endpoints (200-300 LOC)
 ```
 
 ### Migration Pattern
@@ -225,12 +347,14 @@ graph TB
         REST_CLIENT[REST Clients<br/>curl, Postman, etc.]
     end
     
-    subgraph "v3.0 MCP Server Architecture"
-        CLI[CLI Entry Point<br/>--mode flag selection]
+    subgraph "v3.0 Service Layer Architecture"
+        CLI[CLI Entry Point<br/>--mode & --mcp-implementation flags]
         
-        subgraph "MCP Mode (Official SDK)"
-            OFFICIAL_SDK[Official Python MCP SDK<br/>@mcp.tool() decorators]
-            STDIO[STDIO Transport<br/>JSON-RPC protocol]
+        subgraph "MCP Implementations"
+            FASTMCP[FastMCP 2.11.1<br/>Schema overrides]
+            OFFICIAL_SDK[Official MCP SDK 1.13.1<br/>Native @mcp.tool()]
+            MCP_RUNNER[MCPServerRunner<br/>Memory leak mitigation<br/>1000 calls/1GB restart]
+            PARAM_VAL[Parameter Validation<br/>String-first handling<br/>Type conversion utilities]
         end
         
         subgraph "REST Mode (FastAPI)"
@@ -238,7 +362,12 @@ graph TB
             UVICORN[Uvicorn ASGI Server]
         end
         
-        subgraph "Shared Business Logic"
+        subgraph "Service Layer (Business Logic)"
+            CRATE_SVC[CrateService<br/>Search, docs, versions]
+            INGEST_SVC[IngestionService<br/>Pipeline management<br/>Pre-ingestion control]
+        end
+        
+        subgraph "Data & Infrastructure"
             MODELS[models/ package<br/>Pydantic schemas & validation]
             INGEST[ingestion/ package<br/>Document processing pipeline]
             DATABASE[database/ package<br/>SQLite + vector operations]
@@ -249,23 +378,33 @@ graph TB
     subgraph "External Systems"
         DOCS_RS[docs.rs CDN]
         SQLITE[(SQLite + VSS<br/>Vector database)]
+        PSUTIL[psutil<br/>Process monitoring]
     end
     
     MCP_CLIENT -->|JSON-RPC| CLI
     REST_CLIENT -->|HTTP| CLI
     
-    CLI -->|--mode mcp| OFFICIAL_SDK
+    CLI -->|--mcp-implementation fastmcp| FASTMCP
+    CLI -->|--mcp-implementation official| OFFICIAL_SDK
     CLI -->|--mode rest| FASTAPI
     
-    OFFICIAL_SDK --> STDIO
+    FASTMCP --> MCP_RUNNER
+    OFFICIAL_SDK --> MCP_RUNNER
+    MCP_RUNNER --> PARAM_VAL
+    
     FASTAPI --> UVICORN
     
-    OFFICIAL_SDK --> MODELS
-    FASTAPI --> MODELS
+    PARAM_VAL --> CRATE_SVC
+    PARAM_VAL --> INGEST_SVC
+    FASTAPI --> CRATE_SVC
+    FASTAPI --> INGEST_SVC
     
-    MODELS --> INGEST
-    MODELS --> DATABASE
-    MODELS --> API_TOOLS
+    CRATE_SVC --> MODELS
+    INGEST_SVC --> MODELS
+    CRATE_SVC --> DATABASE
+    INGEST_SVC --> INGEST
+    
+    MCP_RUNNER -->|monitor| PSUTIL
     
     INGEST -->|download| DOCS_RS
     DATABASE -->|store/query| SQLITE
@@ -273,19 +412,41 @@ graph TB
 
 ### Implementation Timeline
 
-1. **Phase 1**: Create modular structure with current FastMCP implementation
-2. **Phase 2**: Implement official MCP SDK alongside FastMCP (dual implementation)
-3. **Phase 3**: Migrate tool-by-tool from FastMCP to official SDK
-4. **Phase 4**: Remove FastMCP dependencies and schema override code
-5. **Phase 5**: Optimize and refactor with official SDK patterns
+1. **Phase 1**: Implement Service Layer Pattern
+   - Extract CrateService and IngestionService from transport layers
+   - Create parameter validation utilities for string-first handling
+   - Establish clean business logic separation
+
+2. **Phase 2**: Dual MCP Implementation Support
+   - Implement MCPServerRunner with memory leak mitigation
+   - Add --mcp-implementation CLI flag for implementation selection
+   - Create parallel FastMCP and Official SDK implementations
+
+3. **Phase 3**: Memory Management & Monitoring
+   - Integrate psutil for process health monitoring
+   - Implement automatic restart mechanisms (1000 calls/1GB limits)
+   - Add graceful shutdown and recovery procedures
+
+4. **Phase 4**: Parameter Handling Enhancement
+   - Deploy string parameter validation across all MCP tools
+   - Implement type conversion utilities (boolean, integer, float)
+   - Ensure compatibility with diverse MCP clients
+
+5. **Phase 5**: Migration and Optimization
+   - Migrate tool-by-tool from FastMCP to official SDK
+   - Remove FastMCP dependencies and schema override code
+   - Optimize performance with official SDK patterns
 
 ### Compatibility Guarantees
 
 - **API Stability**: All existing tool names and parameters remain unchanged
 - **REST Mode**: FastAPI endpoints continue to function identically
-- **Configuration**: Environment variables and CLI flags unchanged
+- **Configuration**: Environment variables and CLI flags unchanged (plus new --mcp-implementation)
 - **Database**: No schema changes required
 - **Performance**: Equivalent or improved performance characteristics
+- **Memory Management**: Automatic restart prevents long-running memory leaks
+- **Client Compatibility**: String-first parameter handling supports diverse MCP clients
+- **Backward Compatibility**: FastMCP implementation remains available during transition
 
 ## Configuration Flow
 
