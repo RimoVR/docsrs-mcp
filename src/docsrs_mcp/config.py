@@ -121,6 +121,21 @@ STDLIB_CRATES = {"std", "core", "alloc", "proc_macro", "test"}
 RUST_CHANNEL_BASE = "https://static.rust-lang.org"
 RUST_VERSION_MANIFEST_URL = f"{RUST_CHANNEL_BASE}/version"
 
+# rust-lang.org documentation integration
+RUST_LANG_DOCS_URL = os.getenv("DOCSRS_RUST_LANG_URL", "https://doc.rust-lang.org")
+RUSTUP_HOME = os.getenv(
+    "DOCSRS_RUSTUP_HOME", None
+)  # Optional override for rustup location
+STDLIB_PRE_CACHE = os.getenv("DOCSRS_STDLIB_PRE_CACHE", "true").lower() == "true"
+DEPENDENCY_FILTER_ENABLED = (
+    os.getenv("DOCSRS_DEPENDENCY_FILTER", "true").lower() == "true"
+)
+
+# Bloom filter configuration for dependency filtering
+BLOOM_FILTER_CAPACITY = int(os.getenv("DOCSRS_BLOOM_CAPACITY", "100000"))
+BLOOM_FILTER_ERROR_RATE = float(os.getenv("DOCSRS_BLOOM_ERROR_RATE", "0.001"))
+BLOOM_FILTER_PATH = os.getenv("DOCSRS_BLOOM_PATH", "/tmp/docsrs_deps.bloom")
+
 # Rust-specific term expansions for query preprocessing
 RUST_TERM_EXPANSIONS = {
     "async": ["async", "asynchronous"],

@@ -37,6 +37,7 @@ from .config import (
     MODEL_NAME,
     PARSE_CHUNK_SIZE,
     PRIORITY_CACHE_EVICTION_ENABLED,
+    RUST_LANG_DOCS_URL,
     RUST_VERSION_MANIFEST_URL,
     STDLIB_CRATES,
 )
@@ -236,6 +237,65 @@ def get_stdlib_url(crate_name: str, version: str) -> str:
     else:
         # For specific versions, use the version directly
         return f"https://docs.rs/{crate_name}/{version}/{json_name}.json"
+
+
+async def fetch_rust_lang_stdlib(
+    session: aiohttp.ClientSession,
+    crate_name: str,
+    version: str,
+) -> bytes | None:
+    """
+    Fetch standard library documentation from rust-lang.org or local rustup.
+
+    This function implements the RUST_LANG_STDLIB tier with fallback strategy:
+    1. Try local rustup installation if available (highest quality)
+    2. Try rust-lang.org documentation API
+    3. Return None to trigger fallback to description-only
+
+    Args:
+        session: HTTP session for downloading
+        crate_name: Name of stdlib crate (std, core, alloc, etc.)
+        version: Rust version (e.g., "1.75.0", "stable", "nightly")
+
+    Returns:
+        JSON bytes if found, None otherwise
+    """
+    # First, try local rustup if available
+    from .rustup_detector import get_stdlib_json_path, has_rust_docs_json
+
+    # Check if we have local rust-docs-json
+    if has_rust_docs_json("nightly"):
+        json_path = get_stdlib_json_path(crate_name, "nightly")
+        if json_path and json_path.exists():
+            logger.info(f"Using local rustdoc JSON from rustup: {json_path}")
+            try:
+                return json_path.read_bytes()
+            except Exception as e:
+                logger.warning(f"Failed to read local rustdoc JSON: {e}")
+
+    # Try fetching from rust-lang.org (future enhancement)
+    # Note: rust-lang.org doesn't currently provide JSON API
+    # This is a placeholder for future implementation
+    if RUST_LANG_DOCS_URL:
+        # Construct potential URL patterns
+        potential_urls = [
+            f"{RUST_LANG_DOCS_URL}/{version}/{crate_name}/all.json",
+            f"{RUST_LANG_DOCS_URL}/stable/{crate_name}/all.json",
+            f"{RUST_LANG_DOCS_URL}/{crate_name}/index.json",
+        ]
+
+        for url in potential_urls:
+            try:
+                async with session.get(url, timeout=HTTP_TIMEOUT) as response:
+                    if response.status == 200:
+                        logger.info(f"Found stdlib docs at: {url}")
+                        return await response.read()
+            except Exception:
+                continue
+
+    # No stdlib JSON found
+    logger.info(f"No rustdoc JSON found for {crate_name}, will use fallback")
+    return None
 
 
 @retry(
@@ -2964,45 +3024,67 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 logger.info(f"Resolving rustdoc URL for {crate_name}@{version}")
 
                 if is_stdlib_crate(crate_name):
-                    # For stdlib, we already have the version resolved
+                    # For stdlib, try rust-lang.org/rustup first
                     resolved_version = version
-                    rustdoc_url = get_stdlib_url(crate_name, version)
+
+                    # Try to fetch stdlib JSON through new tier
+                    stdlib_json = await fetch_rust_lang_stdlib(
+                        session, crate_name, version
+                    )
+
+                    if stdlib_json:
+                        # We got stdlib JSON! Use RUST_LANG_STDLIB tier
+                        ingestion_tier = IngestionTier.RUST_LANG_STDLIB
+                        json_content = stdlib_json
+
+                        # Skip the download step since we already have the content
+                        logger.info(
+                            f"Using stdlib JSON from rust-lang.org/rustup for {crate_name}"
+                        )
+                    else:
+                        # Fall back to trying docs.rs (will likely fail)
+                        rustdoc_url = get_stdlib_url(crate_name, version)
                 else:
                     # Use existing docs.rs resolution for third-party crates
                     resolved_version, rustdoc_url = await resolve_version(
                         session, crate_name, version
                     )
 
-                # Download rustdoc (with compression support)
-                logger.info(f"Downloading rustdoc for {crate_name}@{resolved_version}")
-
-                # Try to download with the specific version first
-                try:
-                    compressed_content, download_url = await download_rustdoc(
-                        session, crate_name, resolved_version, rustdoc_url
+                # Check if we already have stdlib JSON content
+                if "json_content" not in locals():
+                    # Download rustdoc (with compression support)
+                    logger.info(
+                        f"Downloading rustdoc for {crate_name}@{resolved_version}"
                     )
-                except Exception:
-                    # Only fall back to latest if this specific version doesn't have rustdoc JSON
-                    # Check for the specific exception type that indicates version unavailability
-                    # is_version_not_found = (
-                    #     e.__class__.__name__ == "RustdocVersionNotFoundError"
-                    #     or "RustdocVersionNotFoundError" in str(type(e))
-                    # )
 
-                    # Don't fall back to latest automatically - let source extraction handle it
-                    raise
+                    # Try to download with the specific version first
+                    try:
+                        compressed_content, download_url = await download_rustdoc(
+                            session, crate_name, resolved_version, rustdoc_url
+                        )
+                    except Exception:
+                        # Only fall back to latest if this specific version doesn't have rustdoc JSON
+                        # Check for the specific exception type that indicates version unavailability
+                        # is_version_not_found = (
+                        #     e.__class__.__name__ == "RustdocVersionNotFoundError"
+                        #     or "RustdocVersionNotFoundError" in str(type(e))
+                        # )
 
-                # Decompress content
-                logger.info("Decompressing rustdoc content")
-                json_content = await decompress_content(
-                    compressed_content, download_url
-                )
+                        # Don't fall back to latest automatically - let source extraction handle it
+                        raise
+
+                    # Decompress content
+                    logger.info("Decompressing rustdoc content")
+                    json_content = await decompress_content(
+                        compressed_content, download_url
+                    )
 
                 # Parse rustdoc items (now returns an async generator)
                 logger.info("Parsing rustdoc items in streaming mode")
 
-                # Track ingestion tier - this is the primary path with full rustdoc JSON
-                ingestion_tier = IngestionTier.RUSTDOC_JSON
+                # Track ingestion tier - set if not already set by stdlib path
+                if "ingestion_tier" not in locals():
+                    ingestion_tier = IngestionTier.RUSTDOC_JSON
 
                 # Collect items from streaming parser
                 items = []
