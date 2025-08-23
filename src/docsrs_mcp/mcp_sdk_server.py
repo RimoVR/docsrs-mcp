@@ -7,18 +7,23 @@ from mcp.server import Server
 from mcp.server.models import InitializationOptions
 
 from .models import (
+    AssociatedItemResponse,
     CompareVersionsResponse,
+    GenericConstraintResponse,
     GetCrateSummaryResponse,
     GetItemDocResponse,
     GetModuleTreeResponse,
     IngestCargoFileResponse,
     ListVersionsResponse,
+    MethodSignatureResponse,
     PreIngestionControlResponse,
     SearchExamplesResponse,
     SearchItemsResponse,
     StartPreIngestionResponse,
+    TraitImplementationResponse,
+    TypeTraitsResponse,
 )
-from .services import CrateService, IngestionService
+from .services import CrateService, IngestionService, TypeNavigationService
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,7 @@ server = Server("docsrs-mcp")
 # Initialize service layer
 crate_service = CrateService()
 ingestion_service = IngestionService()
+type_navigation_service = TypeNavigationService()
 
 
 # Parameter validation utilities
@@ -372,6 +378,142 @@ async def ingest_cargo_file(
 
 
 @server.tool()
+async def get_trait_implementors(
+    crate_name: str, trait_path: str, version: str = "latest"
+) -> dict:
+    """Find all types that implement a specific trait.
+
+    Discovers types implementing a trait, including generic implementations,
+    blanket implementations, and type-specific implementations.
+
+    Args:
+        crate_name: Name of the Rust crate
+        trait_path: Full path to the trait (e.g., 'std::fmt::Debug')
+        version: Specific version or 'latest' (default: latest)
+
+    Returns:
+        List of implementing types with details
+    """
+    try:
+        result = await type_navigation_service.get_trait_implementors(
+            crate_name, trait_path, version if version != "latest" else None
+        )
+        return TraitImplementationResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in get_trait_implementors: {e}")
+        raise
+
+
+@server.tool()
+async def get_type_traits(crate_name: str, type_path: str, version: str = "latest") -> dict:
+    """Get all traits implemented by a specific type.
+
+    Lists all traits that a type implements, including standard library traits,
+    custom traits, and derived traits.
+
+    Args:
+        crate_name: Name of the Rust crate
+        type_path: Full path to the type (e.g., 'std::vec::Vec')
+        version: Specific version or 'latest' (default: latest)
+
+    Returns:
+        List of implemented traits with details
+    """
+    try:
+        result = await type_navigation_service.get_type_traits(
+            crate_name, type_path, version if version != "latest" else None
+        )
+        return TypeTraitsResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in get_type_traits: {e}")
+        raise
+
+
+@server.tool()
+async def resolve_method(
+    crate_name: str, type_path: str, method_name: str, version: str = "latest"
+) -> dict:
+    """Resolve method calls to find the correct implementation.
+
+    Disambiguates between inherent methods and trait methods, providing
+    full signature information and disambiguation hints when multiple
+    candidates exist.
+
+    Args:
+        crate_name: Name of the Rust crate
+        type_path: Full path to the type
+        method_name: Name of the method to resolve
+        version: Specific version or 'latest' (default: latest)
+
+    Returns:
+        Method resolution with candidates and disambiguation hints
+    """
+    try:
+        result = await type_navigation_service.resolve_method(
+            crate_name, type_path, method_name, version if version != "latest" else None
+        )
+        return MethodSignatureResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in resolve_method: {e}")
+        raise
+
+
+@server.tool()
+async def get_associated_items(
+    crate_name: str, container_path: str, item_kind: str | None = None, version: str = "latest"
+) -> dict:
+    """Get associated items (types, constants, functions) for a trait or type.
+
+    Retrieves associated types, constants, and functions defined in traits
+    or implemented for types.
+
+    Args:
+        crate_name: Name of the Rust crate
+        container_path: Path to the containing trait/type
+        item_kind: Optional filter by item kind ('type', 'const', 'function')
+        version: Specific version or 'latest' (default: latest)
+
+    Returns:
+        Associated items grouped by kind
+    """
+    try:
+        result = await type_navigation_service.get_associated_items(
+            crate_name, container_path, item_kind, version if version != "latest" else None
+        )
+        return AssociatedItemResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in get_associated_items: {e}")
+        raise
+
+
+@server.tool()
+async def get_generic_constraints(
+    crate_name: str, item_path: str, version: str = "latest"
+) -> dict:
+    """Get generic constraints (type bounds, lifetime parameters) for an item.
+
+    Retrieves all generic parameters, type bounds, lifetime constraints,
+    and const generics for a function, struct, trait, or impl block.
+
+    Args:
+        crate_name: Name of the Rust crate
+        item_path: Path to the item
+        version: Specific version or 'latest' (default: latest)
+
+    Returns:
+        Generic constraints grouped by kind
+    """
+    try:
+        result = await type_navigation_service.get_generic_constraints(
+            crate_name, item_path, version if version != "latest" else None
+        )
+        return GenericConstraintResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in get_generic_constraints: {e}")
+        raise
+
+
+@server.tool()
 async def compare_versions(
     crate_name: str,
     version_a: str,
@@ -657,6 +799,129 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                 },
                 "required": ["file_path"],
+            },
+        ),
+        types.Tool(
+            name="get_trait_implementors",
+            description="Find all types that implement a specific trait",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "trait_path": {
+                        "type": "string",
+                        "description": "Full path to the trait (e.g., 'std::fmt::Debug')",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "trait_path"],
+            },
+        ),
+        types.Tool(
+            name="get_type_traits",
+            description="Get all traits implemented by a specific type",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "type_path": {
+                        "type": "string",
+                        "description": "Full path to the type (e.g., 'std::vec::Vec')",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "type_path"],
+            },
+        ),
+        types.Tool(
+            name="resolve_method",
+            description="Resolve method calls to find the correct implementation",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "type_path": {
+                        "type": "string",
+                        "description": "Full path to the type",
+                    },
+                    "method_name": {
+                        "type": "string",
+                        "description": "Name of the method to resolve",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "type_path", "method_name"],
+            },
+        ),
+        types.Tool(
+            name="get_associated_items",
+            description="Get associated items (types, constants, functions) for a trait or type",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "container_path": {
+                        "type": "string",
+                        "description": "Path to the containing trait/type",
+                    },
+                    "item_kind": {
+                        "type": "string",
+                        "description": "Optional filter by item kind ('type', 'const', 'function')",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "container_path"],
+            },
+        ),
+        types.Tool(
+            name="get_generic_constraints",
+            description="Get generic constraints (type bounds, lifetime parameters) for an item",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "item_path": {
+                        "type": "string",
+                        "description": "Path to the item",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "item_path"],
             },
         ),
         types.Tool(

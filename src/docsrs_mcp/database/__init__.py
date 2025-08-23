@@ -41,6 +41,10 @@ from .retrieval import (
     get_module_by_path,
     get_module_items,
     get_module_tree,
+    query_associated_items,
+    query_generic_constraints,
+    query_method_signatures,
+    query_trait_implementations,
 )
 
 # Re-export from schema module
@@ -101,6 +105,10 @@ __all__ = [
     "get_module_by_path",
     "get_module_items",
     "get_module_tree",
+    "query_trait_implementations",
+    "query_method_signatures",
+    "query_associated_items",
+    "query_generic_constraints",
     # Ingestion module
     "compute_item_hash",
     "detect_stalled_ingestions",
