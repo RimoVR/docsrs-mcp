@@ -118,17 +118,19 @@ graph LR
         end
         
         subgraph "Ingestion Layer"
-            ING[ingest.py<br/>Enhanced rustdoc pipeline<br/>Three-tier fallback system<br/>Complete item extraction with macro extraction<br/>Standard library fallback documentation]
-            POPULAR[popular_crates.py<br/>PopularCratesManager & PreIngestionWorker<br/>Background asyncio.create_task startup<br/>asyncio.Semaphore(3) rate limiting<br/>Multi-tier cache with circuit breaker<br/>Priority queue with memory monitoring]
+            ING[ingest.py<br/>Enhanced rustdoc pipeline<br/>Four-tier fallback system<br/>Complete item extraction with macro extraction<br/>Standard library fallback documentation]
+            POPULAR[popular_crates.py<br/>PopularCratesManager & PreIngestionWorker<br/>Background asyncio.create_task startup<br/>asyncio.Semaphore(3) rate limiting<br/>Multi-tier cache with circuit breaker<br/>Priority queue with stdlib prioritization<br/>Memory monitoring]
+            RUSTUP_DETECTOR[rustup_detector.py<br/>Cross-platform rustup detection<br/>Windows, macOS, Linux, WSL support<br/>Toolchain enumeration<br/>Local stdlib JSON discovery]
+            DEPENDENCY_FILTER[dependency_filter.py<br/>DependencyFilter class<br/>Set-based implementation<br/>JSON cache at /tmp/docsrs_deps.json<br/>Bloom filter migration ready]
             VER[Version Resolution<br/>docs.rs redirects]
             DL[Compression Support<br/>zst, gzip, json]
             PARSE[ijson Parser<br/>Memory-efficient streaming<br/>Module hierarchy extraction<br/>Path validation with fallback generation]
             HIERARCHY[build_module_hierarchy()<br/>Parent-child relationships<br/>Depth calculation<br/>Item counting]
-            EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]<br/>TIER_SYSTEM[Three-Tier Ingestion System<br/>RUSTDOC_JSON: Full metadata (primary path)<br/>SOURCE_EXTRACTION: Fallback via CDN (80%+ coverage)<br/>DESCRIPTION_ONLY: Minimal fallback (100% guarantee)<br/>enhance_fallback_schema() for tier 2/3<br/>Tier-aware validation with different MIN_ITEMS_THRESHOLD]<br/>MACROEXT[EnhancedMacroExtractor<br/>Patterns: macro_rules!, #[proc_macro], #[proc_macro_derive], #[proc_macro_attribute]<br/>Fragment specifiers: expr, ident, pat, ty, stmt, block, item, meta, tt, vis, literal, path<br/>Results: lazy_static(4 macros), serde_derive(5 macros), anyhow(15 macros)]
+            EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]<br/>TIER_SYSTEM[Four-Tier Ingestion System<br/>RUST_LANG_STDLIB: Local rustdoc JSON (highest priority)<br/>RUSTDOC_JSON: Full metadata (primary path)<br/>SOURCE_EXTRACTION: Fallback via CDN (80%+ coverage)<br/>DESCRIPTION_ONLY: Minimal fallback (100% guarantee)<br/>enhance_fallback_schema() for tier 2/3<br/>Tier-aware validation with different MIN_ITEMS_THRESHOLD]<br/>MACROEXT[EnhancedMacroExtractor<br/>Patterns: macro_rules!, #[proc_macro], #[proc_macro_derive], #[proc_macro_attribute]<br/>Fragment specifiers: expr, ident, pat, ty, stmt, block, item, meta, tt, vis, literal, path<br/>Results: lazy_static(4 macros), serde_derive(5 macros), anyhow(15 macros)]
             PATHVAL[Path Validation<br/>validate_item_path_with_fallback()<br/>Database integrity enforcement]
             EMBED[FastEmbed<br/>Batch processing<br/>Embeddings warmup during startup<br/>Memory-aware batch operations<br/>Enhanced transaction management]
             LOCK[Per-crate Locks<br/>Prevent duplicates]
-            PRIORITY[Priority Queue<br/>On-demand vs pre-ingestion<br/>Request balancing]
+            PRIORITY[Priority Queue<br/>On-demand vs pre-ingestion<br/>Request balancing<br/>float('inf') priority for stdlib]
             STDLIBFALLBACK[Standard Library Fallback<br/>create_stdlib_fallback_documentation()<br/>50-68 items per stdlib crate<br/>Comprehensive tutorial message guides users to rust-docs-json setup<br/>Enhanced coverage: std (62), core (68), alloc (43)<br/>Embedding generation for stdlib types]
         end
         
@@ -189,8 +191,11 @@ graph LR
     INGEST_SVC --> POPULAR
     POPULAR --> ING
     POPULAR --> PRIORITY
+    POPULAR --> DEPENDENCY_FILTER
     PRIORITY --> ING
+    ING --> RUSTUP_DETECTOR
     ING --> PARSE
+    RUSTUP_DETECTOR --> ING
     PARSE --> HIERARCHY
     HIERARCHY --> EXTRACT
     EXTRACT --> PATHVAL
@@ -214,7 +219,7 @@ The docsrs-mcp server implements a service layer pattern that decouples business
 
 #### Core Services
 
-- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management
+- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration.
 - **IngestionService**: Manages the complete ingestion pipeline, pre-ingestion workflows, and cargo file processing
 - **Transport Layer Decoupling**: Business logic is independent of whether accessed via MCP or REST
 
@@ -317,6 +322,7 @@ The models package implements a **modular, function-based split** that maintains
 - `SearchResult`, `CodeExample`, `VersionInfo` data models
 - Response formatting with consistent field naming
 - Integration with FastAPI automatic documentation
+- **Phase 2 Enhancement**: `SearchResult` and `GetItemDocResponse` now include `is_stdlib: bool` and `is_dependency: bool` fields for enhanced filtering and context
 
 **models/version_diff.py (~245 LOC)**
 - Version comparison and change tracking models
@@ -6362,7 +6368,7 @@ The popular crate pre-ingestion system proactively processes high-traffic crates
 **Smart Refresh Strategy**: Background refresh triggered at 75% TTL with stale-while-revalidate pattern, ensuring users never experience cache misses.
 
 ### PreIngestionWorker Enhanced Architecture
-**Priority Queue System**: Processes crates by download count with most popular crates receiving highest priority for optimal user experience.
+**Priority Queue System**: Processes crates by download count with most popular crates receiving highest priority for optimal user experience. **Phase 2 Enhancement**: Standard library crates (std, core, alloc, proc_macro, test) receive `float('inf')` priority, ensuring they are always processed first regardless of download metrics.
 
 **Duplicate Detection**: Set-based tracking prevents redundant work and ensures efficient resource utilization.
 
@@ -6386,6 +6392,7 @@ The IngestionScheduler provides periodic re-ingestion of popular crates to keep 
 - `SCHEDULER_ENABLED`: Enable/disable scheduler (default: true)
 - `SCHEDULER_INTERVAL_HOURS`: Hours between ingestion cycles (default: 6)  
 - `SCHEDULER_JITTER_PERCENT`: Jitter percentage for interval variance (default: 10)
+- `STDLIB_PRE_CACHE`: Enable stdlib priority pre-caching (default: true) - **Phase 2 Enhancement**
 
 **Integration Points**:
 - **PopularCratesManager Integration**: Leverages existing popular crates discovery for scheduling targets
@@ -6531,9 +6538,10 @@ classDiagram
     
     class PreIngestionItem {
         +crate_name: str
-        +priority: int (download_count based)
+        +priority: float (download_count based, float('inf') for stdlib)
         +scheduled_at: datetime
         +retry_count: int
+        +is_stdlib: bool
     }
     
     class CacheStatistics {
@@ -6729,19 +6737,27 @@ def detect_re_ingestion(crate_name: str, version: str) -> bool:
 
 ## Ingestion Tier System
 
-We've implemented a comprehensive three-tier ingestion system to handle different documentation availability scenarios, ensuring 80%+ crate coverage while maintaining appropriate data quality expectations for each ingestion method.
+We've implemented a comprehensive four-tier ingestion system to handle different documentation availability scenarios, ensuring 80%+ crate coverage while maintaining appropriate data quality expectations for each ingestion method. Phase 2 introduces stdlib-specific enhancements with local rustdoc JSON discovery.
 
-### Three-Tier Architecture Overview
+### Four-Tier Architecture Overview
 
-**Tiers**:
-1. **RUSTDOC_JSON** - Full rustdoc JSON with complete metadata (primary path)
-2. **SOURCE_EXTRACTION** - Fallback source extraction from CDN when rustdoc fails
-3. **DESCRIPTION_ONLY** - Minimal description fallback for basic coverage
+**Tiers** (Priority Order):
+1. **RUST_LANG_STDLIB** - Local rustdoc JSON from rustup toolchain (highest quality, stdlib only)
+2. **RUSTDOC_JSON** - Full rustdoc JSON with complete metadata (primary path)
+3. **SOURCE_EXTRACTION** - Fallback source extraction from CDN when rustdoc fails
+4. **DESCRIPTION_ONLY** - Minimal description fallback for basic coverage
 
-### Enhanced Three-Tier Fallback System
+### Enhanced Four-Tier Fallback System
 
 ```mermaid
 graph TD
+    subgraph "Tier 0: RUST_LANG_STDLIB (Highest Priority)"
+        T0_DETECT[Rustup Detection<br/>rustup_detector.py]
+        T0_LOCATE[Locate Local JSON<br/>get_stdlib_json_path()]
+        T0_PARSE[Enhanced JSON Parser<br/>Complete stdlib metadata]
+        T0_SCHEMA[Premium Schema Available<br/>Local rustdoc JSON quality]
+    end
+    
     subgraph "Tier 1: RUSTDOC_JSON (Primary Path)"
         T1_DOWNLOAD[Download rustdoc JSON<br/>docs.rs CDN]
         T1_PARSE[Enhanced JSON Parser<br/>Complete metadata extraction]
@@ -6769,6 +6785,19 @@ graph TD
     subgraph "Tier-Aware Validation"
         VALIDATION[Tier-specific validation<br/>MIN_ITEMS_THRESHOLD per tier<br/>is_fallback_tier() checks<br/>get_tier_threshold() logic]
     end
+    
+    subgraph "Stdlib Check"
+        STDLIB_CHECK{Is stdlib crate?<br/>std, core, alloc, proc_macro, test}
+    end
+    
+    STDLIB_CHECK -->|Yes| T0_DETECT
+    STDLIB_CHECK -->|No| T1_DOWNLOAD
+    
+    T0_DETECT --> T0_LOCATE
+    T0_LOCATE --> T0_PARSE
+    T0_PARSE --> T0_SCHEMA
+    T0_SCHEMA -->|Success| VALIDATION
+    T0_SCHEMA -->|Not Available| T1_DOWNLOAD
     
     T1_DOWNLOAD --> T1_PARSE
     T1_PARSE --> T1_EXTRACT
@@ -6837,6 +6866,7 @@ def enhance_fallback_schema(item_data: Dict, source_tier: str) -> Dict:
 Different validation thresholds apply based on the ingestion tier used:
 
 **MIN_ITEMS_THRESHOLD Values**:
+- **RUST_LANG_STDLIB**: 2 items (highest threshold for local rustdoc JSON)
 - **RUSTDOC_JSON**: 2 items (higher threshold for complete data)
 - **SOURCE_EXTRACTION**: 1 item (lower threshold for extracted data)
 - **DESCRIPTION_ONLY**: 1 item (minimal threshold for basic coverage)
@@ -6849,6 +6879,7 @@ def is_fallback_tier(tier: str) -> bool:
 def get_tier_threshold(tier: str) -> int:
     """Get appropriate threshold for ingestion tier."""
     thresholds = {
+        'RUST_LANG_STDLIB': 2,
         'RUSTDOC_JSON': 2,
         'SOURCE_EXTRACTION': 1, 
         'DESCRIPTION_ONLY': 1
@@ -6864,7 +6895,7 @@ The ingestion tier is tracked in the database for tier-aware processing:
 -- Enhanced crate_metadata with tier tracking
 ALTER TABLE crate_metadata ADD COLUMN ingestion_tier TEXT DEFAULT NULL;
 
--- Tier values: 'RUSTDOC_JSON', 'SOURCE_EXTRACTION', 'DESCRIPTION_ONLY'
+-- Tier values: 'RUST_LANG_STDLIB', 'RUSTDOC_JSON', 'SOURCE_EXTRACTION', 'DESCRIPTION_ONLY'
 ```
 
 **Benefits of Tier Tracking**:
@@ -6872,6 +6903,401 @@ ALTER TABLE crate_metadata ADD COLUMN ingestion_tier TEXT DEFAULT NULL;
 - **Performance Optimization**: Apply tier-specific processing logic
 - **Coverage Metrics**: Track success rates across ingestion methods
 - **Error Context**: Provide tier-aware error messages and limitations
+
+## Phase 2 Enhancement: Rustup Detection Architecture
+
+Phase 2 introduces comprehensive Rust toolchain detection capabilities through the `rustup_detector.py` module, enabling local standard library documentation discovery for superior quality ingestion.
+
+### Cross-Platform Rustup Detection Module
+
+The `rustup_detector.py` module provides robust, cross-platform detection of Rust toolchains and standard library documentation:
+
+**Core Functions**:
+- `detect_rustup()`: Cross-platform rustup installation detection
+- `get_available_toolchains()`: Enumerate installed Rust toolchains
+- `has_rust_docs_json()`: Check for rustdoc JSON availability in toolchain
+- `get_stdlib_json_path()`: Locate standard library JSON documentation
+
+**Platform Support**:
+- **Windows**: Detects rustup in `%USERPROFILE%/.cargo/bin/` and system PATH
+- **macOS**: Supports both Homebrew (`/opt/homebrew/bin/`) and standard (`~/.cargo/bin/`) installations
+- **Linux**: Standard cargo installation detection via `~/.cargo/bin/rustup`
+- **WSL**: Windows Subsystem for Linux compatibility with automatic path conversion
+
+```python
+def detect_rustup() -> Optional[str]:
+    """
+    Cross-platform rustup detection with comprehensive path resolution.
+    
+    Returns:
+        Path to rustup executable if found, None otherwise
+        
+    Platform-specific detection:
+    - Windows: %USERPROFILE%/.cargo/bin/rustup.exe + PATH
+    - macOS: ~/.cargo/bin/rustup + /opt/homebrew/bin/rustup + PATH  
+    - Linux: ~/.cargo/bin/rustup + PATH
+    - WSL: Windows path conversion + standard Linux paths
+    """
+
+def get_stdlib_json_path(toolchain: str = "stable") -> Optional[str]:
+    """
+    Locate standard library rustdoc JSON files in toolchain.
+    
+    Typical path structure:
+    ~/.rustup/toolchains/{toolchain}/share/doc/rust/json/std/
+    
+    Returns:
+        Absolute path to stdlib JSON directory if available
+    """
+```
+
+### Integration with Ingestion Pipeline
+
+The rustup detector integrates seamlessly with the existing ingestion pipeline:
+
+**Ingestion Flow Enhancement**:
+1. **Stdlib Detection**: Check if crate is stdlib (std, core, alloc, proc_macro, test)
+2. **Rustup Check**: Use `detect_rustup()` to locate toolchain
+3. **JSON Discovery**: Call `get_stdlib_json_path()` to find local documentation
+4. **Tier Assignment**: Set ingestion tier to `RUST_LANG_STDLIB` when available
+5. **Fallback**: Graceful fallback to `RUSTDOC_JSON` tier if local docs unavailable
+
+**Quality Benefits**:
+- **Local Documentation**: Access to complete, uncompressed rustdoc JSON
+- **Version Consistency**: Match user's installed Rust version exactly
+- **Performance**: Eliminate network requests for stdlib crates
+- **Completeness**: Access to internal/private items not available via docs.rs
+
+### Enhanced Stdlib Priority in Ingestion
+
+Standard library crates receive special treatment in the ingestion pipeline:
+
+```python
+# Enhanced priority queue with stdlib handling
+def get_crate_priority(crate_name: str, version: str) -> float:
+    """Calculate ingestion priority with stdlib boost."""
+    
+    # Stdlib crates get infinite priority
+    stdlib_crates = {'std', 'core', 'alloc', 'proc_macro', 'test'}
+    if crate_name in stdlib_crates:
+        return float('inf')
+    
+    # Regular priority calculation for other crates
+    return calculate_regular_priority(crate_name, version)
+```
+
+**STDLIB_PRE_CACHE Environment Control**:
+- Environment variable: `STDLIB_PRE_CACHE=true` (default: enabled)
+- Controls whether stdlib crates are automatically prioritized
+- Allows fine-grained control over pre-caching behavior
+
+## Phase 2 Enhancement: Dependency Filter Architecture
+
+The new `dependency_filter.py` module provides efficient dependency tracking and filtering capabilities for enhanced MCP responses.
+
+### DependencyFilter Class Architecture
+
+The `DependencyFilter` class implements set-based dependency management with persistent caching:
+
+**Core Implementation**:
+- **Set-Based Storage**: Uses Python `set()` for O(1) lookup performance
+- **JSON Persistence**: Caches dependency list at `/tmp/docsrs_deps.json`
+- **Lazy Loading**: Dependencies loaded on first access to minimize startup overhead
+- **Thread Safety**: Designed for concurrent access in async environment
+
+**Key Methods**:
+```python
+class DependencyFilter:
+    def __init__(self):
+        self._dependencies: Optional[Set[str]] = None
+        self._cache_path = "/tmp/docsrs_deps.json"
+    
+    def add_dependency(self, crate_name: str) -> None:
+        """Add crate to dependency set with persistence."""
+    
+    def is_dependency(self, crate_name: str) -> bool:
+        """O(1) dependency lookup."""
+    
+    def filter_items(self, items: List[Dict]) -> List[Dict]:
+        """Filter items and mark dependency status."""
+```
+
+### Caching Strategy
+
+The dependency filter implements intelligent caching to balance performance and accuracy:
+
+**Cache Location**: `/tmp/docsrs_deps.json`
+**Cache Benefits**:
+- **Startup Performance**: Avoid re-scanning dependencies on server restart
+- **Cross-Session Persistence**: Maintain dependency knowledge between sessions
+- **Incremental Updates**: Add new dependencies without full rebuild
+
+**Cache Management**:
+```python
+def _load_cache(self) -> Set[str]:
+    """Load dependency cache from JSON file."""
+    try:
+        if os.path.exists(self._cache_path):
+            with open(self._cache_path, 'r') as f:
+                data = json.load(f)
+                return set(data.get('dependencies', []))
+    except (json.JSONDecodeError, IOError):
+        logger.warning("Failed to load dependency cache, starting fresh")
+    return set()
+
+def _save_cache(self) -> None:
+    """Persist dependency set to JSON cache."""
+    cache_data = {
+        'dependencies': sorted(list(self._dependencies)),
+        'last_updated': time.time()
+    }
+    with open(self._cache_path, 'w') as f:
+        json.dump(cache_data, f, indent=2)
+```
+
+### Future Migration Path: Bloom Filter
+
+The architecture is designed for future migration to bloom filters when Python 3.13+ support improves:
+
+**Migration Benefits**:
+- **Memory Efficiency**: Significant reduction in memory usage for large dependency sets
+- **Performance**: Maintain O(1) lookup with improved memory locality
+- **False Positives**: Acceptable for dependency marking (non-critical application)
+
+**Implementation Readiness**:
+- Current set-based implementation serves as baseline
+- JSON cache format compatible with bloom filter initialization
+- Interface designed to support seamless backend swap
+
+### Phase 2 Architecture Flow Diagrams
+
+#### Rustup Detection Flow
+
+```mermaid
+flowchart TD
+    subgraph "Cross-Platform Rustup Detection"
+        START[Crate Ingestion Request]
+        STDLIB_CHECK{Is stdlib crate?<br/>std, core, alloc, proc_macro, test}
+        DETECT_RUSTUP[detect_rustup()<br/>Cross-platform detection]
+        
+        subgraph "Platform Detection"
+            WINDOWS[Windows<br/>%USERPROFILE%/.cargo/bin/<br/>+ PATH search]
+            MACOS[macOS<br/>~/.cargo/bin/<br/>+ /opt/homebrew/bin/<br/>+ PATH search]
+            LINUX[Linux/WSL<br/>~/.cargo/bin/<br/>+ PATH search]
+        end
+        
+        RUSTUP_FOUND{Rustup found?}
+        GET_TOOLCHAINS[get_available_toolchains()<br/>Enumerate installed toolchains]
+        GET_JSON_PATH[get_stdlib_json_path(toolchain)<br/>~/.rustup/toolchains/{}/share/doc/rust/json/]
+        
+        HAS_DOCS{Local docs available?}
+        USE_STDLIB_TIER[Set ingestion_tier = RUST_LANG_STDLIB]
+        FALLBACK_TIER[Fallback to RUSTDOC_JSON tier]
+        
+        LOCAL_INGEST[Process local rustdoc JSON<br/>Superior quality & completeness]
+        REMOTE_INGEST[Process via docs.rs CDN<br/>Standard quality]
+    end
+    
+    START --> STDLIB_CHECK
+    STDLIB_CHECK -->|No| REMOTE_INGEST
+    STDLIB_CHECK -->|Yes| DETECT_RUSTUP
+    
+    DETECT_RUSTUP --> WINDOWS
+    DETECT_RUSTUP --> MACOS
+    DETECT_RUSTUP --> LINUX
+    
+    WINDOWS --> RUSTUP_FOUND
+    MACOS --> RUSTUP_FOUND
+    LINUX --> RUSTUP_FOUND
+    
+    RUSTUP_FOUND -->|No| FALLBACK_TIER
+    RUSTUP_FOUND -->|Yes| GET_TOOLCHAINS
+    GET_TOOLCHAINS --> GET_JSON_PATH
+    GET_JSON_PATH --> HAS_DOCS
+    
+    HAS_DOCS -->|No| FALLBACK_TIER
+    HAS_DOCS -->|Yes| USE_STDLIB_TIER
+    
+    USE_STDLIB_TIER --> LOCAL_INGEST
+    FALLBACK_TIER --> REMOTE_INGEST
+```
+
+#### Dependency Filtering Pipeline
+
+```mermaid
+flowchart TD
+    subgraph "Dependency Filter Architecture"
+        INIT[DependencyFilter Initialization]
+        LAZY_LOAD{Dependencies loaded?}
+        
+        subgraph "Cache Management"
+            LOAD_CACHE[_load_cache()<br/>Load from /tmp/docsrs_deps.json]
+            CACHE_EXISTS{Cache file exists?}
+            PARSE_JSON[Parse JSON dependencies array]
+            CREATE_SET[Create new empty set]
+            CACHE_ERROR[Log warning, use empty set]
+        end
+        
+        ADD_DEPENDENCY[add_dependency(crate_name)<br/>Add to set + persist]
+        IS_DEPENDENCY[is_dependency(crate_name)<br/>O(1) lookup]
+        FILTER_ITEMS[filter_items(items)<br/>Batch marking]
+        
+        subgraph "Persistence Layer"
+            SAVE_CACHE[_save_cache()<br/>Atomic write to JSON]
+            JSON_FORMAT[{"dependencies": [...],<br/>"last_updated": timestamp}]
+        end
+        
+        subgraph "Service Integration"
+            CRATE_SERVICE[CrateService<br/>Auto-population]
+            SEARCH_RESPONSE[SearchResult.is_dependency = bool]
+            DOC_RESPONSE[GetItemDocResponse.is_dependency = bool]
+        end
+        
+        subgraph "Future Migration"
+            BLOOM_FILTER[Bloom Filter Backend<br/>Python 3.13+ ready]
+            MEMORY_EFFICIENT[Significant memory reduction<br/>Acceptable false positives]
+        end
+    end
+    
+    INIT --> LAZY_LOAD
+    LAZY_LOAD -->|No| LOAD_CACHE
+    LAZY_LOAD -->|Yes| IS_DEPENDENCY
+    
+    LOAD_CACHE --> CACHE_EXISTS
+    CACHE_EXISTS -->|Yes| PARSE_JSON
+    CACHE_EXISTS -->|No| CREATE_SET
+    PARSE_JSON -->|Success| IS_DEPENDENCY
+    PARSE_JSON -->|Error| CACHE_ERROR
+    CACHE_ERROR --> CREATE_SET
+    CREATE_SET --> IS_DEPENDENCY
+    
+    ADD_DEPENDENCY --> SAVE_CACHE
+    SAVE_CACHE --> JSON_FORMAT
+    
+    IS_DEPENDENCY --> CRATE_SERVICE
+    FILTER_ITEMS --> CRATE_SERVICE
+    CRATE_SERVICE --> SEARCH_RESPONSE
+    CRATE_SERVICE --> DOC_RESPONSE
+    
+    IS_DEPENDENCY -.-> BLOOM_FILTER
+    BLOOM_FILTER --> MEMORY_EFFICIENT
+```
+
+#### Stdlib Priority Queue Enhancement
+
+```mermaid
+flowchart TD
+    subgraph "Enhanced Priority Queue with Stdlib Handling"
+        CRATE_REQUEST[Crate Ingestion Request]
+        PRIORITY_CALC[get_crate_priority(crate, version)]
+        
+        subgraph "Priority Calculation Logic"
+            STDLIB_CHECK{Is stdlib crate?<br/>std, core, alloc, proc_macro, test}
+            INFINITE_PRIORITY[priority = float('inf')<br/>Highest possible priority]
+            REGULAR_PRIORITY[calculate_regular_priority()<br/>Based on download count]
+        end
+        
+        subgraph "Environment Control"
+            ENV_CHECK{STDLIB_PRE_CACHE enabled?}
+            SKIP_STDLIB[Use regular priority calculation]
+        end
+        
+        subgraph "Priority Queue Management"
+            PRIORITY_QUEUE[Pre-ingestion Priority Queue]
+            STDLIB_ITEMS[Stdlib Items<br/>priority = ∞]
+            POPULAR_ITEMS[Popular Crates<br/>priority = download_count]
+            REGULAR_ITEMS[Other Crates<br/>priority = base_priority]
+        end
+        
+        subgraph "Processing Order"
+            PROCESS_STDLIB[Process All Stdlib First<br/>std, core, alloc, proc_macro, test]
+            PROCESS_POPULAR[Process Popular Crates<br/>By download count descending]
+            PROCESS_OTHERS[Process Remaining Crates<br/>By request time/priority]
+        end
+        
+        subgraph "Worker Pool"
+            SEMAPHORE[Semaphore(3)<br/>Concurrency control]
+            WORKER1[Worker 1<br/>Processing stdlib]
+            WORKER2[Worker 2<br/>Processing popular]
+            WORKER3[Worker 3<br/>Processing others]
+        end
+    end
+    
+    CRATE_REQUEST --> PRIORITY_CALC
+    PRIORITY_CALC --> STDLIB_CHECK
+    
+    STDLIB_CHECK -->|Yes| ENV_CHECK
+    STDLIB_CHECK -->|No| REGULAR_PRIORITY
+    
+    ENV_CHECK -->|true| INFINITE_PRIORITY
+    ENV_CHECK -->|false| SKIP_STDLIB
+    SKIP_STDLIB --> REGULAR_PRIORITY
+    
+    INFINITE_PRIORITY --> PRIORITY_QUEUE
+    REGULAR_PRIORITY --> PRIORITY_QUEUE
+    
+    PRIORITY_QUEUE --> STDLIB_ITEMS
+    PRIORITY_QUEUE --> POPULAR_ITEMS
+    PRIORITY_QUEUE --> REGULAR_ITEMS
+    
+    STDLIB_ITEMS --> PROCESS_STDLIB
+    POPULAR_ITEMS --> PROCESS_POPULAR
+    REGULAR_ITEMS --> PROCESS_OTHERS
+    
+    PROCESS_STDLIB --> SEMAPHORE
+    PROCESS_POPULAR --> SEMAPHORE
+    PROCESS_OTHERS --> SEMAPHORE
+    
+    SEMAPHORE --> WORKER1
+    SEMAPHORE --> WORKER2
+    SEMAPHORE --> WORKER3
+```
+
+#### Phase 2 Integration Overview
+
+```mermaid
+flowchart TB
+    subgraph "Phase 2 Enhanced Architecture Integration"
+        subgraph "New Components"
+            RUSTUP[rustup_detector.py<br/>Cross-platform detection]
+            DEPFILTER[dependency_filter.py<br/>Set-based filtering + cache]
+            NEWMODELS[Enhanced Response Models<br/>is_stdlib + is_dependency fields]
+        end
+        
+        subgraph "Enhanced Ingestion Pipeline"
+            FOURTIER[Four-Tier System<br/>RUST_LANG_STDLIB added]
+            STDLIB_PRIORITY[Stdlib Priority Queue<br/>float('inf') priority]
+            LOCAL_JSON[Local Stdlib JSON<br/>Superior quality]
+        end
+        
+        subgraph "Service Layer Enhancement"
+            CRATESERVICE[CrateService Enhancement<br/>Auto-populate new fields]
+            MOBILEINTEGRATION[MCP/REST Integration<br/>Unified field population]
+        end
+        
+        subgraph "Performance Benefits"
+            FASTER_STDLIB[Faster Stdlib Ingestion<br/>Local files, no network]
+            BETTER_CONTEXT[Enhanced Context<br/>Dependency awareness]
+            IMPROVED_UX[Improved User Experience<br/>Priority-aware processing]
+        end
+    end
+    
+    RUSTUP --> FOURTIER
+    RUSTUP --> LOCAL_JSON
+    DEPFILTER --> NEWMODELS
+    DEPFILTER --> CRATESERVICE
+    
+    FOURTIER --> STDLIB_PRIORITY
+    STDLIB_PRIORITY --> FASTER_STDLIB
+    LOCAL_JSON --> FASTER_STDLIB
+    
+    NEWMODELS --> MOBILEINTEGRATION
+    CRATESERVICE --> MOBILEINTEGRATION
+    
+    FASTER_STDLIB --> IMPROVED_UX
+    BETTER_CONTEXT --> IMPROVED_UX
+    MOBILEINTEGRATION --> BETTER_CONTEXT
+```
 
 ## MCP Parameter Schema Override Architecture
 

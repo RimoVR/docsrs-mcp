@@ -815,6 +815,72 @@
           "relatedFiles": ["src/docsrs_mcp/endpoints.py", "src/docsrs_mcp/models.py"],
           "codeExample": "# CrateModule model expects:\n# CrateModule(id=..., name=..., path=..., parent_id=..., depth=...)\n# Ensure query returns matching columns:\nSELECT m.id, m.name, m.path, m.parent_id, m.depth FROM modules m",
           "debuggingTechnique": "Compare database query column names with Pydantic model field names to ensure exact alignment"
+        },
+        {
+          "error": "pybloomfiltermmap3 Compilation Error - Microsoft Visual C++ 14.0 or greater is required",
+          "rootCause": "Python 3.13 compatibility issue with C extension compilation. The library hasn't been updated for Python 3.13 and requires Microsoft Visual C++ build tools on Windows or equivalent C compiler infrastructure",
+          "solution": "Implemented alternative set-based DependencyFilter class with JSON persistence instead of bloom filters. Use regular Python sets for moderate-sized dependency tracking until library updates",
+          "context": "Phase 2 implementation - dependency tracking needed bloom filter optimization but library incompatible with Python 3.13",
+          "lesson": "Always have fallback implementations for external dependencies with C extensions, especially on cutting-edge Python versions",
+          "pattern": "Use native Python data structures as fallbacks when C extension libraries fail to compile",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/dependency_tracker.py"],
+          "codeExample": "# Fallback implementation without bloom filter:\nclass DependencyFilter:\n    def __init__(self, persist_path: Optional[Path] = None):\n        self._seen_deps: Set[str] = set()\n        self._persist_path = persist_path\n        self._load_from_disk()\n    \n    def add(self, dependency: str) -> None:\n        self._seen_deps.add(dependency)\n        self._save_to_disk()\n    \n    def __contains__(self, dependency: str) -> bool:\n        return dependency in self._seen_deps",
+          "workaround": "Use regular Python sets for moderate-sized dependency tracking",
+          "futureAction": "Migrate to bloom filters when pybloomfiltermmap3 supports Python 3.13",
+          "debuggingTechnique": "Check Python version compatibility of C extension libraries before implementation"
+        },
+        {
+          "error": "Priority Queue Infinity Handling - Concern about float('inf') compatibility",
+          "rootCause": "Initial uncertainty about whether asyncio.PriorityQueue could handle infinity values properly for stdlib crate prioritization",
+          "solution": "Use float('-inf') as priority value for highest priority items. asyncio.PriorityQueue handles infinity values correctly with negative values for max-heap behavior",
+          "context": "Phase 2 implementation - needed to ensure stdlib crates get highest priority in processing queue",
+          "lesson": "Python's asyncio.PriorityQueue correctly handles infinity values. Use negative infinity for highest priority in min-heap implementations",
+          "pattern": "Use float('-inf') for highest priority items in asyncio.PriorityQueue",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/core/priority_processor.py"],
+          "codeExample": "# Correct priority assignment for max priority:\nstdlib_priority = float('-inf')  # Highest priority\nregular_priority = 1.0           # Lower priority\n\n# Queue item with highest priority:\nawait priority_queue.put((stdlib_priority, crate_item))",
+          "verification": "asyncio.PriorityQueue handles infinity values correctly with proper min-heap ordering",
+          "debuggingTechnique": "Test priority queue behavior with infinity values to verify ordering"
+        },
+        {
+          "error": "Import Path Issues - String replacement failed for config imports",
+          "rootCause": "Attempted to use simple string replacement for import path updates instead of proper relative import structure when accessing config.STDLIB_CRATES from service layer",
+          "solution": "Use correct relative import structure (from .. import config) instead of string manipulation for import path changes",
+          "context": "Phase 2 implementation - service layer needed access to configuration constants",
+          "lesson": "Use proper Python import syntax rather than string manipulation for import path changes during refactoring",
+          "pattern": "Always use relative imports (from .. import) for accessing parent module configurations",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/services/priority_service.py", "src/docsrs_mcp/config.py"],
+          "codeExample": "# Correct relative import:\nfrom .. import config\n\n# Access config values:\nif crate_name in config.STDLIB_CRATES:\n    priority = float('-inf')",
+          "debuggingTechnique": "Use Python import system rather than string replacement for import path modifications"
+        },
+        {
+          "error": "Ruff Formatting Issues - Whitespace and formatting violations",
+          "rootCause": "Multiple files modified during Phase 2 implementation without running code formatter, causing whitespace violations and inconsistent formatting",
+          "solution": "Run 'uv run ruff format' on all modified files before committing. Ruff handles all formatting automatically including line length, indentation, and import sorting",
+          "context": "Phase 2 implementation - multiple files edited without consistent formatting applied",
+          "lesson": "Always run ruff format before committing code changes to maintain consistent code style across the project",
+          "pattern": "Include 'uv run ruff format .' in development workflow before all commits",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["Multiple files across src/docsrs_mcp/"],
+          "codeExample": "# Development workflow:\n# 1. Make code changes\n# 2. Run formatter:\nuv run ruff format .\n# 3. Run linter:\nuv run ruff check --fix .\n# 4. Commit changes",
+          "prevention": "Always run ruff format before committing to prevent formatting violations",
+          "automationTip": "Consider adding pre-commit hooks to automatically run ruff format and check",
+          "debuggingTechnique": "Use 'uv run ruff check --diff .' to preview formatting changes before applying"
+        },
+        {
+          "error": "Git Status Not Showing All Changes - Changes missing from git status output",
+          "rootCause": "Changes were already staged or committed, causing git status to not display modifications that actually exist in files. Files like models/responses.py had changes but weren't shown in working directory status",
+          "solution": "Use 'git add -A' to ensure all changes are staged, and use grep to confirm changes exist in files when git status seems incomplete",
+          "context": "Phase 2 implementation - difficulty tracking which files were actually modified during development",
+          "lesson": "Git status only shows unstaged changes. Use git add -A and grep to verify file modifications when status seems incomplete",
+          "pattern": "When git status doesn't match expected changes, verify with grep and use git add -A to stage everything",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/models/responses.py", "Various Phase 2 implementation files"],
+          "codeExample": "# Verify changes exist when git status is unclear:\ngrep -n \"specific_change_text\" src/docsrs_mcp/models/responses.py\n\n# Ensure all changes are staged:\ngit add -A\n\n# Check what's actually staged:\ngit diff --cached --name-only",
+          "verification": "Use grep to confirm changes exist in files regardless of git status output",
+          "debuggingTechnique": "Cross-reference git status with grep searches to verify all changes are tracked"
         }
       ]
     },

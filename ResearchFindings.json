@@ -2,8 +2,8 @@
   "meta": {
     "projectName": "docsrs-mcp",
     "lastUpdated": "2025-08-23",
-    "compressionVersion": "1.1",
-    "originalTokens": 47800,
+    "compressionVersion": "1.2",
+    "originalTokens": 51200,
     "legend": {
       "keys": {
         "desc": "description",
@@ -27,7 +27,11 @@
         "mod": "modularization",
         "import": "imports",
         "compat": "compatibility",
-        "api": "API"
+        "api": "API",
+        "bloom": "bloom filter",
+        "cross_platform": "cross-platform",
+        "priority_q": "priority queue",
+        "mmap": "memory-mapped"
       },
       "phrases": {
         "p1": "Use for optimal performance",
@@ -43,7 +47,12 @@
         "p11": "Code organization best practice",
         "p12": "Import optimization strategy",
         "p13": "Modularization pattern",
-        "p14": "Backward compatibility requirement"
+        "p14": "Backward compatibility requirement",
+        "p15": "Alternative implementation required",
+        "p16": "Cross-platform path detection",
+        "p17": "JSON API unavailable",
+        "p18": "Priority queue optimization",
+        "p19": "Memory efficiency strategy"
       }
     },
     "globals": {
@@ -59,7 +68,9 @@
         "ijson": "3.4.0",
         "pygments": "2.19.2",
         "slowapi": "0.1.10",
-        "tiktoken": "0.11.0"
+        "tiktoken": "0.11.0",
+        "pybloomfiltermmap3": "0.6.0",
+        "mmh3": "4.1.0"
       },
       "perf_metrics": {
         "sqlite_vec_query": "<100ms for 1M+ vectors",
@@ -69,7 +80,10 @@
         "treesitter_speedup": "36x vs regex",
         "memory_efficiency": "7-25x with generators",
         "mmr_diversification_overhead": "<5ms additional latency",
-        "fuzzy_normalization_overhead": "<1ms per query"
+        "fuzzy_normalization_overhead": "<1ms per query",
+        "bloom_filter_lookup": "O(1) with 0.1% false positive rate",
+        "priority_queue_insert": "O(log n) with negative values for max-heap",
+        "memory_mapped_hash": "mmh3 provides fast hashing for bloom filters"
       },
       "memory_limits": {
         "embeddings_10k": "1GB",
@@ -77,6 +91,45 @@
         "critical_threshold": "90%",
         "sqlite_param_limit": "999",
         "batch_size_optimal": "1000"
+      },
+      "phase_2_implementation": {
+        "pybloomfiltermmap3_compatibility": {
+          "issue": "Version compatibility issue with Python 3.13",
+          "problem": "C extension compilation fails with newer Python versions",
+          "alternative": "Set-based implementation provides O(1) lookups with reasonable memory usage",
+          "future_migration": "p15 - Migration path when library updates for Python 3.13+",
+          "workaround": "JSON serialization adequate for moderate-sized dependency sets"
+        },
+        "rustup_detection": {
+          "cross_platform_paths": {
+            "windows": "%USERPROFILE%\\.rustup",
+            "macos_linux": "~/.rustup",
+            "wsl": "/home/{user}/.rustup"
+          },
+          "rust_docs_json_location": "toolchains/{toolchain}/lib/rustlib/{target}/json/",
+          "nightly_requirement": "Nightly toolchain required for rust-docs-json component",
+          "detection_strategy": "p16 - Cross-platform environment variable and filesystem detection"
+        },
+        "rust_lang_org_api": {
+          "json_availability": "p17 - Currently no JSON API available from rust-lang.org",
+          "documentation_format": "HTML documentation only at https://doc.rust-lang.org",
+          "local_source": "Local rustup JSON is the only reliable source for stdlib rustdoc",
+          "fallback_necessity": "HTML parsing required for online stdlib documentation"
+        },
+        "priority_queue_behavior": {
+          "heap_type": "Python's heapq uses min-heap by default",
+          "max_heap_implementation": "p18 - Negative values required for max-heap behavior",
+          "infinity_handling": "float('-inf') works correctly for highest priority items",
+          "asyncio_compatibility": "asyncio.PriorityQueue handles infinity values properly",
+          "performance": "O(log n) insertion with proper priority ordering"
+        },
+        "memory_mapped_files": {
+          "mmh3_library": "mmh3 library provides fast hashing for bloom filters",
+          "memory_efficiency": "p19 - Memory-mapped files reduce memory usage for large filters",
+          "serialization_strategy": "JSON serialization adequate for moderate-sized dependency sets",
+          "bloom_alternative": "Set-based implementation when bloom filters unavailable",
+          "performance_characteristics": "Hash-based lookups maintain O(1) complexity"
+        }
       }
     }
   },
@@ -727,7 +780,33 @@
           "redirect_issue": "docs.rs/std URLs redirect to doc.rust-lang.org which serves HTML only",
           "crates_io_absence": "Stdlib crates (std, core, alloc, proc_macro, test) not published on crates.io",
           "json_access_method": "rustup component add --toolchain nightly rust-docs-json required",
-          "fallback_implemented": "Basic stdlib functionality provided via fallback mechanism when JSON unavailable"
+          "fallback_implemented": "Basic stdlib functionality provided via fallback mechanism when JSON unavailable",
+        "phase_2_enhancements": {
+          "rustup_detection": "Automatic cross-platform rustup installation detection",
+          "component_validation": "Verify rust-docs-json component availability",
+          "toolchain_selection": "Prefer nightly toolchain for complete stdlib access",
+          "graceful_degradation": "Fallback to basic functionality when local JSON unavailable"
+        }
+        }
+      },
+      "phase_2_stdlib_findings": {
+        "rustup_component_requirement": {
+          "component_name": "rust-docs-json",
+          "installation": "rustup component add --toolchain nightly rust-docs-json",
+          "toolchain_requirement": "Nightly toolchain required for stdlib JSON documentation",
+          "location_pattern": "~/.rustup/toolchains/{toolchain}/lib/rustlib/{target}/json/"
+        },
+        "cross_platform_rustup_detection": {
+          "windows_path": "%USERPROFILE%\\.rustup",
+          "unix_path": "$HOME/.rustup or ~/.rustup",
+          "wsl_path": "/home/{user}/.rustup",
+          "validation_strategy": "Check for toolchains directory existence"
+        },
+        "stdlib_documentation_limitations": {
+          "docs_rs_unavailability": "Standard library rustdoc JSON NOT available on docs.rs",
+          "redirect_behavior": "docs.rs/std URLs redirect to doc.rust-lang.org HTML",
+          "api_gap": "No JSON API endpoint for stdlib documentation online",
+          "local_dependency": "Local rustup installation required for complete stdlib access"
         }
       },
       "cross_reference_support": {
@@ -1512,6 +1591,35 @@
         "maintenance_benefits": ["Easier schema updates", "Better version control", "Cleaner code reviews", "Improved testability"]
       }
     },
+    "python_dependencies_phase2": {
+      "pybloomfiltermmap3_issue": {
+        "version": "0.6.0",
+        "python_313_incompatibility": "p15 - C extension compilation fails with Python 3.13+",
+        "compilation_error": "Build tools cannot compile C extensions with newer Python versions",
+        "impact": "Bloom filter-based duplicate detection unavailable",
+        "alternative_implementation": {
+          "approach": "Set-based duplicate detection",
+          "performance": "O(1) lookup complexity maintained",
+          "memory_usage": "Reasonable for moderate dependency sets",
+          "serialization": "JSON format for persistence"
+        },
+        "future_migration_path": "Monitor library updates for Python 3.13+ compatibility"
+      },
+      "mmh3_hashing": {
+        "version": "4.1.0",
+        "purpose": "Fast hashing for bloom filter implementations",
+        "compatibility": "Works with Python 3.13+",
+        "performance": "Optimized hash functions for large datasets",
+        "use_case": "Memory-mapped file hashing and bloom filter operations"
+      },
+      "priority_queue_implementation": {
+        "heapq_limitations": "Min-heap only - requires negative values for max-heap",
+        "asyncio_integration": "asyncio.PriorityQueue handles infinity values correctly",
+        "infinity_support": "float('-inf') works for highest priority items",
+        "performance_characteristics": "O(log n) insertion and O(log n) removal",
+        "implementation_pattern": "Use negative priorities for max-heap behavior"
+      }
+    },
     "defensive_programming": {
       "null_safety": {
         "principle": "Always check for None before string operations",
@@ -1620,6 +1728,11 @@
       "p2: Address Claude Code parameter serialization bug that causes failures after first MCP call",
       "p2: Standard library rustdoc JSON unavailable on docs.rs - implement fallback for std/core/alloc crates",
       "p2: Inform users to install rust-docs-json component via rustup for complete stdlib documentation",
+      "p15: Use set-based implementation as alternative to pybloomfiltermmap3 for Python 3.13+ compatibility",
+      "p16: Implement cross-platform rustup detection for Windows, macOS, Linux, and WSL environments",
+      "p17: No JSON API available from rust-lang.org - local rustup is only reliable stdlib JSON source",
+      "p18: Use negative values in Python heapq for max-heap priority queue behavior",
+      "p19: Apply memory-mapped files and mmh3 hashing for efficient bloom filter operations",
       "p2: Claude Code has NO anyOf schema support - use string-only parameters for maximum compatibility",
       "p2: Avoid anyOf patterns in MCP schemas due to inconsistent client support",
       "p2: Provide examples arrays and format hints in all MCP parameter schemas",
