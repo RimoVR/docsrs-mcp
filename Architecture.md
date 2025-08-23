@@ -2,7 +2,7 @@
 
 ## System Overview
 
-The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a service layer architecture with dual MCP implementation support, enabling both FastMCP 2.11.1 (with schema overrides) and Official Python MCP SDK 1.13.1 (native support) through a --mcp-implementation CLI flag. The system includes comprehensive memory leak mitigation with automatic server restarts, string-first parameter handling for broad client compatibility, and transport-agnostic business services (CrateService and IngestionService) that decouple core functionality from MCP/REST layers. The architecture maintains a comprehensive asynchronous ingestion pipeline with enhanced rustdoc JSON processing, SQLite-based vector storage with intelligent caching, and dedicated code example extraction systems.
+The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a service layer architecture with dual MCP implementation support, with Official Python MCP SDK 1.13.1 as the default implementation and legacy FastMCP 2.11.1 support (deprecated) through a --mcp-implementation CLI flag. The system includes comprehensive memory leak mitigation with automatic server restarts, string-first parameter handling for broad client compatibility, and transport-agnostic business services (CrateService and IngestionService) that decouple core functionality from MCP/REST layers. The architecture maintains a comprehensive asynchronous ingestion pipeline with enhanced rustdoc JSON processing, SQLite-based vector storage with intelligent caching, and dedicated code example extraction systems.
 
 ## High-Level Architecture
 
@@ -17,8 +17,8 @@ graph TB
         CONFIG[Config Module<br/>Environment variable loading<br/>Unified configuration source]
         
         subgraph "MCP Implementations"
-            FASTMCP[FastMCP 2.11.1<br/>Schema overrides]
-            OFFICIAL[Official Python MCP SDK 1.13.1<br/>Native @mcp.tool() decorators]
+            OFFICIAL[Official Python MCP SDK 1.13.1<br/>Default implementation<br/>Native @mcp.tool() decorators]
+            FASTMCP[FastMCP 2.11.1<br/>Deprecated - Legacy support<br/>Schema overrides]
             RUNNER[MCPServerRunner<br/>Memory leak mitigation<br/>1000 calls/1GB restart]
         end
         
@@ -92,8 +92,8 @@ graph LR
         end
         
         subgraph "MCP Implementations"
-            FASTMCP_SVR[fastmcp_server.py<br/>FastMCP 2.11.1 implementation<br/>Schema override support<br/>Compatibility layer]
-            OFFICIAL_SVR[official_server.py<br/>Official MCP SDK 1.13.1<br/>Native @mcp.tool() decorators<br/>Standard protocol support]
+            OFFICIAL_SVR[mcp_sdk_server.py<br/>Official MCP SDK 1.13.1 - Default<br/>Native @server.tool() decorators<br/>Standard protocol support<br/>All 10 tools migrated]
+            FASTMCP_SVR[fastmcp_server.py<br/>FastMCP 2.11.1 - Deprecated<br/>Schema override support<br/>Legacy compatibility layer]
         end
         
         subgraph "Modular Web Layer (Post-Refactoring)"
@@ -154,7 +154,7 @@ graph LR
         end
         
         subgraph "Server Layer"
-            MCP_SERVER[mcp_server.py<br/>Official Python MCP SDK (v3.0)<br/>Native @mcp.tool() decorators<br/>STDIO transport<br/>stderr logging]
+            MCP_SERVER[mcp_sdk_server.py<br/>Official Python MCP SDK 1.13.1 (Default)<br/>Native @server.tool() decorators<br/>STDIO transport<br/>stderr logging<br/>All 10 tools migrated]
         end
         
         subgraph "Utilities"
@@ -240,18 +240,40 @@ The system now supports two parallel MCP implementations to ensure compatibility
 
 #### Implementation Options
 
-- **FastMCP 2.11.1**: Current implementation with schema overrides for compatibility
-- **Official Python MCP SDK 1.13.1**: New native implementation with full protocol support
-- **CLI Control**: `--mcp-implementation` flag selects which implementation to run
-- **Parallel Validation**: Both implementations can run in comparison mode for testing
+- **Official Python MCP SDK 1.13.1**: Default implementation with native @server.tool() decorators and full protocol support
+- **FastMCP 2.11.1**: Deprecated legacy implementation with schema overrides (available via --mcp-implementation=fastmcp)
+- **CLI Control**: `--mcp-implementation` flag selects implementation (defaults to 'official')
+- **Complete Migration**: All 10 tools fully migrated with proper schemas and string parameter validation
 
-#### Key Migration Benefits
+#### Key Migration Benefits ✅ **ACHIEVED**
 
-- **Official SDK Adoption**: Native support for Anthropic's official Python MCP SDK
-- **Schema Override Elimination**: Remove complex `override_fastmcp_schemas()` workarounds
-- **Native @mcp.tool() Decorators**: Use official decorators instead of FastAPI-to-MCP conversion
-- **Maintained Compatibility**: Preserve dual-mode operation (MCP + REST) with backward compatibility
-- **Simplified Architecture**: Cleaner codebase without FastMCP conversion layers
+- ✅ **Official SDK Adoption**: Native support for Anthropic's official Python MCP SDK 1.13.1 is now default
+- ✅ **Schema Override Elimination**: Complex `override_fastmcp_schemas()` workarounds removed from default implementation
+- ✅ **Native @server.tool() Decorators**: All 10 tools use official decorators with complete schemas
+- ✅ **Maintained Compatibility**: Dual-mode operation preserved with string parameter validation
+- ✅ **Simplified Architecture**: Clean codebase in `mcp_sdk_server.py` without conversion layers
+
+#### Implementation Details
+
+**mcp_sdk_server.py (Default Implementation)**
+- Contains all 10 MCP tools with @server.tool() decorators
+- Implements complete `handle_list_tools()` with proper JSON schemas
+- String-only parameters with validation for universal MCP client compatibility
+- Native MCP protocol support without conversion layers
+- Integrated with MCPServerRunner for memory management
+
+**Tool Migration Status**
+All 10 tools successfully migrated:
+1. `search_items` - Documentation search with embedding similarity
+2. `get_item_doc` - Individual item documentation retrieval
+3. `get_crate_summary` - Crate overview and metadata
+4. `compare_versions` - Version difference analysis
+5. `search_examples` - Code example search and retrieval
+6. `start_pre_ingestion` - Ingestion pipeline initialization
+7. `ingest_cargo_file` - Single crate ingestion
+8. `get_popular_crates` - Popular crates listing
+9. `get_ingestion_stats` - Pipeline status monitoring
+10. `get_version_info` - Version-specific information
 
 ### Memory Leak Mitigation
 
@@ -370,8 +392,8 @@ src/docsrs_mcp/
 │   ├── ingestion_service.py  # IngestionService: pipeline management (400-500 LOC)
 │   └── mcp_runner.py         # MCPServerRunner: memory management (200-300 LOC)
 ├── mcp/
-│   ├── fastmcp_server.py     # FastMCP 2.11.1 implementation (300-400 LOC)
-│   ├── official_server.py    # Official MCP SDK 1.13.1 implementation (300-400 LOC)
+│   ├── mcp_sdk_server.py     # Official MCP SDK 1.13.1 implementation - Default (300-400 LOC)
+│   ├── fastmcp_server.py     # FastMCP 2.11.1 implementation - Deprecated (300-400 LOC)
 │   └── parameter_validation.py # String parameter handling utilities (200-300 LOC)
 ├── models/
 │   ├── base.py              # Shared utilities, strict_config, ErrorResponse (~60 LOC)
@@ -446,8 +468,8 @@ graph TB
         CLI[CLI Entry Point<br/>--mode & --mcp-implementation flags]
         
         subgraph "MCP Implementations"
-            FASTMCP[FastMCP 2.11.1<br/>Schema overrides]
-            OFFICIAL_SDK[Official MCP SDK 1.13.1<br/>Native @mcp.tool()]
+            OFFICIAL_SDK[Official MCP SDK 1.13.1<br/>Default - Native @server.tool()<br/>All 10 tools migrated]
+            FASTMCP[FastMCP 2.11.1<br/>Deprecated - Schema overrides<br/>Legacy support only]
             MCP_RUNNER[MCPServerRunner<br/>Memory leak mitigation<br/>1000 calls/1GB restart]
             PARAM_VAL[Parameter Validation<br/>String-first handling<br/>Type conversion utilities]
         end
@@ -614,10 +636,11 @@ These remaining files exceed the target due to inherent complexity rather than o
    - Implement type conversion utilities (boolean, integer, float)
    - Ensure compatibility with diverse MCP clients
 
-5. **Phase 5**: Migration and Optimization
-   - Migrate tool-by-tool from FastMCP to official SDK
-   - Remove FastMCP dependencies and schema override code
-   - Optimize performance with official SDK patterns
+5. **Phase 5**: Migration and Optimization ✅ **COMPLETED**
+   - ✅ All 10 tools migrated from FastMCP to Official MCP SDK 1.13.1
+   - ✅ Official SDK is now the default implementation
+   - ✅ FastMCP deprecated but maintained for backward compatibility
+   - ✅ Complete schemas with handle_list_tools() for all tools
 
 ### Compatibility Guarantees
 
@@ -628,7 +651,7 @@ These remaining files exceed the target due to inherent complexity rather than o
 - **Performance**: Equivalent or improved performance characteristics
 - **Memory Management**: Automatic restart prevents long-running memory leaks
 - **Client Compatibility**: String-first parameter handling supports diverse MCP clients
-- **Backward Compatibility**: FastMCP implementation remains available during transition
+- **Backward Compatibility**: FastMCP implementation remains available as deprecated legacy support
 
 ## Configuration Flow
 
@@ -641,7 +664,7 @@ graph TB
     subgraph "CLI Entry Point (cli.py)"
         CLI_ARGS[CLI Arguments<br/>--port, --concurrency, --pre-ingest]
         ENV_CONV[Environment Variable Conversion<br/>DOCSRS_PORT, DOCSRS_CONCURRENCY<br/>DOCSRS_PRE_INGEST_ENABLED]
-        MODULE_IMPORT[Module Imports<br/>config.py, mcp_server.py (v3.0)]
+        MODULE_IMPORT[Module Imports<br/>config.py, mcp_sdk_server.py (default)]
     end
     
     subgraph "Configuration Module (config.py)"
@@ -707,7 +730,7 @@ Both REST and MCP modes use identical background service initialization:
 sequenceDiagram
     participant CLI as cli.py
     participant Config as config.py
-    participant App as server.py/mcp_server.py
+    participant App as server.py/mcp_sdk_server.py
     participant PreIngest as PreIngestionWorker
     participant EventLoop as Background Thread
     
@@ -775,7 +798,8 @@ src/docsrs_mcp/
 │   ├── responses.py     (~365 LOC) - All response models
 │   ├── version_diff.py  (~245 LOC) - Version comparison models
 │   └── __init__.py      - Backward compatibility re-exports
-├── mcp_server.py        (<200 LOC) - MCP entry point
+├── mcp_sdk_server.py    (<200 LOC) - Official MCP SDK entry point (default)
+├── fastmcp_server.py    (<200 LOC) - Legacy FastMCP entry point (deprecated)
 └── app.py               (<200 LOC) - FastAPI entry point
 ```
 
@@ -815,11 +839,11 @@ graph TD
     end
 ```
 
-### Technology Stack Update:
-- FastMCP 2.11.1 → Official MCP SDK 1.13.1
-- Schema overrides → Native SDK schema generation
-- Monolithic files → Modular service architecture
-- Manual tool registration → @mcp.tool() decorators
+### Technology Stack Update: ✅ **COMPLETED**
+- ✅ FastMCP 2.11.1 → Official MCP SDK 1.13.1 (now default)
+- ✅ Schema overrides → Native @server.tool() decorators with proper schemas
+- ✅ Monolithic files → Modular service architecture
+- ✅ Manual tool registration → Native MCP SDK tool discovery with handle_list_tools()
 
 ### Modular Architecture Implementation
 
@@ -1801,7 +1825,7 @@ graph TB
         CLI_ENTRY[CLI Entry Point<br/>--mode flag]
         
         subgraph "MCP Mode (Default)"
-            MCP_SERVER[mcp_server.py<br/>FastMCP wrapper]
+            MCP_SERVER[mcp_sdk_server.py<br/>Official MCP SDK wrapper (default)<br/>@server.tool() decorators]
             STDIO[STDIO Transport]
             STDERR_LOG[stderr-only logging]
         end
@@ -4370,7 +4394,7 @@ graph LR
 - **Configuration Control**: `DOCSRS_EMBEDDINGS_WARMUP_ENABLED` environment variable (default: true)
 - **Non-blocking Startup**: Uses `asyncio.create_task()` pattern for fire-and-forget initialization
 - **Global State Tracking**: `_embeddings_warmed` boolean prevents redundant warmup operations
-- **Dual Integration**: Activated in both REST mode (`server.py/middleware.py`) and MCP mode (`mcp_server.py`)
+- **Dual Integration**: Activated in both REST mode (`server.py/middleware.py`) and MCP mode (`mcp_sdk_server.py`)
 - **Performance Impact**: Eliminates 1.4s cold-start latency, achieves <100ms warm performance
 - **Warmup Strategy**: Uses 3 representative text samples covering typical documentation patterns
 - **Memory Efficiency**: Warmup samples immediately discarded after model initialization
@@ -4679,7 +4703,7 @@ K parameter maximum is set to 20 to ensure sqlite-vec performance and prevent ov
 - **Reusability**: Single function used across all request models via `@field_validator(mode='before')`
 - **Performance**: Lookup table optimization provides 10x performance improvement over multiple if statements
 - **Consistency**: Uniform boolean handling across the entire MCP interface
-- **MCP Schema Override Compatibility**: Retained in `mcp_server.py` for Claude Code compatibility
+- **String Parameter Validation**: Implemented in `mcp_sdk_server.py` for universal MCP client compatibility
 
 **Boolean Field Validation Implementation**
 ```python
@@ -5056,7 +5080,7 @@ graph TB
 
 #### Technical Implementation
 
-**Location**: `src/docsrs_mcp/mcp_server.py`  
+**Location**: `src/docsrs_mcp/mcp_sdk_server.py` (Official SDK) and `src/docsrs_mcp/fastmcp_server.py` (deprecated legacy)  
 **Function**: `override_fastmcp_schemas()`  
 **Timing**: Called via `asyncio.run()` before server startup  
 **Targets**: All tools with problematic parameter types
@@ -6355,7 +6379,7 @@ async def warmup_embeddings() -> None:
 - Uses `asyncio.create_task()` for non-blocking initialization
 - Integrated with popular crates manager startup sequence
 
-**MCP Mode Integration** (`mcp_server.py`):
+**MCP Mode Integration** (`mcp_sdk_server.py`):
 - Activated during MCP server initialization
 - Follows same background task pattern as pre-ingestion worker
 - Non-blocking startup ensures MCP client connections aren't delayed
@@ -6641,7 +6665,7 @@ The IngestionScheduler provides periodic re-ingestion of popular crates to keep 
 
 ```mermaid
 sequenceDiagram
-    participant Startup as Server Startup (server.py/mcp_server.py)
+    participant Startup as Server Startup (server.py/mcp_sdk_server.py)
     participant Scheduler as IngestionScheduler
     participant Manager as PopularCratesManager
     participant DiskCache as Msgpack Disk Cache
@@ -6823,7 +6847,7 @@ classDiagram
 
 #### Startup Integration
 - **server.py/middleware.py**: `asyncio.create_task(popular_manager.start_background_tasks())` during FastAPI startup event
-- **mcp_server.py**: `PreIngestionWorker` initialization in MCP server startup sequence
+- **mcp_sdk_server.py**: `PreIngestionWorker` initialization in MCP server startup sequence
 - **Scheduler**: `asyncio.create_task(scheduler.start())` when `SCHEDULER_ENABLED=true`
 - **Non-blocking**: Background tasks don't delay server startup
 
@@ -7586,7 +7610,7 @@ async def getCrateSummary(crate_name: str, version: str = "latest") -> CrateSumm
 
 ### Critical Implementation Detail: tools_to_fix Dictionary
 
-The `tools_to_fix` dictionary in `mcp_server.py` **MUST** use snake_case MCP tool names, not camelCase operation_ids:
+The string parameter validation in `mcp_sdk_server.py` uses proper @server.tool() decorators with complete schemas. Legacy `tools_to_fix` dictionary in `fastmcp_server.py` (deprecated) **MUST** use snake_case MCP tool names:
 
 ```python
 tools_to_fix = {

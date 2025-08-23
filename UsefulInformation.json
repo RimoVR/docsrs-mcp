@@ -2265,6 +2265,23 @@
             "rest": "uv run docsrs-mcp --mode rest"
           },
           "usagePattern": "Start with FastMCP, migrate to SDK, validate with both, deprecate FastMCP"
+        },
+        {
+          "error": "FastMCP schema override complexity vs MCP SDK simplicity",
+          "context": "MCP SDK migration revealed that all MCP tools were already implemented in mcp_sdk_server.py but with incomplete schema definitions, requiring 180+ lines of complex FastMCP schema overrides",
+          "solution": "Use official MCP SDK with string-only parameters from the start. The @server.tool() decorator pattern is cleaner than FastMCP conversion and eliminates need for complex schema overrides",
+          "prevention": "Start new MCP projects with official SDK and string-only parameters for maximum Claude Code compatibility. Service layer abstraction works perfectly - no modifications needed during migration",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py", "src/docsrs_mcp/app.py"],
+          "migrationInsights": {
+            "schemaCompletion": "All MCP tools were already implemented, just needed schema completion",
+            "parameterCompatibility": "String-only parameters essential for Claude Code compatibility",
+            "codeElimination": "180+ lines of override code eliminated by using official SDK",
+            "serviceLayerStability": "Service layer abstraction worked perfectly - no modifications needed",
+            "validationApproach": "Parallel validation mode ensures identical behavior between implementations",
+            "defaultImplementation": "Default CLI flag changed from 'fastmcp' to 'sdk' for new users"
+          },
+          "architecturalBenefits": "Official SDK's @server.tool() decorator pattern is cleaner and more maintainable than FastMCP conversion patterns"
         }
       ]
     },

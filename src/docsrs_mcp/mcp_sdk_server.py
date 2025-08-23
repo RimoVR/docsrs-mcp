@@ -430,38 +430,271 @@ async def handle_list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="get_crate_summary",
-            description="Get summary information about a Rust crate",
+            description="Get summary information about a Rust crate including metadata and module structure",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "crate_name": {"type": "string"},
-                    "version": {"type": "string", "default": "latest"},
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate (e.g., 'tokio', 'serde')",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
                 },
                 "required": ["crate_name"],
             },
         ),
         types.Tool(
             name="search_items",
-            description="Search for items in a crate's documentation",
+            description="Search for items in a crate's documentation using semantic similarity",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "crate_name": {"type": "string"},
-                    "query": {"type": "string"},
-                    "version": {"type": "string", "default": "latest"},
-                    "k": {"type": "string", "default": "5"},
-                    "item_type": {"type": "string"},
-                    "crate_filter": {"type": "string"},
-                    "module_path": {"type": "string"},
-                    "has_examples": {"type": "string"},
-                    "min_doc_length": {"type": "string"},
-                    "visibility": {"type": "string"},
-                    "deprecated": {"type": "string"},
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the crate to search within",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language search query",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                    "k": {
+                        "type": "string",
+                        "default": "5",
+                        "description": "Number of results to return (1-20)",
+                    },
+                    "item_type": {
+                        "type": "string",
+                        "description": "Filter by item type (function, struct, trait, enum, module)",
+                    },
+                    "crate_filter": {
+                        "type": "string",
+                        "description": "Filter results to specific crate",
+                    },
+                    "module_path": {
+                        "type": "string",
+                        "description": "Filter results to specific module path",
+                    },
+                    "has_examples": {
+                        "type": "string",
+                        "description": "Filter to only items with code examples ('true'/'false')",
+                    },
+                    "min_doc_length": {
+                        "type": "string",
+                        "description": "Minimum documentation length in characters",
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "description": "Filter by item visibility (public, private, crate)",
+                    },
+                    "deprecated": {
+                        "type": "string",
+                        "description": "Filter by deprecation status ('true'/'false')",
+                    },
                 },
                 "required": ["crate_name", "query"],
             },
         ),
-        # Add more tool schemas as needed...
+        types.Tool(
+            name="get_item_doc",
+            description="Get complete documentation for a specific item in a crate",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the crate containing the item",
+                    },
+                    "item_path": {
+                        "type": "string",
+                        "description": "Full path to the item (e.g., 'tokio::spawn', 'std::vec::Vec')",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "item_path"],
+            },
+        ),
+        types.Tool(
+            name="get_module_tree",
+            description="Get the module hierarchy tree for a Rust crate",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate to get module tree for",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
+        types.Tool(
+            name="search_examples",
+            description="Search for code examples in a crate's documentation",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the crate to search within",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Search query for finding relevant code examples",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version to search",
+                    },
+                    "k": {
+                        "type": "string",
+                        "default": "5",
+                        "description": "Number of examples to return (1-20)",
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Filter examples by programming language (e.g., 'rust', 'bash', 'toml')",
+                    },
+                },
+                "required": ["crate_name", "query"],
+            },
+        ),
+        types.Tool(
+            name="list_versions",
+            description="List all locally cached versions of a crate",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate to query",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
+        types.Tool(
+            name="start_pre_ingestion",
+            description="Start background pre-ingestion of popular Rust crates",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "string",
+                        "default": "100",
+                        "description": "Number of crates to pre-ingest (10-500)",
+                    },
+                    "concurrency": {
+                        "type": "string",
+                        "default": "3",
+                        "description": "Number of parallel download workers (1-10)",
+                    },
+                    "force": {
+                        "type": "string",
+                        "default": "false",
+                        "description": "Force restart if pre-ingestion is already running ('true'/'false')",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        types.Tool(
+            name="control_pre_ingestion",
+            description="Control the pre-ingestion worker (pause/resume/stop)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "Control action to perform (pause/resume/stop)",
+                    },
+                },
+                "required": ["action"],
+            },
+        ),
+        types.Tool(
+            name="ingest_cargo_file",
+            description="Ingest crates from a Cargo.toml or Cargo.lock file",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to Cargo.toml or Cargo.lock file",
+                    },
+                    "concurrency": {
+                        "type": "string",
+                        "default": "3",
+                        "description": "Number of parallel download workers (1-10)",
+                    },
+                    "skip_existing": {
+                        "type": "string",
+                        "default": "true",
+                        "description": "Skip already ingested crates ('true'/'false')",
+                    },
+                    "resolve_versions": {
+                        "type": "string",
+                        "default": "false",
+                        "description": "Resolve version specifications to concrete versions ('true'/'false')",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        ),
+        types.Tool(
+            name="compare_versions",
+            description="Compare two versions of a crate for API changes",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "version_a": {
+                        "type": "string",
+                        "description": "First version to compare",
+                    },
+                    "version_b": {
+                        "type": "string",
+                        "description": "Second version to compare",
+                    },
+                    "categories": {
+                        "type": "string",
+                        "description": "Comma-separated categories of changes (breaking,deprecated,added,removed,modified)",
+                    },
+                    "include_unchanged": {
+                        "type": "string",
+                        "default": "false",
+                        "description": "Include unchanged items in response ('true'/'false')",
+                    },
+                    "max_results": {
+                        "type": "string",
+                        "default": "1000",
+                        "description": "Maximum number of changes to return (1-5000)",
+                    },
+                },
+                "required": ["crate_name", "version_a", "version_b"],
+            },
+        ),
     ]
 
 

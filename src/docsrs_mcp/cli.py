@@ -25,8 +25,8 @@ def main() -> None:
     parser.add_argument(
         "--mcp-implementation",
         choices=["fastmcp", "sdk", "both"],
-        default="fastmcp",
-        help="MCP implementation to use: 'fastmcp' (current), 'sdk' (new), 'both' (parallel validation) (default: fastmcp)",
+        default="sdk",
+        help="MCP implementation to use: 'fastmcp' (legacy), 'sdk' (default), 'both' (parallel validation) (default: sdk)",
     )
     parser.add_argument(
         "--pre-ingest",
@@ -102,7 +102,11 @@ def main() -> None:
 
             run_parallel_validation()
         else:
-            # Run current FastMCP implementation (default)
+            # Run current FastMCP implementation (legacy)
+            logger.warning(
+                "FastMCP implementation is deprecated and will be removed in a future version. "
+                "Please migrate to the official SDK implementation (--mcp-implementation sdk)"
+            )
             from .mcp_server import run_mcp_server  # noqa: PLC0415
 
             run_mcp_server()
