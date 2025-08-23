@@ -1,7 +1,7 @@
 {
   "taskManagement": {
-    "description": "Task tracking for docsrs-mcp development with comprehensive 20-day enhancement plan",
-    "lastUpdated": "2025-08-23T16:30:00Z",
+    "description": "Task tracking for docsrs-mcp development with integrated enhancement phases and SDK migration tracks",
+    "lastUpdated": "2025-08-23T18:15:00Z",
     "priorities": [
       "critical",
       "high",
@@ -14,7 +14,28 @@
       "completed",
       "blocked",
       "failed"
-    ]
+    ],
+    "developmentTracks": {
+      "user-value": {
+        "description": "Enhancement phases 1-3 that provide immediate user value and can run parallel to infrastructure work",
+        "phases": ["phase-1-core-fixes", "phase-2-documentation", "phase-3-advanced-search"],
+        "canRunInParallel": true
+      },
+      "infrastructure": {
+        "description": "SDK migration tasks that modernize the codebase architecture",
+        "components": ["sdk-migration-research", "sdk-migration-setup", "sdk-migration-models", "sdk-migration-app", "sdk-migration-tools", "sdk-migration-testing", "sdk-migration-cleanup"],
+        "prerequisiteFor": ["integration"]
+      },
+      "integration": {
+        "description": "Enhancement phases 4-7 that require SDK infrastructure to be complete",
+        "phases": ["phase-4-type-system", "phase-5-code-intelligence", "phase-6-cross-references", "phase-7-workflow-enhancement"],
+        "dependsOn": ["infrastructure"]
+      },
+      "maintenance": {
+        "description": "Lower priority tasks and ongoing maintenance items",
+        "canRunAnytime": true
+      }
+    }
   },
   "tasks": {
     "high": [
@@ -881,6 +902,366 @@
             "description": "Verify functionality with serde, tokio, and other crates",
             "status": "completed",
             "progress": 100
+          }
+        ]
+      },
+      {
+        "id": "phase-1-core-fixes",
+        "title": "Phase 1: Core Fixes (Days 1-2)",
+        "description": "Fix fundamental issues with numeric parameter validation, MCP client compatibility, version comparison, and error handling",
+        "status": "in_progress",
+        "progress": 50,
+        "phase": 1,
+        "duration": "2 days",
+        "dependencies": [],
+        "relatedTasks": [],
+        "priority": "critical",
+        "roadblocks": [],
+        "parallelTrack": "user-value",
+        "implementationNotes": "Parameter validation completed (commit c4fff68). Error handling framework implemented. 50% complete based on commit history analysis.",
+        "subtasks": [
+          {
+            "id": "fix-numeric-validation",
+            "title": "Fix all numeric parameter validations",
+            "description": "Ensure all numeric parameters (limit, offset, page_size) are properly validated and handled",
+            "status": "completed",
+            "progress": 100,
+            "estimatedHours": 6,
+            "completionDetails": {
+              "completedDate": "2025-08-23T16:30:00Z",
+              "implementation": "Fixed missing boolean validation function by adding coerce_to_bool_with_validation() to validation.py. Verified NoneType errors already fixed in version_diff.py _map_item_type method with defensive checks. Updated boolean validators in models/requests.py to use centralized function. Verified MCP schema override logic in mcp_server.py is clean and functional.",
+              "notes": "Successfully tested parameter validation with production code - all numeric and boolean string parameters work correctly. The implementation is complete and tested with 100% functionality.",
+              "verification": "Production testing confirmed all numeric and boolean string parameters are properly validated and converted",
+              "filesModified": [
+                "src/docsrs_mcp/validation.py (added coerce_to_bool_with_validation function)",
+                "src/docsrs_mcp/models/requests.py (updated boolean validators)",
+                "src/docsrs_mcp/version_diff.py (verified defensive checks)",
+                "src/docsrs_mcp/mcp_server.py (verified schema override logic)"
+              ]
+            }
+          },
+          {
+            "id": "test-mcp-clients",
+            "title": "Test with MCP clients",
+            "description": "Comprehensive testing with various MCP clients to ensure compatibility",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 4
+          },
+          {
+            "id": "fix-version-compare",
+            "title": "Fix compare versions errors",
+            "description": "Resolve version comparison issues in version_diff functionality",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 4
+          },
+          {
+            "id": "enhance-error-handling",
+            "title": "Add comprehensive error handling",
+            "description": "Implement robust error handling throughout the application",
+            "status": "completed",
+            "progress": 100,
+            "estimatedHours": 2,
+            "completionDetails": {
+              "completedDate": "2025-08-23T16:30:00Z",
+              "implementation": "Enhanced error handling implemented across all modules with proper exception propagation and user-friendly messages",
+              "notes": "Error handling framework completed as part of Phase 2 documentation foundation"
+            }
+          }
+        ]
+      },
+      {
+        "id": "phase-2-documentation",
+        "title": "Phase 2: Documentation Enhancement (Days 3-5)",
+        "description": "Integrate rust-lang.org documentation, add rustup detection, implement pre-caching, and add dependency filtering",
+        "status": "in_progress",
+        "progress": 30,
+        "phase": 2,
+        "duration": "3 days",
+        "dependencies": [],
+        "relatedTasks": [],
+        "priority": "high",
+        "roadblocks": [],
+        "parallelTrack": "user-value",
+        "implementationNotes": "Documentation foundation implemented (commit 38e839d). Three-tier ingestion system completed (commit d978d38). 30% complete with foundation work done.",
+        "subtasks": [
+          {
+            "id": "rust-lang-integration",
+            "title": "Implement rust-lang.org integration",
+            "description": "Add support for fetching standard library documentation from rust-lang.org",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 12
+          },
+          {
+            "id": "rustup-json-detection",
+            "title": "Add rustup JSON detection",
+            "description": "Implement detection of local rustup installations and their documentation",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "stdlib-precaching",
+            "title": "Pre-cache stdlib items",
+            "description": "Implement pre-caching mechanism for standard library items",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "dependency-filtering",
+            "title": "Implement dependency filtering",
+            "description": "Add filtering capabilities for dependency-based searches",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          }
+        ]
+      },
+      {
+        "id": "phase-3-advanced-search",
+        "title": "Phase 3: Advanced Search (Days 6-8)",
+        "description": "Enhance search capabilities with fuzzy search, regex matching, cross-crate search, and stability filtering",
+        "status": "in_progress",
+        "progress": 10,
+        "phase": 3,
+        "duration": "3 days",
+        "dependencies": [],
+        "relatedTasks": [],
+        "priority": "high",
+        "roadblocks": [],
+        "parallelTrack": "user-value",
+        "implementationNotes": "Enhanced search ranking with MMR implemented (commit 20a8643). Trait implementation search added (commit 309ff01). Batch processing enhancements completed (commit e1b3bc4). 10% complete.",
+        "subtasks": [
+          {
+            "id": "fix-fuzzy-search",
+            "title": "Fix fuzzy search implementation",
+            "description": "Improve fuzzy search algorithm for better matching accuracy",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 8
+          },
+          {
+            "id": "add-regex-matching",
+            "title": "Add regex matching",
+            "description": "Implement regex-based search patterns for advanced queries",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "cross-crate-search",
+            "title": "Implement cross-crate search",
+            "description": "Enable searching across multiple crates simultaneously",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 10
+          },
+          {
+            "id": "stability-filtering",
+            "title": "Add stability filtering",
+            "description": "Filter results based on Rust stability annotations (stable, beta, nightly)",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          }
+        ]
+      },
+      {
+        "id": "phase-4-type-system",
+        "title": "Phase 4: Type System Navigation (Days 9-12)",
+        "description": "Build comprehensive type system navigation with trait tables, resolution system, method resolution, and associated items",
+        "status": "pending",
+        "progress": 0,
+        "phase": 4,
+        "duration": "4 days",
+        "dependencies": ["sdk-migration-tools"],
+        "relatedTasks": [],
+        "priority": "high",
+        "roadblocks": [],
+        "parallelTrack": "integration",
+        "implementationNotes": "Depends on SDK migration tools completion. Advanced type system features require MCP SDK infrastructure.",
+        "subtasks": [
+          {
+            "id": "trait-implementation-tables",
+            "title": "Create trait implementation tables",
+            "description": "Build database tables and indexes for trait implementation relationships",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 12
+          },
+          {
+            "id": "trait-resolution-system",
+            "title": "Build trait resolution system",
+            "description": "Implement system for resolving trait implementations and bounds",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 16
+          },
+          {
+            "id": "method-resolution",
+            "title": "Add method resolution",
+            "description": "Implement method resolution for types including inherent and trait methods",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 12
+          },
+          {
+            "id": "associated-items",
+            "title": "Implement associated items",
+            "description": "Handle associated types, constants, and functions in trait and impl blocks",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 8
+          }
+        ]
+      },
+      {
+        "id": "phase-5-code-intelligence",
+        "title": "Phase 5: Code Intelligence (Days 13-15)",
+        "description": "Enhance code intelligence with full signature parsing, safety information, error type identification, and feature requirements",
+        "status": "pending",
+        "progress": 0,
+        "phase": 5,
+        "duration": "3 days",
+        "dependencies": ["phase-4-type-system"],
+        "relatedTasks": [],
+        "priority": "medium",
+        "roadblocks": [],
+        "parallelTrack": "integration",
+        "implementationNotes": "Advanced code intelligence features building on type system infrastructure.",
+        "subtasks": [
+          {
+            "id": "parse-full-signatures",
+            "title": "Parse full signatures",
+            "description": "Implement comprehensive parsing of function and method signatures",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 10
+          },
+          {
+            "id": "safety-information",
+            "title": "Extract safety information",
+            "description": "Parse and categorize unsafe code blocks and safety documentation",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 8
+          },
+          {
+            "id": "error-types",
+            "title": "Identify error types",
+            "description": "Parse and categorize error types and Result return patterns",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "feature-requirements",
+            "title": "Parse feature requirements",
+            "description": "Extract and track cargo feature requirements for APIs",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          }
+        ]
+      },
+      {
+        "id": "phase-6-cross-references",
+        "title": "Phase 6: Cross-References (Days 16-18)",
+        "description": "Build comprehensive cross-referencing system with import resolver, re-export tracking, dependency graphs, and migration suggestions",
+        "status": "pending",
+        "progress": 0,
+        "phase": 6,
+        "duration": "3 days",
+        "dependencies": ["phase-5-code-intelligence"],
+        "relatedTasks": [],
+        "priority": "medium",
+        "roadblocks": [],
+        "parallelTrack": "integration",
+        "implementationNotes": "Cross-reference system requiring comprehensive code intelligence foundation.",
+        "subtasks": [
+          {
+            "id": "import-resolver",
+            "title": "Build import resolver",
+            "description": "Create system for resolving use statements and module paths",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 12
+          },
+          {
+            "id": "track-reexports",
+            "title": "Track re-exports",
+            "description": "Monitor and index pub use re-exports across crates",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 8
+          },
+          {
+            "id": "dependency-graphs",
+            "title": "Create dependency graphs",
+            "description": "Build visual and queryable dependency relationship graphs",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 10
+          },
+          {
+            "id": "migration-suggestions",
+            "title": "Add migration suggestions",
+            "description": "Provide suggestions for API migrations and deprecation handling",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          }
+        ]
+      },
+      {
+        "id": "phase-7-workflow-enhancement",
+        "title": "Phase 7: Workflow Enhancement (Days 19-20)",
+        "description": "Final phase focusing on user experience with progressive detail levels, usage patterns, learning paths, and comprehensive testing",
+        "status": "pending",
+        "progress": 0,
+        "phase": 7,
+        "duration": "2 days",
+        "dependencies": ["phase-6-cross-references"],
+        "relatedTasks": [],
+        "priority": "medium",
+        "roadblocks": [],
+        "parallelTrack": "integration",
+        "implementationNotes": "Final workflow enhancements and user experience polish. Integrates with SDK migration testing.",
+        "subtasks": [
+          {
+            "id": "progressive-detail-levels",
+            "title": "Add progressive detail levels",
+            "description": "Implement tiered information disclosure based on user preferences",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "usage-patterns",
+            "title": "Extract usage patterns",
+            "description": "Analyze and surface common usage patterns from documentation",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 6
+          },
+          {
+            "id": "learning-paths",
+            "title": "Create learning paths",
+            "description": "Generate suggested learning sequences for complex APIs",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 4
+          },
+          {
+            "id": "final-testing-polish",
+            "title": "Final testing and polish",
+            "description": "Comprehensive testing, performance optimization, and final polish",
+            "status": "pending",
+            "progress": 0,
+            "estimatedHours": 4
           }
         ]
       }
@@ -3802,349 +4183,6 @@
           "resolution": "Added validation to detect insufficient ingestion and provide clear error messages",
           "testing": "Verified fix prevents misleading '0 changes' results"
         }
-      }
-    ],
-    "20-day-enhancement-plan": [
-      {
-        "id": "phase-1-core-fixes",
-        "title": "Phase 1: Core Fixes (Days 1-2)",
-        "description": "Fix fundamental issues with numeric parameter validation, MCP client compatibility, version comparison, and error handling",
-        "status": "pending",
-        "progress": 0,
-        "phase": 1,
-        "duration": "2 days",
-        "dependencies": [],
-        "relatedTasks": [],
-        "priority": "critical",
-        "roadblocks": [],
-        "subtasks": [
-          {
-            "id": "fix-numeric-validation",
-            "title": "Fix all numeric parameter validations",
-            "description": "Ensure all numeric parameters (limit, offset, page_size) are properly validated and handled",
-            "status": "completed",
-            "progress": 100,
-            "estimatedHours": 6,
-            "completionDetails": {
-              "completedDate": "2025-08-23T16:30:00Z",
-              "implementation": "Fixed missing boolean validation function by adding coerce_to_bool_with_validation() to validation.py. Verified NoneType errors already fixed in version_diff.py _map_item_type method with defensive checks. Updated boolean validators in models/requests.py to use centralized function. Verified MCP schema override logic in mcp_server.py is clean and functional.",
-              "notes": "Successfully tested parameter validation with production code - all numeric and boolean string parameters work correctly. The implementation is complete and tested with 100% functionality.",
-              "verification": "Production testing confirmed all numeric and boolean string parameters are properly validated and converted",
-              "filesModified": [
-                "src/docsrs_mcp/validation.py (added coerce_to_bool_with_validation function)",
-                "src/docsrs_mcp/models/requests.py (updated boolean validators)",
-                "src/docsrs_mcp/version_diff.py (verified defensive checks)",
-                "src/docsrs_mcp/mcp_server.py (verified schema override logic)"
-              ]
-            }
-          },
-          {
-            "id": "test-mcp-clients",
-            "title": "Test with MCP clients",
-            "description": "Comprehensive testing with various MCP clients to ensure compatibility",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 4
-          },
-          {
-            "id": "fix-version-compare",
-            "title": "Fix compare versions errors",
-            "description": "Resolve version comparison issues in version_diff functionality",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 4
-          },
-          {
-            "id": "enhance-error-handling",
-            "title": "Add comprehensive error handling",
-            "description": "Implement robust error handling throughout the application",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 2
-          }
-        ]
-      },
-      {
-        "id": "phase-2-documentation",
-        "title": "Phase 2: Documentation Enhancement (Days 3-5)",
-        "description": "Integrate rust-lang.org documentation, add rustup detection, implement pre-caching, and add dependency filtering",
-        "status": "pending",
-        "progress": 0,
-        "phase": 2,
-        "duration": "3 days",
-        "dependencies": ["phase-1-core-fixes"],
-        "relatedTasks": [],
-        "priority": "high",
-        "roadblocks": [],
-        "subtasks": [
-          {
-            "id": "rust-lang-integration",
-            "title": "Implement rust-lang.org integration",
-            "description": "Add support for fetching standard library documentation from rust-lang.org",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 12
-          },
-          {
-            "id": "rustup-json-detection",
-            "title": "Add rustup JSON detection",
-            "description": "Implement detection of local rustup installations and their documentation",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          },
-          {
-            "id": "stdlib-precaching",
-            "title": "Pre-cache stdlib items",
-            "description": "Implement pre-caching mechanism for standard library items",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          },
-          {
-            "id": "dependency-filtering",
-            "title": "Implement dependency filtering",
-            "description": "Add filtering capabilities for dependency-based searches",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          }
-        ]
-      },
-      {
-        "id": "phase-3-advanced-search",
-        "title": "Phase 3: Advanced Search (Days 6-8)",
-        "description": "Enhance search capabilities with fuzzy search, regex matching, cross-crate search, and stability filtering",
-        "status": "pending",
-        "progress": 0,
-        "phase": 3,
-        "duration": "3 days",
-        "dependencies": ["phase-2-documentation"],
-        "relatedTasks": [],
-        "priority": "high",
-        "roadblocks": [],
-        "subtasks": [
-          {
-            "id": "fix-fuzzy-search",
-            "title": "Fix fuzzy search implementation",
-            "description": "Improve fuzzy search algorithm for better matching accuracy",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 8
-          },
-          {
-            "id": "add-regex-matching",
-            "title": "Add regex matching",
-            "description": "Implement regex-based search patterns for advanced queries",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          },
-          {
-            "id": "cross-crate-search",
-            "title": "Implement cross-crate search",
-            "description": "Enable searching across multiple crates simultaneously",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 10
-          },
-          {
-            "id": "stability-filtering",
-            "title": "Add stability filtering",
-            "description": "Filter results based on Rust stability annotations (stable, beta, nightly)",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          }
-        ]
-      },
-      {
-        "id": "phase-4-type-system",
-        "title": "Phase 4: Type System Navigation (Days 9-12)",
-        "description": "Build comprehensive type system navigation with trait tables, resolution system, method resolution, and associated items",
-        "status": "pending",
-        "progress": 0,
-        "phase": 4,
-        "duration": "4 days",
-        "dependencies": ["phase-3-advanced-search"],
-        "relatedTasks": [],
-        "priority": "high",
-        "roadblocks": [],
-        "subtasks": [
-          {
-            "id": "trait-implementation-tables",
-            "title": "Create trait implementation tables",
-            "description": "Build database tables and indexes for trait implementation relationships",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 12
-          },
-          {
-            "id": "trait-resolution-system",
-            "title": "Build trait resolution system",
-            "description": "Implement system for resolving trait implementations and bounds",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 16
-          },
-          {
-            "id": "method-resolution",
-            "title": "Add method resolution",
-            "description": "Implement method resolution for types including inherent and trait methods",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 12
-          },
-          {
-            "id": "associated-items",
-            "title": "Implement associated items",
-            "description": "Handle associated types, constants, and functions in trait and impl blocks",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 8
-          }
-        ]
-      },
-      {
-        "id": "phase-5-code-intelligence",
-        "title": "Phase 5: Code Intelligence (Days 13-15)",
-        "description": "Enhance code intelligence with full signature parsing, safety information, error type identification, and feature requirements",
-        "status": "pending",
-        "progress": 0,
-        "phase": 5,
-        "duration": "3 days",
-        "dependencies": ["phase-4-type-system"],
-        "relatedTasks": [],
-        "priority": "medium",
-        "roadblocks": [],
-        "subtasks": [
-          {
-            "id": "parse-full-signatures",
-            "title": "Parse full signatures",
-            "description": "Implement comprehensive parsing of function and method signatures",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 10
-          },
-          {
-            "id": "safety-information",
-            "title": "Extract safety information",
-            "description": "Parse and categorize unsafe code blocks and safety documentation",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 8
-          },
-          {
-            "id": "error-types",
-            "title": "Identify error types",
-            "description": "Parse and categorize error types and Result return patterns",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          },
-          {
-            "id": "feature-requirements",
-            "title": "Parse feature requirements",
-            "description": "Extract and track cargo feature requirements for APIs",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          }
-        ]
-      },
-      {
-        "id": "phase-6-cross-references",
-        "title": "Phase 6: Cross-References (Days 16-18)",
-        "description": "Build comprehensive cross-referencing system with import resolver, re-export tracking, dependency graphs, and migration suggestions",
-        "status": "pending",
-        "progress": 0,
-        "phase": 6,
-        "duration": "3 days",
-        "dependencies": ["phase-5-code-intelligence"],
-        "relatedTasks": [],
-        "priority": "medium",
-        "roadblocks": [],
-        "subtasks": [
-          {
-            "id": "import-resolver",
-            "title": "Build import resolver",
-            "description": "Create system for resolving use statements and module paths",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 12
-          },
-          {
-            "id": "track-reexports",
-            "title": "Track re-exports",
-            "description": "Monitor and index pub use re-exports across crates",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 8
-          },
-          {
-            "id": "dependency-graphs",
-            "title": "Create dependency graphs",
-            "description": "Build visual and queryable dependency relationship graphs",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 10
-          },
-          {
-            "id": "migration-suggestions",
-            "title": "Add migration suggestions",
-            "description": "Provide suggestions for API migrations and deprecation handling",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          }
-        ]
-      },
-      {
-        "id": "phase-7-workflow-enhancement",
-        "title": "Phase 7: Workflow Enhancement (Days 19-20)",
-        "description": "Final phase focusing on user experience with progressive detail levels, usage patterns, learning paths, and comprehensive testing",
-        "status": "pending",
-        "progress": 0,
-        "phase": 7,
-        "duration": "2 days",
-        "dependencies": ["phase-6-cross-references"],
-        "relatedTasks": [],
-        "priority": "medium",
-        "roadblocks": [],
-        "subtasks": [
-          {
-            "id": "progressive-detail-levels",
-            "title": "Add progressive detail levels",
-            "description": "Implement tiered information disclosure based on user preferences",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          },
-          {
-            "id": "usage-patterns",
-            "title": "Extract usage patterns",
-            "description": "Analyze and surface common usage patterns from documentation",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 6
-          },
-          {
-            "id": "learning-paths",
-            "title": "Create learning paths",
-            "description": "Generate suggested learning sequences for complex APIs",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 4
-          },
-          {
-            "id": "final-testing-polish",
-            "title": "Final testing and polish",
-            "description": "Comprehensive testing, performance optimization, and final polish",
-            "status": "pending",
-            "progress": 0,
-            "estimatedHours": 4
-          }
-        ]
       }
     ]
   }
