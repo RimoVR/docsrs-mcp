@@ -19,7 +19,7 @@ from ..models import (
     CrateModule,
     SearchResult,
 )
-from ..version_diff import compute_version_diff
+from ..version_diff import get_diff_engine
 
 logger = logging.getLogger(__name__)
 
@@ -457,7 +457,8 @@ class CrateService:
         db_path_b = await ingest_crate(crate_name, version_b)
 
         # Compute diff
-        diff = await compute_version_diff(
+        engine = get_diff_engine()
+        diff = await engine.compute_diff(
             db_path_a,
             db_path_b,
             categories=categories,

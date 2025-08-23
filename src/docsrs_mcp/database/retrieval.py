@@ -298,43 +298,46 @@ async def get_module_items(db_path: Path, module_path: str) -> list[dict[str, An
 
 
 async def query_trait_implementations(
-    db_path: Path, crate_id: int, trait_path: str | None = None, type_path: str | None = None
+    db_path: Path,
+    crate_id: int,
+    trait_path: str | None = None,
+    type_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Query trait implementations from the database.
-    
+
     Args:
         db_path: Path to the database
         crate_id: ID of the crate
         trait_path: Optional trait path to filter by
         type_path: Optional type path to filter by
-        
+
     Returns:
         List of trait implementation records
     """
     import aiosqlite
-    
+
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         # Build query based on filters
         query_parts = ["SELECT * FROM trait_implementations WHERE crate_id = ?"]
         params = [crate_id]
-        
+
         if trait_path:
             query_parts.append("AND trait_path = ?")
             params.append(trait_path)
-        
+
         if type_path:
             query_parts.append("AND impl_type_path = ?")
             params.append(type_path)
-        
+
         query = " ".join(query_parts) + " ORDER BY trait_path, impl_type_path"
-        
+
         cursor = await db.execute(query, params)
         columns = [col[0] for col in cursor.description]
-        
+
         results = []
         async for row in cursor:
             results.append(dict(zip(columns, row)))
-        
+
         return results
 
 
@@ -342,38 +345,38 @@ async def query_method_signatures(
     db_path: Path, crate_id: int, parent_type_path: str, method_name: str | None = None
 ) -> list[dict[str, Any]]:
     """Query method signatures from the database.
-    
+
     Args:
         db_path: Path to the database
         crate_id: ID of the crate
         parent_type_path: Parent type path
         method_name: Optional method name to filter by
-        
+
     Returns:
         List of method signature records
     """
     import aiosqlite
-    
+
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         query = """
             SELECT * FROM method_signatures 
             WHERE crate_id = ? AND parent_type_path = ?
         """
         params = [crate_id, parent_type_path]
-        
+
         if method_name:
             query += " AND method_name = ?"
             params.append(method_name)
-        
+
         query += " ORDER BY method_kind, method_name"
-        
+
         cursor = await db.execute(query, params)
         columns = [col[0] for col in cursor.description]
-        
+
         results = []
         async for row in cursor:
             results.append(dict(zip(columns, row)))
-        
+
         return results
 
 
@@ -381,38 +384,38 @@ async def query_associated_items(
     db_path: Path, crate_id: int, container_path: str, item_kind: str | None = None
 ) -> list[dict[str, Any]]:
     """Query associated items from the database.
-    
+
     Args:
         db_path: Path to the database
         crate_id: ID of the crate
         container_path: Container trait/type path
         item_kind: Optional item kind filter
-        
+
     Returns:
         List of associated item records
     """
     import aiosqlite
-    
+
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         query = """
             SELECT * FROM associated_items 
             WHERE crate_id = ? AND container_path = ?
         """
         params = [crate_id, container_path]
-        
+
         if item_kind:
             query += " AND item_kind = ?"
             params.append(item_kind)
-        
+
         query += " ORDER BY item_kind, item_name"
-        
+
         cursor = await db.execute(query, params)
         columns = [col[0] for col in cursor.description]
-        
+
         results = []
         async for row in cursor:
             results.append(dict(zip(columns, row)))
-        
+
         return results
 
 
@@ -420,17 +423,17 @@ async def query_generic_constraints(
     db_path: Path, crate_id: int, item_path: str
 ) -> list[dict[str, Any]]:
     """Query generic constraints from the database.
-    
+
     Args:
         db_path: Path to the database
         crate_id: ID of the crate
         item_path: Item path to get constraints for
-        
+
     Returns:
         List of generic constraint records
     """
     import aiosqlite
-    
+
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         cursor = await db.execute(
             """
@@ -440,13 +443,13 @@ async def query_generic_constraints(
             """,
             (crate_id, item_path),
         )
-        
+
         columns = [col[0] for col in cursor.description]
-        
+
         results = []
         async for row in cursor:
             results.append(dict(zip(columns, row)))
-        
+
         return results
 
 

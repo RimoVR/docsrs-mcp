@@ -514,15 +514,15 @@ async def search_items(request: Request, params: SearchItemsRequest):
             # Cross-crate search
             from .database.search import cross_crate_search
             from .ingest import get_embedding_model
-            
+
             crate_paths = []
             for crate in params.crates[:5]:  # Limit to 5 crates
                 db_path = await ingest_crate(crate, "latest")
                 crate_paths.append(db_path)
-            
+
             model = get_embedding_model()
             query_embedding = list(model.embed([params.query]))[0]
-            
+
             results = await cross_crate_search(
                 crate_paths,
                 query_embedding,
@@ -537,12 +537,12 @@ async def search_items(request: Request, params: SearchItemsRequest):
         else:
             # Single crate search
             db_path = await ingest_crate(params.crate_name, params.version)
-            
+
             # Route based on search mode
             if params.search_mode == "regex" and params.regex_pattern:
                 # Regex search
                 from .database.search import regex_search
-                
+
                 results = await regex_search(
                     db_path,
                     params.regex_pattern,
@@ -559,7 +559,7 @@ async def search_items(request: Request, params: SearchItemsRequest):
             elif params.search_mode == "fuzzy":
                 # Enhanced fuzzy search
                 from .fuzzy_resolver import get_fuzzy_suggestions
-                
+
                 # Get fuzzy suggestions first
                 fuzzy_paths = await get_fuzzy_suggestions(
                     params.query,
@@ -569,16 +569,17 @@ async def search_items(request: Request, params: SearchItemsRequest):
                     limit=params.k or 5,
                     threshold=params.fuzzy_tolerance or 0.7,
                 )
-                
+
                 # Then retrieve full docs for those paths
                 results = []
                 if fuzzy_paths:
                     import aiosqlite
+
                     async with aiosqlite.connect(db_path) as db:
                         for path in fuzzy_paths:
                             cursor = await db.execute(
                                 "SELECT item_path, header, content FROM embeddings WHERE item_path = ?",
-                                (path,)
+                                (path,),
                             )
                             row = await cursor.fetchone()
                             if row:
@@ -586,10 +587,10 @@ async def search_items(request: Request, params: SearchItemsRequest):
             else:
                 # Default vector search (including hybrid mode)
                 from .ingest import get_embedding_model
-                
+
                 model = get_embedding_model()
                 query_embedding = list(model.embed([params.query]))[0]
-                
+
                 results = await search_embeddings(
                     db_path,
                     query_embedding,

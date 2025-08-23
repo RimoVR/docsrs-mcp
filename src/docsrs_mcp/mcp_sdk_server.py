@@ -1,5 +1,6 @@
 """MCP SDK implementation for docsrs-mcp server."""
 
+import json
 import logging
 
 from mcp import types
@@ -8,7 +9,7 @@ from mcp.server.models import InitializationOptions
 
 from .models import (
     AssociatedItemResponse,
-    CompareVersionsResponse,
+    DependencyGraphResponse,
     GenericConstraintResponse,
     GetCrateSummaryResponse,
     GetItemDocResponse,
@@ -16,14 +17,23 @@ from .models import (
     IngestCargoFileResponse,
     ListVersionsResponse,
     MethodSignatureResponse,
+    MigrationSuggestionsResponse,
     PreIngestionControlResponse,
+    ReexportTrace,
+    ResolveImportResponse,
     SearchExamplesResponse,
     SearchItemsResponse,
     StartPreIngestionResponse,
     TraitImplementationResponse,
     TypeTraitsResponse,
+    VersionDiffResponse,
 )
-from .services import CrateService, IngestionService, TypeNavigationService
+from .services import (
+    CrateService,
+    CrossReferenceService,
+    IngestionService,
+    TypeNavigationService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +85,6 @@ def validate_bool_parameter(value: str, default: bool = None) -> bool | None:
 # MCP Tool Implementations
 
 
-@server.tool()
 async def get_crate_summary(crate_name: str, version: str = "latest") -> dict:
     """Get summary information about a Rust crate.
 
@@ -100,7 +109,6 @@ async def get_crate_summary(crate_name: str, version: str = "latest") -> dict:
         raise
 
 
-@server.tool()
 async def search_items(
     crate_name: str,
     query: str,
@@ -165,7 +173,6 @@ async def search_items(
         raise
 
 
-@server.tool()
 async def get_item_doc(
     crate_name: str, item_path: str, version: str = "latest"
 ) -> dict:
@@ -193,7 +200,6 @@ async def get_item_doc(
         raise
 
 
-@server.tool()
 async def get_module_tree(crate_name: str, version: str = "latest") -> dict:
     """Get the module hierarchy tree for a Rust crate.
 
@@ -217,7 +223,6 @@ async def get_module_tree(crate_name: str, version: str = "latest") -> dict:
         raise
 
 
-@server.tool()
 async def search_examples(
     crate_name: str,
     query: str,
@@ -256,7 +261,6 @@ async def search_examples(
         raise
 
 
-@server.tool()
 async def list_versions(crate_name: str) -> dict:
     """List all locally cached versions of a crate.
 
@@ -278,7 +282,6 @@ async def list_versions(crate_name: str) -> dict:
         raise
 
 
-@server.tool()
 async def start_pre_ingestion(
     count: str = "100", concurrency: str = "3", force: str = "false"
 ) -> dict:
@@ -311,7 +314,6 @@ async def start_pre_ingestion(
         raise
 
 
-@server.tool()
 async def control_pre_ingestion(action: str) -> dict:
     """Control the pre-ingestion worker (pause/resume/stop).
 
@@ -337,7 +339,6 @@ async def control_pre_ingestion(action: str) -> dict:
         raise
 
 
-@server.tool()
 async def ingest_cargo_file(
     file_path: str,
     concurrency: str = "3",
@@ -377,7 +378,6 @@ async def ingest_cargo_file(
         raise
 
 
-@server.tool()
 async def get_trait_implementors(
     crate_name: str, trait_path: str, version: str = "latest"
 ) -> dict:
@@ -404,8 +404,9 @@ async def get_trait_implementors(
         raise
 
 
-@server.tool()
-async def get_type_traits(crate_name: str, type_path: str, version: str = "latest") -> dict:
+async def get_type_traits(
+    crate_name: str, type_path: str, version: str = "latest"
+) -> dict:
     """Get all traits implemented by a specific type.
 
     Lists all traits that a type implements, including standard library traits,
@@ -429,7 +430,6 @@ async def get_type_traits(crate_name: str, type_path: str, version: str = "lates
         raise
 
 
-@server.tool()
 async def resolve_method(
     crate_name: str, type_path: str, method_name: str, version: str = "latest"
 ) -> dict:
@@ -458,9 +458,11 @@ async def resolve_method(
         raise
 
 
-@server.tool()
 async def get_associated_items(
-    crate_name: str, container_path: str, item_kind: str | None = None, version: str = "latest"
+    crate_name: str,
+    container_path: str,
+    item_kind: str | None = None,
+    version: str = "latest",
 ) -> dict:
     """Get associated items (types, constants, functions) for a trait or type.
 
@@ -478,7 +480,10 @@ async def get_associated_items(
     """
     try:
         result = await type_navigation_service.get_associated_items(
-            crate_name, container_path, item_kind, version if version != "latest" else None
+            crate_name,
+            container_path,
+            item_kind,
+            version if version != "latest" else None,
         )
         return AssociatedItemResponse(**result).model_dump()
     except Exception as e:
@@ -486,7 +491,6 @@ async def get_associated_items(
         raise
 
 
-@server.tool()
 async def get_generic_constraints(
     crate_name: str, item_path: str, version: str = "latest"
 ) -> dict:
@@ -513,7 +517,6 @@ async def get_generic_constraints(
         raise
 
 
-@server.tool()
 async def compare_versions(
     crate_name: str,
     version_a: str,
@@ -559,9 +562,167 @@ async def compare_versions(
             include_unchanged=include_unchanged_bool,
             max_results=max_results_int,
         )
-        return CompareVersionsResponse(**result).model_dump()
+        return VersionDiffResponse(**result).model_dump()
     except Exception as e:
         logger.error(f"Error in compare_versions: {e}")
+        raise
+
+
+async def resolve_import_handler(
+    crate_name: str,
+    import_path: str,
+    include_alternatives: str = "false",
+) -> dict:
+    """Resolve import paths and suggest alternatives.
+
+    Helps resolve Rust import paths to their actual locations and provides
+    alternative suggestions when exact matches aren't found. Useful for
+    understanding re-exports and finding the correct import statements.
+
+    Args:
+        crate_name: Name of the Rust crate
+        import_path: Import path to resolve (e.g., 'Result', 'io::Error')
+        include_alternatives: Include alternative import paths ("true"/"false")
+
+    Returns:
+        Resolved import path with confidence score and alternatives
+    """
+    try:
+        from .ingest import ingest_crate
+
+        # Ensure crate is ingested
+        db_path = await ingest_crate(crate_name)
+
+        # Initialize service if needed
+        cross_ref_service = CrossReferenceService(db_path)
+
+        include_alts = validate_bool_parameter(include_alternatives, default=False)
+
+        result = await cross_ref_service.resolve_import(
+            crate_name, import_path, include_alternatives=include_alts
+        )
+        return ResolveImportResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in resolve_import: {e}")
+        raise
+
+
+async def get_dependency_graph_handler(
+    crate_name: str,
+    max_depth: str = "3",
+    include_versions: str = "true",
+) -> dict:
+    """Get dependency graph with version constraints.
+
+    Builds a hierarchical dependency graph showing the relationships between
+    crates and their dependencies. Includes cycle detection and version
+    constraint information.
+
+    Args:
+        crate_name: Name of the Rust crate
+        max_depth: Maximum depth to traverse (1-10, default: 3)
+        include_versions: Include version information ("true"/"false")
+
+    Returns:
+        Dependency graph with hierarchy and cycle detection
+    """
+    try:
+        from .ingest import ingest_crate
+
+        # Ensure crate is ingested
+        db_path = await ingest_crate(crate_name)
+
+        # Initialize service if needed
+        cross_ref_service = CrossReferenceService(db_path)
+
+        max_depth_int = validate_int_parameter(
+            max_depth, default=3, min_val=1, max_val=10
+        )
+        include_vers = validate_bool_parameter(include_versions, default=True)
+
+        result = await cross_ref_service.get_dependency_graph(
+            crate_name, max_depth=max_depth_int, include_versions=include_vers
+        )
+        return DependencyGraphResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in get_dependency_graph: {e}")
+        raise
+
+
+async def suggest_migrations_handler(
+    crate_name: str,
+    from_version: str,
+    to_version: str,
+) -> dict:
+    """Suggest migration paths for breaking changes between versions.
+
+    Analyzes differences between two versions of a crate and suggests
+    migration paths for renamed, moved, or removed items. Helps developers
+    upgrade their code when crate APIs change.
+
+    Args:
+        crate_name: Name of the Rust crate
+        from_version: Starting version (e.g., '1.0.0')
+        to_version: Target version (e.g., '2.0.0')
+
+    Returns:
+        Migration suggestions with confidence scores
+    """
+    try:
+        from .ingest import ingest_crate
+
+        # Ensure both versions are ingested
+        db_path_from = await ingest_crate(crate_name, from_version)
+        db_path_to = await ingest_crate(crate_name, to_version)
+
+        # Use the newer version's database
+        cross_ref_service = CrossReferenceService(db_path_to)
+
+        suggestions = await cross_ref_service.suggest_migrations(
+            crate_name, from_version, to_version
+        )
+
+        result = {
+            "crate_name": crate_name,
+            "from_version": from_version,
+            "to_version": to_version,
+            "suggestions": suggestions,
+        }
+        return MigrationSuggestionsResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in suggest_migrations: {e}")
+        raise
+
+
+async def trace_reexports_handler(
+    crate_name: str,
+    item_path: str,
+) -> dict:
+    """Trace re-exported items to their original source.
+
+    Follows the re-export chain to find where an item was originally defined.
+    Useful for understanding the true source of re-exported types and functions.
+
+    Args:
+        crate_name: Name of the Rust crate
+        item_path: Path of the item to trace (e.g., 'Result', 'io::Error')
+
+    Returns:
+        Re-export chain showing the path from re-export to original source
+    """
+    try:
+        from .ingest import ingest_crate
+
+        # Ensure crate is ingested
+        db_path = await ingest_crate(crate_name)
+
+        # Initialize service if needed
+        cross_ref_service = CrossReferenceService(db_path)
+
+        result = await cross_ref_service.trace_reexports(crate_name, item_path)
+        return ReexportTrace(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in trace_reexports: {e}")
         raise
 
 
@@ -960,7 +1121,150 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["crate_name", "version_a", "version_b"],
             },
         ),
+        # Phase 6: Cross-References Tools
+        types.Tool(
+            name="resolve_import",
+            description="Resolve import paths and suggest alternatives",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "import_path": {
+                        "type": "string",
+                        "description": "Import path to resolve (e.g., 'Result', 'io::Error')",
+                    },
+                    "include_alternatives": {
+                        "type": "string",
+                        "default": "false",
+                        "description": "Include alternative import paths ('true'/'false')",
+                    },
+                },
+                "required": ["crate_name", "import_path"],
+            },
+        ),
+        types.Tool(
+            name="get_dependency_graph",
+            description="Get dependency graph with version constraints",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "max_depth": {
+                        "type": "string",
+                        "default": "3",
+                        "description": "Maximum depth to traverse (1-10)",
+                    },
+                    "include_versions": {
+                        "type": "string",
+                        "default": "true",
+                        "description": "Include version information ('true'/'false')",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
+        types.Tool(
+            name="suggest_migrations",
+            description="Suggest migration paths for breaking changes between versions",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "from_version": {
+                        "type": "string",
+                        "description": "Starting version (e.g., '1.0.0')",
+                    },
+                    "to_version": {
+                        "type": "string",
+                        "description": "Target version (e.g., '2.0.0')",
+                    },
+                },
+                "required": ["crate_name", "from_version", "to_version"],
+            },
+        ),
+        types.Tool(
+            name="trace_reexports",
+            description="Trace re-exported items to their original source",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "item_path": {
+                        "type": "string",
+                        "description": "Path of the item to trace (e.g., 'Result', 'io::Error')",
+                    },
+                },
+                "required": ["crate_name", "item_path"],
+            },
+        ),
     ]
+
+
+@server.call_tool()
+async def handle_call_tool(
+    name: str, arguments: dict | None
+) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+    """Handle tool calls from clients."""
+    try:
+        # Handle existing tools
+        if name == "get_crate_summary":
+            result = await get_crate_summary(**arguments)
+        elif name == "search_items":
+            result = await search_items(**arguments)
+        elif name == "get_item_doc":
+            result = await get_item_doc(**arguments)
+        elif name == "get_module_tree":
+            result = await get_module_tree(**arguments)
+        elif name == "search_examples":
+            result = await search_examples(**arguments)
+        elif name == "list_versions":
+            result = await list_versions(**arguments)
+        elif name == "start_pre_ingestion":
+            result = await start_pre_ingestion(**arguments)
+        elif name == "control_pre_ingestion":
+            result = await control_pre_ingestion(**arguments)
+        elif name == "ingest_cargo_file":
+            result = await ingest_cargo_file(**arguments)
+        elif name == "get_trait_implementors":
+            result = await get_trait_implementors(**arguments)
+        elif name == "get_type_traits":
+            result = await get_type_traits(**arguments)
+        elif name == "resolve_method":
+            result = await resolve_method(**arguments)
+        elif name == "get_associated_items":
+            result = await get_associated_items(**arguments)
+        elif name == "get_generic_constraints":
+            result = await get_generic_constraints(**arguments)
+        elif name == "compare_versions":
+            result = await compare_versions(**arguments)
+        # Phase 6: Cross-References Tools
+        elif name == "resolve_import":
+            result = await resolve_import_handler(**arguments)
+        elif name == "get_dependency_graph":
+            result = await get_dependency_graph_handler(**arguments)
+        elif name == "suggest_migrations":
+            result = await suggest_migrations_handler(**arguments)
+        elif name == "trace_reexports":
+            result = await trace_reexports_handler(**arguments)
+        else:
+            raise ValueError(f"Unknown tool: {name}")
+        
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+    except Exception as e:
+        logger.error(f"Error calling tool {name}: {e}")
+        return [types.TextContent(type="text", text=f"Error: {str(e)}")]
 
 
 async def run_sdk_server():

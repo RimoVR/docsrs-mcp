@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-23T18:45:00",
+    "lastUpdated": "2025-08-23T19:15:00",
     "compressionVersion": "1.2",
     "originalTokens": 51200,
     "legend": {
@@ -355,21 +355,75 @@
       },
       "sdk_features": {
         "fastmcp_integration": "FastMCP 1.0 incorporated into official SDK in 2024",
-        "tool_registration": "@server.tool() decorator pattern for tool registration",
+        "tool_registration": "Two APIs: FastMCP uses @mcp.tool(), Server uses manual handlers",
         "import_pattern": "from mcp.server import Server",
         "structured_output": "Native support for Pydantic models, TypedDicts, classes with type hints",
         "transport_modes": "STDIO (local) and HTTP/SSE (remote) dual-mode support",
         "context_injection": "Progress reporting via ctx.report_progress()",
         "parameter_handling": "Native support for string parameters from MCP clients"
       },
+      "tool_registration_architecture": {
+        "research_date": "2025-08-23",
+        "overview": "Comprehensive analysis of MCP SDK 1.13.1 tool registration patterns and API variations",
+        "api_variations": {
+          "fastmcp_high_level": {
+            "import": "from mcp.server.fastmcp import FastMCP",
+            "decorator": "@mcp.tool()",
+            "description": "High-level API with automatic tool registration",
+            "initialization": "mcp = FastMCP()",
+            "server_creation": "server = mcp.create_server()",
+            "automatic_discovery": true
+          },
+          "server_low_level": {
+            "import": "from mcp.server import Server",
+            "decorator": "None - manual registration required",
+            "description": "Low-level API requiring manual tool management",
+            "initialization": "server = Server('server-name')",
+            "tool_listing": "@server.list_tools() handler required",
+            "tool_dispatch": "@server.call_tool() handler required",
+            "manual_registration": true
+          }
+        },
+        "critical_findings": {
+          "decorator_nonexistence": "@server.tool() decorator does NOT exist in MCP SDK 1.13.1",
+          "api_separation": "FastMCP and Server are completely separate APIs with different patterns",
+          "mixing_prohibited": "Never mix FastMCP and Server APIs in the same implementation",
+          "registration_patterns": {
+            "fastmcp_automatic": "Tools automatically discovered via @mcp.tool() decorator",
+            "server_manual": "Tools must be manually listed in handle_list_tools() and dispatched in handle_call_tool()"
+          }
+        },
+        "implementation_requirements": {
+          "fastmcp_pattern": {
+            "tool_definition": "@mcp.tool() decorator on async functions",
+            "server_setup": "FastMCP instance creation and server generation",
+            "automatic_handling": "Tool registration and dispatch handled automatically"
+          },
+          "server_pattern": {
+            "list_tools_handler": "@server.list_tools() decorator required for tool enumeration",
+            "call_tool_handler": "@server.call_tool() decorator required for tool execution",
+            "manual_dispatch": "Manual tool name matching and parameter handling in handlers"
+          }
+        }
+      },
       "migration_patterns": {
-        "import_statement": "from mcp.server import Server",
-        "server_creation": "server = Server('docsrs-mcp')",
-        "tool_decorator": "@server.tool() decorator pattern for tool registration",
-        "function_signature": "async def tool_name(param: str, optional: Optional[int] = None) -> dict",
-        "documentation": "Tool description for auto-documentation via docstring",
-        "type_hints": "Use type hints for automatic schema generation",
-        "service_layer_extraction": "Extract business logic for reuse across implementations"
+        "server_low_level": {
+          "import_statement": "from mcp.server import Server",
+          "server_creation": "server = Server('docsrs-mcp')",
+          "tool_handlers": "Manual @server.list_tools() and @server.call_tool() handlers required",
+          "function_signature": "async def handle_call_tool(name: str, arguments: dict) -> list[TextContent]"
+        },
+        "fastmcp_high_level": {
+          "import_statement": "from mcp.server.fastmcp import FastMCP",
+          "server_creation": "mcp = FastMCP(); server = mcp.create_server()",
+          "tool_decorator": "@mcp.tool() decorator for automatic registration",
+          "function_signature": "async def tool_name(param: str, optional: Optional[int] = None) -> dict"
+        },
+        "common_patterns": {
+          "documentation": "Tool description for auto-documentation via docstring",
+          "type_hints": "Use type hints for automatic schema generation",
+          "service_layer_extraction": "Extract business logic for reuse across implementations"
+        }
       },
       "claude_code_integration": {
         "configuration": "JSON with mcpServers object",
@@ -432,7 +486,7 @@
         "status": "Current official version",
         "fastmcp_integration": "FastMCP 1.0 integrated natively",
         "import_pattern": "from mcp.server import Server",
-        "decorator_pattern": "@server.tool() for tool registration"
+        "decorator_pattern": "Two APIs: FastMCP @mcp.tool() or Server manual handlers"
       },
       "memory_leak_analysis": {
         "confirmed_issue": "Memory leak in SDK 1.13.1",
@@ -482,7 +536,7 @@
         "schema_override_obsolete": "Schema override workaround unnecessary with SDK",
         "validation_improvements": "SDK provides better native validation patterns",
         "breaking_changes": {
-          "decorator_syntax": "@server.tool() vs @fastmcp.tool()",
+          "decorator_syntax": "Server uses manual handlers, FastMCP uses @mcp.tool()",
           "server_initialization": "Server() constructor vs FastMCP.from_fastapi()",
           "transport_configuration": "Different transport setup patterns"
         }

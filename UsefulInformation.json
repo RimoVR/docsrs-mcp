@@ -917,6 +917,18 @@
           "relatedFiles": ["src/docsrs_mcp/database.py"],
           "codeExample": "# SQLite migration pattern for complex schema changes\nasync def upgrade_table_with_new_constraints():\n    # Create new table with desired schema\n    await db.execute(\"CREATE TABLE items_new (id TEXT PRIMARY KEY, ...)\")\n    # Copy data from old table\n    await db.execute(\"INSERT INTO items_new SELECT * FROM items\")\n    # Drop old table and rename new table\n    await db.execute(\"DROP TABLE items\")\n    await db.execute(\"ALTER TABLE items_new RENAME TO items\")",
           "debuggingTechnique": "Test migrations with sample data to ensure data preservation during schema changes"
+        },
+        {
+          "error": "AttributeError: 'Server' object has no attribute 'tool'",
+          "rootCause": "Attempting to use @server.tool() decorator which doesn't exist in MCP SDK 1.13.1. The low-level Server API and FastMCP have different decorator patterns that should not be mixed.",
+          "solution": "Use the low-level Server API pattern with @server.list_tools() and @server.call_tool() handlers instead of decorator-based registration. Manually register tools in handle_list_tools() and dispatch in handle_call_tool().",
+          "context": "Migrating from FastMCP to official MCP SDK and mixing API patterns incorrectly",
+          "lesson": "Always verify decorator existence in documentation before use; MCP SDK has two separate APIs (FastMCP and Server) with different patterns that should not be mixed",
+          "pattern": "When using low-level Server, implement tool registration manually rather than relying on decorators",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/server.py"],
+          "codeExample": "# Wrong - trying to use @server.tool() with low-level Server:\n@server.tool()\ndef my_tool():\n    pass\n\n# Correct - manual registration with low-level Server:\n@server.list_tools()\nasync def handle_list_tools() -> list[types.Tool]:\n    return [types.Tool(name='my_tool', ...)]\n\n@server.call_tool()\nasync def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:\n    if name == 'my_tool':\n        return [types.TextContent(type='text', text='result')]",
+          "debuggingTechnique": "Check MCP SDK documentation for correct API patterns; use dir(server) to inspect available methods on Server instances"
         }
       ]
     },
