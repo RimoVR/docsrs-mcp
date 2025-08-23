@@ -118,20 +118,31 @@ graph LR
         end
         
         subgraph "Ingestion Layer"
-            ING[ingest.py<br/>Enhanced rustdoc pipeline<br/>Four-tier fallback system<br/>Complete item extraction with macro extraction<br/>Standard library fallback documentation]
+            subgraph "Modular Ingestion Pipeline (Post-Refactoring)"
+                ORCHESTRATOR[ingest_orchestrator.py<br/>Main orchestration (~479 LOC)<br/>Four-tier fallback system<br/>Service layer pattern<br/>Coordinates all ingestion modules]
+                EMBED_MGR[embedding_manager.py<br/>ONNX model lifecycle (~170 LOC)<br/>Lazy loading pattern<br/>Memory-aware batch processing<br/>Warmup during startup]
+                VER_RESOLVER[version_resolver.py<br/>Version resolution (~445 LOC)<br/>Rustdoc downloading<br/>Compression support (zst, gzip, json)<br/>docs.rs redirects]
+                CACHE_MGR[cache_manager.py<br/>LRU cache eviction (~270 LOC)<br/>Priority scoring for popular crates<br/>2GB size limit enforcement<br/>File mtime-based eviction]
+                RUSTDOC_PARSER[rustdoc_parser.py<br/>Streaming JSON parsing (~305 LOC)<br/>ijson-based memory efficiency<br/>Module hierarchy extraction<br/>Path validation with fallback]
+                SIG_EXTRACTOR[signature_extractor.py<br/>Metadata extraction (~365 LOC)<br/>Complete item extraction<br/>Macro extraction patterns<br/>Enhanced schema validation]
+                CODE_EXAMPLES[code_examples.py<br/>Code example extraction (~343 LOC)<br/>Language detection via pygments<br/>30% confidence threshold<br/>JSON structure with metadata]
+                STORAGE_MGR[storage_manager.py<br/>Batch embedding storage (~296 LOC)<br/>Transaction management<br/>Streaming batch inserts<br/>Memory-aware chunking]
+            end
+            
+            ING[ingest.py<br/>Backward compatibility layer<br/>Re-exports from modular components<br/>Maintains existing API surface]
             POPULAR[popular_crates.py<br/>PopularCratesManager & PreIngestionWorker<br/>Background asyncio.create_task startup<br/>asyncio.Semaphore(3) rate limiting<br/>Multi-tier cache with circuit breaker<br/>Priority queue with stdlib prioritization<br/>Memory monitoring]
             RUSTUP_DETECTOR[rustup_detector.py<br/>Cross-platform rustup detection<br/>Windows, macOS, Linux, WSL support<br/>Toolchain enumeration<br/>Local stdlib JSON discovery]
             DEPENDENCY_FILTER[dependency_filter.py<br/>DependencyFilter class<br/>Set-based implementation<br/>JSON cache at /tmp/docsrs_deps.json<br/>Bloom filter migration ready]
-            VER[Version Resolution<br/>docs.rs redirects]
-            DL[Compression Support<br/>zst, gzip, json]
-            PARSE[ijson Parser<br/>Memory-efficient streaming<br/>Module hierarchy extraction<br/>Path validation with fallback generation]
-            HIERARCHY[build_module_hierarchy()<br/>Parent-child relationships<br/>Depth calculation<br/>Item counting]
-            EXTRACT[Enhanced Code Example Extractor<br/>JSON structure with metadata<br/>Language detection via pygments<br/>30% confidence threshold]<br/>TIER_SYSTEM[Four-Tier Ingestion System<br/>RUST_LANG_STDLIB: Local rustdoc JSON (highest priority)<br/>RUSTDOC_JSON: Full metadata (primary path)<br/>SOURCE_EXTRACTION: Fallback via CDN (80%+ coverage)<br/>DESCRIPTION_ONLY: Minimal fallback (100% guarantee)<br/>enhance_fallback_schema() for tier 2/3<br/>Tier-aware validation with different MIN_ITEMS_THRESHOLD]<br/>MACROEXT[EnhancedMacroExtractor<br/>Patterns: macro_rules!, #[proc_macro], #[proc_macro_derive], #[proc_macro_attribute]<br/>Fragment specifiers: expr, ident, pat, ty, stmt, block, item, meta, tt, vis, literal, path<br/>Results: lazy_static(4 macros), serde_derive(5 macros), anyhow(15 macros)]
-            PATHVAL[Path Validation<br/>validate_item_path_with_fallback()<br/>Database integrity enforcement]
-            EMBED[FastEmbed<br/>Batch processing<br/>Embeddings warmup during startup<br/>Memory-aware batch operations<br/>Enhanced transaction management]
-            LOCK[Per-crate Locks<br/>Prevent duplicates]
-            PRIORITY[Priority Queue<br/>On-demand vs pre-ingestion<br/>Request balancing<br/>float('inf') priority for stdlib]
-            STDLIBFALLBACK[Standard Library Fallback<br/>create_stdlib_fallback_documentation()<br/>50-68 items per stdlib crate<br/>Comprehensive tutorial message guides users to rust-docs-json setup<br/>Enhanced coverage: std (62), core (68), alloc (43)<br/>Embedding generation for stdlib types]
+            
+            subgraph "Core Ingestion Features"
+                TIER_SYSTEM[Four-Tier Ingestion System<br/>RUST_LANG_STDLIB: Local rustdoc JSON (highest priority)<br/>RUSTDOC_JSON: Full metadata (primary path)<br/>SOURCE_EXTRACTION: Fallback via CDN (80%+ coverage)<br/>DESCRIPTION_ONLY: Minimal fallback (100% guarantee)<br/>enhance_fallback_schema() for tier 2/3<br/>Tier-aware validation with different MIN_ITEMS_THRESHOLD]
+                MACROEXT[EnhancedMacroExtractor<br/>Patterns: macro_rules!, #[proc_macro], #[proc_macro_derive], #[proc_macro_attribute]<br/>Fragment specifiers: expr, ident, pat, ty, stmt, block, item, meta, tt, vis, literal, path<br/>Results: lazy_static(4 macros), serde_derive(5 macros), anyhow(15 macros)]
+                HIERARCHY[build_module_hierarchy()<br/>Parent-child relationships<br/>Depth calculation<br/>Item counting]
+                PATHVAL[Path Validation<br/>validate_item_path_with_fallback()<br/>Database integrity enforcement]
+                LOCK[Per-crate Locks<br/>Prevent duplicates]
+                PRIORITY[Priority Queue<br/>On-demand vs pre-ingestion<br/>Request balancing<br/>float('inf') priority for stdlib]
+                STDLIBFALLBACK[Standard Library Fallback<br/>create_stdlib_fallback_documentation()<br/>50-68 items per stdlib crate<br/>Comprehensive tutorial message guides users to rust-docs-json setup<br/>Enhanced coverage: std (62), core (68), alloc (43)<br/>Embedding generation for stdlib types]
+            end
         end
         
         subgraph "Storage Layer"
@@ -369,11 +380,16 @@ src/docsrs_mcp/
 │   ├── responses.py         # All response models and data structures (~365 LOC)
 │   ├── version_diff.py      # Version comparison and change tracking (~245 LOC)
 │   └── __init__.py          # Comprehensive re-exports for backward compatibility
-├── ingestion/
-│   ├── core.py              # Core ingestion logic (400-500 LOC)
-│   ├── embeddings.py        # Embedding generation and management (300-400 LOC)
-│   ├── processors.py        # Document processing pipeline (400-500 LOC)
-│   └── cache.py             # Ingestion caching and optimization (300-400 LOC)
+├── ingestion/ (✅ **Implemented** - Modular Pipeline)
+│   ├── ingest_orchestrator.py  # Main orchestration with four-tier fallback (~479 LOC)
+│   ├── embedding_manager.py    # ONNX model lifecycle with lazy loading (~170 LOC)
+│   ├── version_resolver.py     # Version resolution and rustdoc downloading (~445 LOC)
+│   ├── cache_manager.py        # LRU cache eviction with priority scoring (~270 LOC)
+│   ├── rustdoc_parser.py       # Streaming JSON parsing with ijson (~305 LOC)
+│   ├── signature_extractor.py  # Metadata extraction from rustdoc items (~365 LOC)
+│   ├── code_examples.py        # Code example extraction with language detection (~343 LOC)
+│   ├── storage_manager.py      # Batch embedding storage operations (~296 LOC)
+│   └── ingest.py               # Backward compatibility layer with re-exports
 ├── database/
 │   ├── core.py              # Database operations and connections (300-400 LOC)
 │   ├── search.py            # Vector search and ranking (400-500 LOC)
@@ -444,7 +460,7 @@ graph TB
         
         subgraph "Data & Infrastructure"
             MODELS[models/ package<br/>Pydantic schemas & validation]
-            INGEST[ingestion/ package<br/>Document processing pipeline]
+            INGEST[ingestion/ package<br/>Modular pipeline (8 modules)<br/>Service layer architecture]
             DATABASE[database/ package<br/>SQLite + vector operations]
             API_TOOLS[api/ package<br/>Tool implementations]
         end
@@ -557,10 +573,15 @@ def get_mcp_manifest():
 
 **Large Files Remaining** (implementation complexity requires >500 LOC):
 - `database.py`: 2393 lines (core database operations)
-- `ingest.py`: 3527 lines (complex ingestion pipeline)
 - `popular_crates.py`: 1330 lines (background processing & caching)
 
-These files exceed the target due to inherent complexity rather than organizational issues - they contain comprehensive business logic that benefits from co-location.
+**Recently Refactored** (Post-Phase 2 Enhancement):
+- `ingest.py`: ✅ **Modularized** - Refactored from 3609 LOC monolith into 8 focused modules (~170-479 LOC each)
+  - Maintains backward compatibility through re-exports
+  - Service layer pattern with clear separation of concerns
+  - Enhanced maintainability while preserving all functionality
+
+These remaining files exceed the target due to inherent complexity rather than organizational issues - they contain comprehensive business logic that benefits from co-location.
 
 ### Implementation Timeline
 
@@ -3519,6 +3540,97 @@ All four issues share common architectural anti-patterns:
 - Validation checkpoints with meaningful error messages
 
 ## System Components
+
+### Modular Ingestion Architecture
+
+The ingestion pipeline has been refactored from a monolithic 3609-line `ingest.py` file into 8 focused modules following the service layer pattern. This refactoring maintains backward compatibility through re-exports while dramatically improving maintainability and testability.
+
+#### Module Breakdown
+
+**ingest_orchestrator.py (~479 LOC)**
+- Main orchestration logic coordinating all ingestion modules
+- Implements the four-tier fallback system (RUST_LANG_STDLIB → RUSTDOC_JSON → SOURCE_EXTRACTION → DESCRIPTION_ONLY)
+- Service layer pattern with dependency injection
+- Error handling and recovery logic across all ingestion tiers
+
+**embedding_manager.py (~170 LOC)**
+- ONNX model lifecycle management with lazy loading
+- Memory-aware batch processing (adaptive batch sizes 16-512)
+- Embedding warmup during startup for improved performance
+- FastEmbed integration with explicit cleanup and garbage collection
+
+**version_resolver.py (~445 LOC)**
+- Version resolution via docs.rs redirect mechanism
+- Rustdoc JSON downloading with compression support (zst, gzip, json)
+- Standard library crate detection and special handling
+- Channel resolution for Rust version channels (stable/beta/nightly)
+
+**cache_manager.py (~270 LOC)**
+- LRU cache eviction with 2GB size limit enforcement
+- Priority scoring algorithm for popular crates
+- File mtime-based eviction strategies
+- Cache health monitoring and cleanup operations
+
+**rustdoc_parser.py (~305 LOC)**
+- Streaming JSON parsing using ijson for memory efficiency
+- Module hierarchy extraction with parent-child relationships
+- Path validation with fallback generation for robustness
+- Progressive item streaming using generator-based architecture
+
+**signature_extractor.py (~365 LOC)**
+- Complete metadata extraction from rustdoc JSON items
+- Enhanced macro extraction patterns (macro_rules!, proc_macro variants)
+- Schema validation with tier-aware different MIN_ITEMS_THRESHOLD values
+- Cross-reference extraction from links fields
+
+**code_examples.py (~343 LOC)**
+- Code example extraction with structured JSON metadata
+- Language detection via pygments with 30% confidence threshold
+- SHA256-based deduplication using 16-character prefix
+- Character fragmentation bug prevention with type validation
+
+**storage_manager.py (~296 LOC)**
+- Batch embedding storage with transaction management
+- Streaming batch inserts with memory-aware chunking (size=999)
+- Enhanced transaction management with retry logic
+- Database integrity enforcement with UNIQUE constraints
+
+#### Backward Compatibility
+
+The main `ingest.py` file now serves as a compatibility layer:
+- Re-exports all public functions and classes from the modular components
+- Maintains the existing API surface for dependent code
+- Ensures zero-disruption migration for existing integrations
+- Preserves all existing functionality while enabling modular development
+
+#### Benefits of Modular Architecture
+
+- **Maintainability**: Each module has a single, focused responsibility
+- **Testability**: Individual modules can be unit tested in isolation
+- **Performance**: Lazy loading and targeted optimization per module
+- **Code Clarity**: LOC per module stays under 500 for better comprehension
+- **Parallel Development**: Multiple developers can work on different modules simultaneously
+
+#### Module Dependencies and Data Flow
+
+The modular architecture follows a clear dependency graph with the orchestrator coordinating all operations:
+
+```
+ingest_orchestrator.py (Main Controller)
+├── version_resolver.py → cache_manager.py
+├── rustdoc_parser.py → signature_extractor.py → code_examples.py
+└── embedding_manager.py → storage_manager.py
+```
+
+**Ingestion Flow Through Modules**:
+1. **Orchestrator** receives ingestion request and determines tier strategy
+2. **Version Resolver** downloads rustdoc JSON, consulting **Cache Manager** for existing files
+3. **Rustdoc Parser** streams JSON content using ijson for memory efficiency
+4. **Signature Extractor** processes each item, extracting metadata and cross-references
+5. **Code Examples** extractor processes documentation for example code blocks
+6. **Embedding Manager** generates vectors for processed items in adaptive batches
+7. **Storage Manager** handles transactional database operations with streaming inserts
+8. **Orchestrator** coordinates error handling and tier fallback across all modules
 
 ### Ingestion Layer Details
 

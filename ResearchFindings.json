@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-23",
+    "lastUpdated": "2025-08-23T16:30:00",
     "compressionVersion": "1.2",
     "originalTokens": 51200,
     "legend": {
@@ -521,7 +521,12 @@
           "opt": ["Session caching", "Generator pattern", "ONNX Runtime"],
           "batch_sizes": {"cpu": 16, "gpu": 256, "general": 32}
         },
-        "onnx_env": ["ORT_DISABLE_CPU_ARENA_ALLOCATOR=1", "ORT_DISABLE_MEMORY_PATTERN=1"]
+        "onnx_env": ["ORT_DISABLE_CPU_ARENA_ALLOCATOR=1", "ORT_DISABLE_MEMORY_PATTERN=1"],
+        "onnx_runtime_optimization": {
+          "arena_configuration": "Proper arena settings prevent memory bloat during embedding generation",
+          "memory_management": "ONNX runtime memory optimizable through environment variable configuration",
+          "performance_impact": "Arena optimization reduces memory footprint for batch embedding operations"
+        }
       },
       "sync": {
         "libs": {"sqlite_vec": "#{sqlitevec}", "aiosqlite": "3.0.0", "embedding_model": "fastembed"},
@@ -554,7 +559,17 @@
         "opts": {
           "pre_serialize": "Vectors to bytes before batch",
           "transaction_per_batch": "One transaction per #{batch_size_optimal}",
-          "adaptive": {"mem_thresh": "#{warning_threshold}%/#{critical_threshold}%"}
+          "adaptive": {"mem_thresh": "#{warning_threshold}%/#{critical_threshold}%"},
+          "sqlite_vec_storage": {
+            "serialization_method": "sqlite_vec.serialize_float32() for proper embedding storage",
+            "storage_optimization": "Native serialize function ensures optimal SQLite vector storage format",
+            "performance_benefit": "Proper serialization prevents storage corruption and query failures"
+          },
+          "batch_processing_enhancement": {
+            "adaptive_sizing": "Dynamic batch size adjustment based on memory pressure monitoring",
+            "stability_improvement": "Prevents memory exhaustion during large dataset ingestion",
+            "memory_threshold_response": "Reduces batch size automatically when memory usage exceeds thresholds"
+          }
         }
       },
       "search_opt": {
@@ -773,7 +788,12 @@
         "best_practices": {
           "streaming": "ijson for large files",
           "mem_mgmt": "Chunk processing",
-          "caching": "Aggressive - expensive parsing"
+          "caching": "Aggressive - expensive parsing",
+          "performance_optimization": {
+            "ijson_backend": "yajl2_c provides 1329K objects/sec optimal performance",
+            "streaming_parser": "ijson with C backend significantly outperforms standard JSON parser",
+            "memory_pressure_handling": "Adaptive batch sizing based on memory monitoring prevents OOM"
+          }
         },
         "docs_rs_limitations": {
           "json_unavailable": "Standard library rustdoc JSON NOT available on docs.rs",
@@ -968,7 +988,10 @@
           "type_checking_pattern": {
             "purpose": "p12 - Reduce runtime import overhead",
             "implementation": "from __future__ import annotations + TYPE_CHECKING",
-            "benefit": "Heavy dependencies loaded only for type checking"
+            "benefit": "Heavy dependencies loaded only for type checking",
+            "architectural_benefit": "Prevents circular imports in modular Python architectures",
+            "dependency_injection_support": "Enables clean separation of concerns without runtime import cycles",
+            "refactoring_enabler": "Allows conditional imports for type hints only, supporting modular design"
           },
           "lazy_imports": {
             "targets": ["ONNX models", "Database operations", "Heavy ML libraries"],
@@ -1417,7 +1440,12 @@
         "cached_comparison": "<500ms response time",
         "initial_ingestion": "10-30s for version processing",
         "memory_usage": "<1GB with streaming processing",
-        "cache_eviction": "LRU-based with configurable limits"
+        "cache_eviction": "LRU-based with configurable limits",
+        "priority_scoring_optimization": {
+          "lru_enhancement": "LRU cache with priority scoring improves retention of popular crates",
+          "scoring_factors": "Download frequency, search relevance, and recency combined for intelligent eviction",
+          "performance_impact": "Priority-aware caching reduces cache misses for frequently accessed crates"
+        }
       },
       "tested_implementations": {
         "validation_crates": ["serde", "once_cell", "anyhow"],
@@ -1749,6 +1777,12 @@
       "p11: Maintain <500 LOC files and group related endpoints in separate router modules",
       "p14: Apply facade pattern with re-exports for backward compatibility during refactoring",
       "p12: Use TYPE_CHECKING pattern and lazy imports to optimize application startup time",
+      "p2: Use ijson with yajl2_c backend for optimal streaming JSON parsing performance (1329K objects/sec)",
+      "p2: Apply sqlite_vec.serialize_float32() for proper embedding storage in SQLite vector tables",
+      "p2: Implement LRU cache with priority scoring to improve retention of popular crates",
+      "p2: Configure ONNX runtime with arena settings to optimize memory usage during embedding generation",
+      "p2: Use dependency injection patterns with TYPE_CHECKING to prevent circular imports in modular Python architectures",
+      "p2: Implement adaptive batch processing with memory pressure monitoring for stable large dataset ingestion",
       "p2: Enforce snake_case field naming in Pydantic models for FastAPI integration compatibility"
     ],
     "performance": [
@@ -1767,7 +1801,11 @@
       "Dynamic fetch_k adjustment based on filter selectivity improves performance",
       "Fuzzy normalization handles British/American spellings with <1ms overhead",
       "List comprehensions with None filtering provide 40% speedup over filter() function",
-      "Generator expressions avoid intermediate storage for memory-efficient None handling"
+      "Generator expressions avoid intermediate storage for memory-efficient None handling",
+      "ijson with yajl2_c backend delivers 1329K objects/sec streaming JSON parsing performance",
+      "LRU cache with priority scoring reduces cache misses for frequently accessed crates",
+      "Adaptive batch sizing prevents memory exhaustion during large dataset processing",
+      "ONNX arena configuration optimizes memory footprint for batch embedding operations"
     ],
     "implementation": [
       "Pydantic mode='before' validators for type coercion",
@@ -1849,7 +1887,14 @@
       "Implement CancellationToken patterns for cooperative LSP operation cancellation",
       "Apply progressive timeout strategies for complex LSP analysis operations",
       "Use rustup rust-docs-json component for complete standard library JSON access",
-      "Implement structured error responses with field-level context for validation failures"
+      "Implement structured error responses with field-level context for validation failures",
+      "Use ijson streaming parser with yajl2_c backend for optimal large file processing performance",
+      "Apply sqlite_vec.serialize_float32() native serialization for embedding storage integrity",
+      "Implement LRU caching with priority scoring based on download frequency and search relevance",
+      "Configure ONNX runtime environment variables for memory-efficient embedding generation",
+      "Use TYPE_CHECKING imports to enable dependency injection without circular import issues",
+      "Apply adaptive batch processing with dynamic sizing based on real-time memory pressure monitoring",
+      "Implement memory threshold-based batch size reduction to prevent OOM conditions during ingestion"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",

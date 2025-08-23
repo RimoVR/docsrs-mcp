@@ -1,22 +1,66 @@
-"""Ingestion pipeline for Rust crate documentation.
+"""Ingestion pipeline modules for Rust crate documentation.
 
-This module now delegates to the focused modules in the ingestion package.
-All functionality has been preserved through re-exports for backward compatibility.
+This package splits the monolithic ingest.py into focused modules under 500 LOC each,
+while maintaining backward compatibility through re-exports.
 """
 
-# Re-export all public functions and classes from the ingestion package
-from .ingestion import (
-    # Main orchestration
-    IngestionOrchestrator,
-    get_crate_lock,
-    ingest_crate,
-    recover_incomplete_ingestion,
-    # Embedding management
+# Import all public functions and classes from sub-modules
+# Re-export constants and types for backward compatibility
+from .cache_manager import (
+    CACHE_DIR,
+    MAX_CACHE_SIZE,
+    calculate_cache_size,
+    evict_cache_if_needed,
+)
+from .code_examples import (
+    batch_examples,
+    calculate_example_hash,
+    extract_code_examples,
+    format_example_for_embedding,
+    generate_example_embeddings,
+    normalize_code,
+)
+from .embedding_manager import (
+    EMBEDDING_MODEL_NAME,
     cleanup_embedding_model,
     get_embedding_model,
     get_warmup_status,
     warmup_embedding_model,
-    # Version resolution
+)
+from .ingest_orchestrator import (
+    IngestionOrchestrator,
+    get_crate_lock,
+    ingest_crate,
+    recover_incomplete_ingestion,
+)
+from .rustdoc_parser import (
+    build_module_hierarchy,
+    parse_rustdoc_items,
+    parse_rustdoc_items_streaming,
+    resolve_parent_id,
+)
+from .signature_extractor import (
+    extract_deprecated,
+    extract_generics,
+    extract_signature,
+    extract_type_name,
+    extract_visibility,
+    extract_where_clause,
+    extract_where_predicate,
+    format_signature,
+)
+from .storage_manager import (
+    clean_existing_embeddings,
+    generate_embeddings,
+    generate_embeddings_streaming,
+    store_embeddings,
+    store_embeddings_streaming,
+)
+from .version_resolver import (
+    COMPRESSED_RUSTDOC_SUPPORTED,
+    HTTP_TIMEOUT,
+    RUST_VERSION_MANIFEST_URL,
+    STDLIB_CRATES,
     construct_stdlib_url,
     decompress_content,
     download_rustdoc,
@@ -26,52 +70,10 @@ from .ingestion import (
     resolve_stdlib_version,
     resolve_version,
     resolve_version_from_crate_info,
-    # Rustdoc parsing
-    build_module_hierarchy,
-    parse_rustdoc_items,
-    parse_rustdoc_items_streaming,
-    resolve_parent_id,
-    # Signature extraction
-    extract_deprecated,
-    extract_generics,
-    extract_signature,
-    extract_type_name,
-    extract_visibility,
-    extract_where_clause,
-    extract_where_predicate,
-    format_signature,
-    # Code examples
-    batch_examples,
-    calculate_example_hash,
-    extract_code_examples,
-    format_example_for_embedding,
-    generate_example_embeddings,
-    normalize_code,
-    # Storage management
-    clean_existing_embeddings,
-    generate_embeddings,
-    generate_embeddings_streaming,
-    store_embeddings,
-    store_embeddings_streaming,
-    # Cache management
-    calculate_cache_size,
-    evict_cache_if_needed,
 )
 
-# Re-export constants for backward compatibility
-from .ingestion import (
-    CACHE_DIR,
-    COMPRESSED_RUSTDOC_SUPPORTED,
-    EMBEDDING_MODEL_NAME,
-    HTTP_TIMEOUT,
-    MAX_CACHE_SIZE,
-    RUST_VERSION_MANIFEST_URL,
-    STDLIB_CRATES,
-)
-
-# This allows the module to be used exactly as before
 __all__ = [
-    # Main orchestration
+    # Orchestrator
     "IngestionOrchestrator",
     "ingest_crate",
     "recover_incomplete_ingestion",

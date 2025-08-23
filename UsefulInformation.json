@@ -3148,6 +3148,97 @@
           "relatedFiles": ["src/docsrs_mcp/mcp_tools.py", "src/docsrs_mcp/ingest.py"],
           "codeExample": "# Add as first line in all MCP tool functions:\nawait ingest_crate(crate_name, version)\n\n# This ensures ingestion completes before proceeding\n# Existing locks prevent duplicate ingestion attempts",
           "debuggingTechnique": "Verify ingestion completion by checking database state before tool execution"
+        },
+        {
+          "lesson": "Character iteration bug in code examples requires type checking",
+          "context": "Refactoring code examples processing to prevent string fragmentation",
+          "details": "String examples_data being iterated character by character instead of as complete blocks. Must wrap string examples in lists before iteration to preserve complete code blocks.",
+          "impact": "Prevents examples from returning individual characters instead of complete code snippets",
+          "dateLearned": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/app.py"],
+          "implementation": {
+            "typeGuard": "if isinstance(examples_data, str): examples_data = [examples_data]",
+            "beforeIteration": "Always check string type before iteration over examples",
+            "pattern": "Wrap single strings in lists to maintain iteration consistency"
+          }
+        },
+        {
+          "lesson": "Database schema mismatches require column name mapping",
+          "context": "Refactoring database queries with inconsistent column naming",
+          "details": "Database tables may use different column names (item_id vs item_path) that require mapping during query construction. Always verify actual schema column names.",
+          "impact": "Prevents SQL errors and ensures proper data retrieval",
+          "dateLearned": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/app.py"],
+          "implementation": {
+            "columnMapping": "Map logical names to actual database column names",
+            "schemaVerification": "Check database schema before constructing queries",
+            "pattern": "Use schema inspection or explicit mapping dictionaries"
+          }
+        },
+        {
+          "lesson": "Missing function arguments must be added during refactoring",
+          "context": "Function signature changes require updating all call sites",
+          "details": "Functions like store_modules may require additional parameters (crate_id) after refactoring. All call sites must be updated with required arguments.",
+          "impact": "Prevents TypeError exceptions during runtime",
+          "dateLearned": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/ingest.py", "src/docsrs_mcp/database.py"],
+          "implementation": {
+            "signatureReview": "Check all function signatures for new required parameters",
+            "callSiteUpdate": "Update all call sites with new required arguments",
+            "pattern": "Use IDE search to find all function usage locations"
+          }
+        },
+        {
+          "lesson": "NoneType concatenation errors require conditional expressions",
+          "context": "Safe string operations on potentially None values",
+          "details": "Direct concatenation with None values causes TypeError. Use conditional expressions (x or '') instead of direct concatenation for safe string operations.",
+          "impact": "Prevents runtime errors when processing external data that may be None",
+          "dateLearned": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/ingest.py"],
+          "implementation": {
+            "safePattern": "(value or '').method() for string operations",
+            "avoidDirect": "Never concatenate potentially None values directly",
+            "defensiveCoding": "Always check for None before string operations"
+          }
+        },
+        {
+          "lesson": "execute_with_retry doesn't support 'many' parameter for batch operations",
+          "context": "Database batch operations with retry logic",
+          "details": "The execute_with_retry() helper function doesn't support executemany() batch operations. Use db.executemany() directly for batch insertions instead of the retry wrapper.",
+          "impact": "Prevents AttributeError when attempting batch operations with retry",
+          "dateLearned": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/database.py"],
+          "implementation": {
+            "batchOperations": "Use db.executemany() directly, not execute_with_retry()",
+            "retryLogic": "Implement separate retry logic for batch operations if needed",
+            "pattern": "Check function signatures for supported parameters"
+          }
+        },
+        {
+          "lesson": "Import order matters in Python and affects functionality",
+          "context": "Refactoring code with import reorganization",
+          "details": "Python import order can affect module initialization and functionality. Use ruff to auto-fix import sorting to maintain consistent and correct import ordering.",
+          "impact": "Prevents import-related errors and maintains code consistency",
+          "dateLearned": "2025-08-23",
+          "relatedFiles": ["pyproject.toml", "various .py files"],
+          "implementation": {
+            "autoFix": "uv run ruff check --fix . to automatically sort imports",
+            "configurable": "Configure import sorting rules in pyproject.toml",
+            "pattern": "Run ruff formatting as part of development workflow"
+          }
+        },
+        {
+          "lesson": "Type checking with uvx ty is faster than pyright for development",
+          "context": "Development workflow optimization for type validation",
+          "details": "Using 'uvx ty check' provides faster type validation than pyright during development iterations. Useful for rapid feedback on type errors during refactoring.",
+          "impact": "Improves development speed with faster type checking feedback",
+          "dateLearned": "2025-08-23",
+          "relatedFiles": ["development workflow"],
+          "implementation": {
+            "fastChecking": "uvx ty check for rapid type validation",
+            "developmentUse": "Use during active development for quick feedback",
+            "pattern": "Integrate into development workflow for faster iteration"
+          }
         }
       ]
     },
