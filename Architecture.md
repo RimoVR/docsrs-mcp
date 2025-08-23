@@ -275,6 +275,60 @@ def validate_integer(value: str, min_val: int = None, max_val: int = None) -> in
         raise ValueError(f"Invalid integer: {value} - {e}")
 ```
 
+### Models Package Architecture
+
+The models package implements a **modular, function-based split** that maintains backward compatibility while achieving maintainability targets. All files are now under 1,000 LOC, with the largest being `requests.py` at ~950 lines.
+
+#### Module Organization
+
+**models/base.py (~60 LOC)**
+- `ErrorResponse`: Standardized error response format
+- `strict_config`: Shared Pydantic configuration with `extra='forbid'`
+- Base utilities for model validation and configuration
+
+**models/mcp.py (~130 LOC)** 
+- `MCPTool`: MCP tool schema definitions
+- `MCPResource`: MCP resource metadata models  
+- `MCPManifest`: Complete MCP server manifest structure
+- MCP-specific validation and compatibility handling
+
+**models/requests.py (~950 LOC)**
+- All request models with comprehensive validation
+- Field validators with `mode='before'` for MCP client compatibility
+- String-to-type coercion for integers, booleans, and enums
+- Centralized parameter validation patterns
+- Support for both MCP string parameters and native REST types
+
+**models/responses.py (~365 LOC)**
+- All response models and data structures
+- `SearchResult`, `CodeExample`, `VersionInfo` data models
+- Response formatting with consistent field naming
+- Integration with FastAPI automatic documentation
+
+**models/version_diff.py (~245 LOC)**
+- Version comparison and change tracking models
+- `ChangeCategory`, `ItemChange`, `DiffSummary` structures
+- Migration hint generation and severity classification
+- Three-tier ingestion compatibility models
+
+**models/__init__.py**
+- **Comprehensive re-exports** for complete backward compatibility
+- All existing imports continue to work without modification
+- Explicit `__all__` definition for clear public API
+- Maintains the original `from docsrs_mcp.models import ModelName` pattern
+
+#### Key Design Principles
+
+**Functional Boundaries**: Each module focuses on a specific concern (requests, responses, MCP schemas, version diffing) rather than arbitrary size limits.
+
+**Backward Compatibility**: The `__init__.py` module ensures all existing imports continue working, preventing breaking changes during the refactor.
+
+**Validation Consistency**: All request models share the same `mode='before'` validator patterns for MCP client compatibility, with centralized validation utilities in `base.py`.
+
+**Maintainability Target**: Every file stays under 1,000 LOC, with the largest (`requests.py`) at 948 lines, meeting the organizational maintainability requirements.
+
+**MCP Compatibility**: Preserves all `mode='before'` validators that enable MCP clients to send string parameters that get coerced to appropriate types (integers, booleans, enums).
+
 ### Modular Structure
 
 The service layer architecture introduces clear separation of concerns with business logic decoupled from transport layers:
@@ -290,10 +344,12 @@ src/docsrs_mcp/
 │   ├── official_server.py    # Official MCP SDK 1.13.1 implementation (300-400 LOC)
 │   └── parameter_validation.py # String parameter handling utilities (200-300 LOC)
 ├── models/
-│   ├── mcp.py               # MCP-specific models and schemas (200-300 LOC)
-│   ├── requests.py          # Request validation models (400-500 LOC)
-│   ├── responses.py         # Response formatting models (400-500 LOC)
-│   └── validation.py        # Shared validation utilities (300-400 LOC)
+│   ├── base.py              # Shared utilities, strict_config, ErrorResponse (~60 LOC)
+│   ├── mcp.py               # MCPTool, MCPResource, MCPManifest (~130 LOC)
+│   ├── requests.py          # All request models with validation (~950 LOC)
+│   ├── responses.py         # All response models and data structures (~365 LOC)
+│   ├── version_diff.py      # Version comparison and change tracking (~245 LOC)
+│   └── __init__.py          # Comprehensive re-exports for backward compatibility
 ├── ingestion/
 │   ├── core.py              # Core ingestion logic (400-500 LOC)
 │   ├── embeddings.py        # Embedding generation and management (300-400 LOC)
@@ -587,9 +643,12 @@ src/docsrs_mcp/
 │   ├── operations.py    (<400 LOC)
 │   └── cache.py         (<300 LOC)
 ├── models/              - Data models layer
-│   ├── requests.py      (<400 LOC)
-│   ├── responses.py     (<400 LOC)
-│   └── validators.py    (<400 LOC)
+│   ├── base.py          (~60 LOC) - Shared utilities and base models
+│   ├── mcp.py           (~130 LOC) - MCP-specific schemas
+│   ├── requests.py      (~950 LOC) - All request models with validation
+│   ├── responses.py     (~365 LOC) - All response models
+│   ├── version_diff.py  (~245 LOC) - Version comparison models
+│   └── __init__.py      - Backward compatibility re-exports
 ├── mcp_server.py        (<200 LOC) - MCP entry point
 └── app.py               (<200 LOC) - FastAPI entry point
 ```
