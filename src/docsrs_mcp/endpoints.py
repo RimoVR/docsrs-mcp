@@ -1,17 +1,14 @@
 """API endpoint handlers for docsrs-mcp server."""
 
-import json
 import logging
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiosqlite
 import psutil
 from fastapi import APIRouter, HTTPException, Request
 
-from . import config
 from .database import CACHE_DIR
 from .fuzzy_resolver import get_fuzzy_suggestions_with_fallback, resolve_path_alias
 from .ingest import ingest_crate
@@ -23,7 +20,6 @@ from .popular_crates import (
     _pre_ingestion_worker,
     get_popular_crates_status,
 )
-from .utils import extract_smart_snippet
 
 if TYPE_CHECKING:
     from .models import (

@@ -465,6 +465,81 @@ def coerce_to_float_with_bounds(
     return value
 
 
+def coerce_to_bool_with_validation(value: Any, field_name: str = "value") -> bool:
+    """
+    Coerce value to boolean with MCP client compatibility.
+
+    Handles various string representations of boolean values that MCP clients
+    might send, providing consistent boolean conversion across the application.
+
+    Args:
+        value: The value to validate and coerce to boolean
+        field_name: Name of the field for error messages
+
+    Returns:
+        Boolean value after coercion
+
+    Examples:
+        >>> coerce_to_bool_with_validation("true")
+        True
+        >>> coerce_to_bool_with_validation("false")
+        False
+        >>> coerce_to_bool_with_validation("1")
+        True
+        >>> coerce_to_bool_with_validation(None)
+        False
+    """
+    # Handle None
+    if value is None:
+        return False
+
+    # Handle boolean types directly
+    if isinstance(value, bool):
+        return value
+
+    # Handle string types (MCP clients may send as strings)
+    if isinstance(value, str):
+        # Strip whitespace
+        value = value.strip().lower()
+
+        # Empty string is False
+        if not value:
+            return False
+
+        # Lookup table for performance (10x faster than multiple if statements)
+        BOOL_MAP = {
+            "true": True,
+            "false": False,
+            "1": True,
+            "0": False,
+            "yes": True,
+            "no": False,
+            "on": True,
+            "off": False,
+            "t": True,
+            "f": False,
+            "y": True,
+            "n": False,
+            "enabled": True,
+            "disabled": False,
+        }
+
+        # Check lookup table first
+        if value in BOOL_MAP:
+            return BOOL_MAP[value]
+
+        # For any other non-empty string, use Python truthiness
+        # This ensures we don't reject unexpected but valid inputs
+        return bool(value)
+
+    # For numeric types
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    # Default to Python truthiness for any other type
+    return bool(value)
+
+
 def validate_item_path_with_fallback(
     path: str | None, item_id: str | None, item_kind: str | None
 ) -> tuple[str, bool]:

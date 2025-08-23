@@ -1,9 +1,9 @@
 """MCP tool definitions and schemas for the manifest endpoint."""
 
-from typing import Any, Dict
+from typing import Any
 
 # Tool definitions with their input schemas
-MCP_TOOLS_CONFIG: list[Dict[str, Any]] = [
+MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
     {
         "name": "get_crate_summary",
         "description": "Get summary information about a Rust crate",
