@@ -668,6 +668,78 @@
           "relatedFiles": ["src/docsrs_mcp/version_analysis.py", "src/docsrs_mcp/semantic_changes.py"],
           "codeExample": "# Defensive version comparison\ndef safe_version_compare(version_a: Optional[str], version_b: Optional[str]) -> int:\n    \"\"\"Compare versions with None safety\"\"\"\n    # Safe string operations with fallback\n    clean_a = (version_a or '').strip()\n    clean_b = (version_b or '').strip()\n    \n    # Handle empty/None cases\n    if not clean_a and not clean_b:\n        return 0\n    elif not clean_a:\n        return -1\n    elif not clean_b:\n        return 1\n    \n    # Actual comparison logic\n    return semver.compare(clean_a, clean_b)\n\n# Apply pattern throughout codebase\ndef extract_version_info(metadata: dict) -> dict:\n    return {\n        'version': (metadata.get('version') or '').strip(),\n        'yanked': bool(metadata.get('yanked')),\n        'created_at': (metadata.get('created_at') or '').strip()\n    }",
           "debuggingTechnique": "Add logging for None values encountered during version processing to identify data quality issues"
+        },
+        {
+          "error": "SQL Error: no such column: m.description",
+          "rootCause": "The modules table schema doesn't have a description column, but SQL query tried to SELECT m.description causing column not found error",
+          "solution": "Remove m.description from SELECT statement and use empty string for CrateModule description field when the column doesn't exist in the database schema",
+          "context": "app.py refactoring - SQL queries mismatched with actual database schema",
+          "lesson": "Always verify database schema matches SQL queries, especially after refactoring or schema migrations",
+          "pattern": "Query only columns that exist in the database schema, use appropriate default values for model fields",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/endpoints.py"],
+          "codeExample": "# Instead of:\nSELECT m.id, m.name, m.description FROM modules m\n# Use:\nSELECT m.id, m.name FROM modules m\n# And in Python:\nCrateModule(id=row[0], name=row[1], description=\"\")",
+          "debuggingTechnique": "Check database schema with PRAGMA table_info(table_name) to verify column existence before writing SQL queries"
+        },
+        {
+          "error": "Pydantic ValidationError: inputSchema field name mismatch",
+          "rootCause": "MCPTool model expected snake_case 'input_schema' but code used camelCase 'inputSchema' causing Pydantic validation to fail",
+          "solution": "Replace all occurrences of 'inputSchema' with 'input_schema' to match Pydantic field naming conventions",
+          "context": "app.py refactoring - MCP manifest endpoint field naming inconsistency",
+          "lesson": "Pydantic models use snake_case by default, ensure field names in code match the model definition exactly",
+          "pattern": "Always use snake_case for Pydantic model field names unless explicitly configured otherwise with Field aliases",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/endpoints.py", "src/docsrs_mcp/models.py"],
+          "codeExample": "# Instead of:\nMCPTool(name='tool', inputSchema=schema)\n# Use:\nMCPTool(name='tool', input_schema=schema)",
+          "debuggingTechnique": "Check Pydantic model definitions for exact field names and ensure code matches the model schema"
+        },
+        {
+          "error": "Pydantic ValidationError: MCPResource mimeType field doesn't exist",
+          "rootCause": "MCPResource model doesn't have a mimeType field but code tried to set it during resource instantiation",
+          "solution": "Remove mimeType field assignment from MCPResource instantiation since it's not part of the model schema",
+          "context": "app.py refactoring - MCP resources endpoint trying to set non-existent model fields",
+          "lesson": "Check Pydantic model definitions to ensure only valid fields are set during object instantiation",
+          "pattern": "Only assign fields that exist in the Pydantic model schema, remove any extra fields that cause validation errors",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/endpoints.py", "src/docsrs_mcp/models.py"],
+          "codeExample": "# Instead of:\nMCPResource(uri=uri, name=name, mimeType=\"application/json\")\n# Use:\nMCPResource(uri=uri, name=name)",
+          "debuggingTechnique": "Review Pydantic model definitions to identify valid fields before instantiating objects"
+        },
+        {
+          "error": "ImportError: list_versions function not found after refactoring",
+          "rootCause": "list_versions was imported from wrong module (endpoints.py) after refactoring moved it to endpoints_tools.py to maintain file size limits",
+          "solution": "Update import statement to import list_versions from endpoints_tools.py instead of endpoints.py",
+          "context": "app.py refactoring - function moved between modules to keep files under 500 LOC limit",
+          "lesson": "When refactoring code into multiple files, update all import statements to reference the new module locations",
+          "pattern": "Maintain a clear mapping of which functions belong in which modules during refactoring, update imports systematically",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/endpoints.py", "src/docsrs_mcp/endpoints_tools.py"],
+          "codeExample": "# Instead of:\nfrom .endpoints import list_versions\n# Use:\nfrom .endpoints_tools import list_versions",
+          "debuggingTechnique": "After refactoring, test all import statements and run the application to catch import errors early"
+        },
+        {
+          "error": "Config AttributeError: HIDE_EMPTY_MODULES doesn't exist",
+          "rootCause": "Code referenced config.HIDE_EMPTY_MODULES which doesn't exist in the configuration module, causing AttributeError",
+          "solution": "Remove the filtering logic that depends on non-existent config variable or add TODO comment for future implementation",
+          "context": "app.py refactoring - code referenced configuration that was never implemented",
+          "lesson": "Verify all configuration variables exist before referencing them in code, especially during refactoring",
+          "pattern": "Check configuration module for all referenced variables, implement missing config or remove dependent code",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/endpoints.py", "src/docsrs_mcp/config.py"],
+          "codeExample": "# Instead of:\nif not config.HIDE_EMPTY_MODULES:\n    # filter logic\n# Use:\n# TODO: Implement HIDE_EMPTY_MODULES config option\n# if not config.HIDE_EMPTY_MODULES:\n#     # filter logic",
+          "debuggingTechnique": "Review config module to verify all referenced configuration variables are properly defined"
+        },
+        {
+          "error": "CrateModule Model Field Mismatch",
+          "rootCause": "CrateModule model expected different fields (path, parent_id, depth) than what was being provided (description, has_children) from database query results",
+          "solution": "Query the correct columns from database that match CrateModule model fields exactly, ensure database schema and model are synchronized",
+          "context": "app.py refactoring - database query results didn't match Pydantic model field expectations",
+          "lesson": "Database queries must return columns that exactly match the Pydantic model fields being instantiated",
+          "pattern": "Always align database query column selection with target Pydantic model field requirements",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/endpoints.py", "src/docsrs_mcp/models.py"],
+          "codeExample": "# CrateModule model expects:\n# CrateModule(id=..., name=..., path=..., parent_id=..., depth=...)\n# Ensure query returns matching columns:\nSELECT m.id, m.name, m.path, m.parent_id, m.depth FROM modules m",
+          "debuggingTechnique": "Compare database query column names with Pydantic model field names to ensure exact alignment"
         }
       ]
     },

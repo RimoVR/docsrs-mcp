@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-22",
+    "lastUpdated": "2025-08-23",
     "compressionVersion": "1.1",
     "originalTokens": 47800,
     "legend": {
@@ -23,7 +23,11 @@
         "feat": "features",
         "vals": "validators",
         "sched": "scheduling",
-        "mgmt": "management"
+        "mgmt": "management",
+        "mod": "modularization",
+        "import": "imports",
+        "compat": "compatibility",
+        "api": "API"
       },
       "phrases": {
         "p1": "Use for optimal performance",
@@ -35,7 +39,11 @@
         "p7": "Production readiness requirement",
         "p8": "Token usage optimization",
         "p9": "Error handling best practice",
-        "p10": "Database operation optimization"
+        "p10": "Database operation optimization",
+        "p11": "Code organization best practice",
+        "p12": "Import optimization strategy",
+        "p13": "Modularization pattern",
+        "p14": "Backward compatibility requirement"
       }
     },
     "globals": {
@@ -827,6 +835,51 @@
         "error_handling": {
           "http_exceptions": {"codes": "400, 401, 403, 404, 422, 500, 503"},
           "logging": {"stderr": "p2 - STDIO transport", "validation": "Structured error logs"}
+        },
+        "modularization_patterns": {
+          "api_router": {
+            "purpose": "p13 - Prevents circular imports in FastAPI applications",
+            "pattern": "APIRouter instances for logical endpoint grouping",
+            "benefits": ["Clean separation of concerns", "Individual rate limiting", "Modular middleware configuration"]
+          },
+          "router_organization": {
+            "principle": "p11 - Group related endpoints in separate modules",
+            "file_size_limit": "<500 LOC for maintainability",
+            "separation_strategy": "Extract cross-cutting concerns into middleware"
+          },
+          "backward_compatibility": {
+            "facade_pattern": "p14 - Preserve existing imports during refactoring",
+            "re_exports": "Star imports in facade modules for comprehensive compatibility",
+            "api_preservation": "Maintain public API while refactoring internals"
+          }
+        },
+        "import_optimization": {
+          "type_checking_pattern": {
+            "purpose": "p12 - Reduce runtime import overhead",
+            "implementation": "from __future__ import annotations + TYPE_CHECKING",
+            "benefit": "Heavy dependencies loaded only for type checking"
+          },
+          "lazy_imports": {
+            "targets": ["ONNX models", "Database operations", "Heavy ML libraries"],
+            "strategy": "Import inside functions or conditional blocks",
+            "performance": "Faster startup times"
+          },
+          "public_api_control": {
+            "__all__": "Strategic use for clean public APIs",
+            "module_organization": "Control what gets exported from modules"
+          }
+        },
+        "pydantic_integration": {
+          "field_naming": {
+            "requirement": "p2 - snake_case field names (input_schema not inputSchema)",
+            "validation": "Extra fields not allowed with strict validation",
+            "schema_matching": "Model fields must match database schema exactly"
+          },
+          "fastapi_compatibility": {
+            "request_validation": "RequestValidationError for field mismatches",
+            "json_schema": "Field names must follow Python conventions",
+            "type_hints": "Proper type annotations required"
+          }
         }
       },
       "uvicorn": {"ver": "#{uvicorn}", "workers": "Production scaling"},
@@ -1467,7 +1520,12 @@
       "p2: Implement universal auto-ingestion audit to ensure 100% tool coverage",
       "p2: Replace binary existence checks with multi-level ingestion completion tracking",
       "p2: Remove CLI flag dependency from health endpoint status reporting in MCP mode",
-      "p2: Enhance Tier 2/3 fallback ingestion with complete schema standardization including generic_params and trait_bounds"
+      "p2: Enhance Tier 2/3 fallback ingestion with complete schema standardization including generic_params and trait_bounds",
+      "p13: Use APIRouter for FastAPI modularization to avoid circular import issues",
+      "p11: Maintain <500 LOC files and group related endpoints in separate router modules",
+      "p14: Apply facade pattern with re-exports for backward compatibility during refactoring",
+      "p12: Use TYPE_CHECKING pattern and lazy imports to optimize application startup time",
+      "p2: Enforce snake_case field naming in Pydantic models for FastAPI integration compatibility"
     ],
     "performance": [
       "#{sqlite_vec_query} with sqlite-vec",
@@ -1497,6 +1555,15 @@
       "Recursive CTEs for tree traversal",
       "Hash-based deduplication strategies",
       "Background task separation for resource isolation",
+      "APIRouter-based modularization to prevent circular imports",
+      "Router separation for logical endpoint grouping and independent middleware",
+      "Facade pattern with re-exports for backward compatibility during refactoring",
+      "TYPE_CHECKING imports for reduced runtime overhead with heavy dependencies",
+      "Lazy imports for ONNX models and database operations to improve startup time",
+      "Strategic __all__ usage for clean public API control in modules",
+      "Snake_case field naming in Pydantic models for FastAPI compatibility",
+      "<500 LOC file size limits for maintainable FastAPI application structure",
+      "Cross-cutting concern extraction to dedicated middleware modules",
       "ConfigDict(extra='forbid') for strict validation",
       "ValueError exceptions in field validators, not ValidationError",
       "FastAPI RequestValidationError handlers for custom error formatting",

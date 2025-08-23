@@ -95,8 +95,13 @@ graph LR
             OFFICIAL_SVR[official_server.py<br/>Official MCP SDK 1.13.1<br/>Native @mcp.tool() decorators<br/>Standard protocol support]
         end
         
-        subgraph "Web Layer"
-            APP[app.py<br/>FastAPI instance<br/>OpenAPI metadata<br/>search_examples endpoint]
+        subgraph "Modular Web Layer (Post-Refactoring)"
+            SERVER[server.py<br/>FastAPI app initialization (~90 LOC)<br/>Router registration<br/>Middleware configuration<br/>Exception handlers]
+            ENDPOINTS[endpoints.py<br/>Main API endpoints (~1115 LOC)<br/>Health check & MCP manifest<br/>Core MCP tools via APIRouter<br/>get_crate_summary, search_items, get_item_doc]
+            ENDPOINTS_TOOLS[endpoints_tools.py<br/>Additional MCP endpoints (~440 LOC)<br/>get_module_tree, ingest_cargo_file<br/>pre-ingestion & version control<br/>recover_ingestions]
+            MW_NEW[middleware.py<br/>Cross-cutting concerns (~140 LOC)<br/>Rate limiting configuration<br/>Exception handlers<br/>Startup events & embedding warmup]
+            UTILS[utils.py<br/>Shared utilities (~100 LOC)<br/>extract_smart_snippet function<br/>Text truncation helpers]
+            APP_FACADE[app.py<br/>Backward compatibility facade (~50 LOC)<br/>Re-exports app instance<br/>Maintains API compatibility]
             ROUTES[routes.py<br/>Enhanced MCP endpoints<br/>Comprehensive docstrings<br/>Fuzzy path resolution]
             MODELS[models.py<br/>Enhanced Pydantic schemas<br/>Field validators<br/>MCP compatibility<br/>Auto-generated docs<br/>Code example data models]
             TOOLDOCS[tool_documentation.py<br/>Enhanced MCP tool descriptions<br/>Tutorial metadata<br/>Token-efficient patterns]
@@ -106,7 +111,6 @@ graph LR
             PATTERN[pattern_extraction.py<br/>Usage pattern recognition<br/>Code example analysis<br/>Frequency scoring]
             CROSSREF[cross_reference_resolver.py<br/>Cross-crate dependency resolution<br/>Import path analysis<br/>Re-export tracking]
             IMPORTS[import_suggestion_engine.py<br/>Import path optimization<br/>Feature flag analysis<br/>Usage frequency ranking]
-            MW[middleware.py<br/>Rate limiting]
             EXPORT[export.py<br/>Documentation export endpoints<br/>FastAPI endpoint patterns]
             VERSIONDIFF[Version Diff Service<br/>Documentation version comparison<br/>FastAPI endpoint patterns]
         end
@@ -146,7 +150,13 @@ graph LR
         end
     end
     
-    APP --> ROUTES
+    SERVER --> ENDPOINTS
+    SERVER --> ENDPOINTS_TOOLS
+    SERVER --> MW_NEW
+    ENDPOINTS --> UTILS
+    ENDPOINTS_TOOLS --> UTILS
+    APP_FACADE --> SERVER
+    APP_FACADE --> ROUTES
     ROUTES --> MODELS
     MODELS --> VALIDATION
     APP --> MW
@@ -581,7 +591,7 @@ Both REST and MCP modes use identical background service initialization:
 sequenceDiagram
     participant CLI as cli.py
     participant Config as config.py
-    participant App as app.py/mcp_server.py
+    participant App as server.py/mcp_server.py
     participant PreIngest as PreIngestionWorker
     participant EventLoop as Background Thread
     
@@ -659,17 +669,34 @@ src/docsrs_mcp/
 3. **Elimination of Workarounds**: Remove 180+ lines of override_fastmcp_schemas() complexity
 4. **Dual-Mode Preservation**: Maintain REST and MCP modes with shared service layer
 5. **Native SDK Integration**: Use mcp.server.fastmcp.FastMCP from official SDK 1.13.1
+6. **Modular Web Layer**: Refactored monolithic app.py (~981 LOC) into focused modules:
+   - **server.py**: FastAPI initialization and configuration
+   - **endpoints.py**: Main API endpoints with APIRouter pattern
+   - **endpoints_tools.py**: Additional MCP tool endpoints
+   - **middleware.py**: Cross-cutting concerns and startup events
+   - **utils.py**: Shared utility functions
+   - **app.py**: Backward compatibility facade for existing imports
 
-### Data Flow (Post-Migration):
+### Data Flow (Post-Migration & Modular Refactoring):
 ```mermaid
 graph TD
     A[MCP Client] --> B[mcp_tools.py]
-    C[REST Client] --> D[rest_api.py]
-    B --> E[Service Layer]
-    D --> E
-    E --> F[Database Layer]
-    E --> G[Models/Validators]
-    F --> H[SQLite + Vec]
+    C[REST Client] --> D[server.py FastAPI App]
+    D --> E[APIRouter: endpoints.py]
+    D --> F[APIRouter: endpoints_tools.py]
+    E --> G[Service Layer]
+    F --> G
+    B --> G
+    G --> H[Database Layer]
+    G --> I[Models/Validators]
+    H --> J[SQLite + Vec]
+    
+    subgraph "Router-Based Architecture"
+        K[middleware.py] --> D
+        L[utils.py] --> E
+        L --> F
+        M[app.py facade] --> D
+    end
 ```
 
 ### Technology Stack Update:
@@ -677,6 +704,97 @@ graph TD
 - Schema overrides → Native SDK schema generation
 - Monolithic files → Modular service architecture
 - Manual tool registration → @mcp.tool() decorators
+
+### Modular Architecture Implementation
+
+#### APIRouter Pattern for Circular Import Avoidance
+The refactored architecture uses FastAPI's APIRouter pattern to avoid circular dependency issues:
+
+**Pattern Implementation:**
+```python
+# server.py - Clean app initialization
+from fastapi import FastAPI
+from .endpoints import router as main_router
+from .endpoints_tools import router as tools_router
+
+app = FastAPI(
+    title="docsrs-mcp",
+    description="Rust documentation MCP server",
+    version="2.0.0"
+)
+
+app.include_router(main_router)
+app.include_router(tools_router)
+```
+
+**Router Module Structure:**
+```python
+# endpoints.py - Main API endpoints using APIRouter
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/health")
+async def health_check():
+    # Implementation
+    pass
+
+# endpoints_tools.py - Additional tools using APIRouter
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.post("/mcp/tools/get_module_tree")
+async def get_module_tree_endpoint():
+    # Implementation
+    pass
+```
+
+**Benefits of APIRouter Pattern:**
+- **Modular Organization**: Each router handles a specific domain of endpoints
+- **Circular Import Prevention**: Routers are imported into server.py, not the reverse
+- **Clean Separation**: Core endpoints vs. tool endpoints are logically separated
+- **Maintainability**: Smaller, focused files (~440-1115 LOC vs. 981 LOC monolith)
+
+#### Backward Compatibility Strategy
+The `app.py` facade maintains API compatibility for existing imports:
+
+```python
+# app.py - Backward compatibility facade (~50 LOC)
+from .server import app
+from .endpoints import some_key_function
+from .middleware import another_function
+
+# Re-export for backward compatibility
+__all__ = ['app', 'some_key_function', 'another_function']
+```
+
+This approach ensures that existing code using `from docsrs_mcp.app import app` continues to work without modification while enabling the modular architecture benefits.
+
+#### Architectural Benefits of Modular Refactoring
+
+**Improved Maintainability:**
+- **Focused Responsibility**: Each module has a single, well-defined purpose
+- **Reduced Complexity**: Smaller files (~90-1115 LOC) vs. monolithic 981 LOC
+- **Easier Navigation**: Developers can quickly locate specific functionality
+
+**Enhanced Testing:**
+- **Unit Test Isolation**: Each module can be tested independently
+- **Mock-friendly**: Clean dependencies make mocking easier
+- **Focused Test Coverage**: Tests can target specific endpoint groups
+
+**Development Velocity:**
+- **Parallel Development**: Teams can work on different endpoint modules simultaneously  
+- **Reduced Merge Conflicts**: Changes to different endpoint groups rarely conflict
+- **Clear Code Ownership**: Module boundaries establish ownership patterns
+
+**Performance Benefits:**
+- **Lazy Loading**: Modules are loaded only when needed
+- **Memory Efficiency**: Unused endpoint groups don't consume memory
+- **Startup Optimization**: Middleware and utilities are separated from endpoint logic
+
+**Deployment Flexibility:**
+- **Selective Deployment**: Different modules can be deployed or disabled independently
+- **Feature Flagging**: Individual endpoint groups can be feature-flagged
+- **Resource Optimization**: High-traffic endpoints can be optimized separately
 
 ## Data Flow
 
@@ -2976,7 +3094,7 @@ for example in examples_data:  # Now safely iterates over list elements
 
 ### MCP Parameter Validation Enhancement
 
-**Location**: `app.py:151-297` in FastAPI route parameter handling
+**Location**: `endpoints.py` and `endpoints_tools.py` in FastAPI route parameter handling (formerly `app.py:151-297`)
 
 **Issue Description**:
 Initial MCP manifest schema used `anyOf` patterns but was later simplified to string-only parameters for broader client compatibility, particularly with Claude Code.
@@ -3946,7 +4064,7 @@ graph LR
 - **Configuration Control**: `DOCSRS_EMBEDDINGS_WARMUP_ENABLED` environment variable (default: true)
 - **Non-blocking Startup**: Uses `asyncio.create_task()` pattern for fire-and-forget initialization
 - **Global State Tracking**: `_embeddings_warmed` boolean prevents redundant warmup operations
-- **Dual Integration**: Activated in both REST mode (`app.py`) and MCP mode (`mcp_server.py`)
+- **Dual Integration**: Activated in both REST mode (`server.py/middleware.py`) and MCP mode (`mcp_server.py`)
 - **Performance Impact**: Eliminates 1.4s cold-start latency, achieves <100ms warm performance
 - **Warmup Strategy**: Uses 3 representative text samples covering typical documentation patterns
 - **Memory Efficiency**: Warmup samples immediately discarded after model initialization
@@ -4105,7 +4223,7 @@ graph TD
 
 The MCP parameter validation system has evolved to use a **string-first validation strategy** for maximum client compatibility:
 
-1. **JSON Schema validation** with string-only parameters in the manifest (app.py `get_mcp_manifest` function)
+1. **JSON Schema validation** with string-only parameters in the manifest (endpoints.py `get_mcp_manifest` function)
 2. **Pydantic field validators** with `mode='before'` for type coercion from strings (models.py)
 3. **Double validation architecture**: Simple JSON Schema → Pydantic coercion
 
@@ -5656,7 +5774,7 @@ graph TB
 
 The function now returns structured JSON data while maintaining backward compatibility and includes a critical bug fix for character fragmentation:
 
-**CRITICAL BUG FIX - Data Validation Pattern (ingest.py:761-769, app.py)**:
+**CRITICAL BUG FIX - Data Validation Pattern (ingest.py:761-769, endpoints.py)**:
 ```python
 # BUG FIX: Type validation prevents character fragmentation
 if isinstance(examples_data, str):
@@ -5674,7 +5792,7 @@ for example in examples_data:  # Now safely iterates over list elements
 
 **Data Validation Improvement**:
 - **Type validation added** after JSON parsing to ensure string inputs are properly wrapped in lists
-- **Consistent implementation** across both `ingest.py` and `app.py` for uniform behavior
+- **Consistent implementation** across both `ingest.py` and `endpoints.py` for uniform behavior
 - **Follows established `isinstance()` validation patterns** throughout the codebase
 - **Prevents catastrophic character fragmentation bug** where single strings were iterated character-by-character
 
@@ -5699,7 +5817,7 @@ Key features:
 - **Fallback Strategy**: Uses context clues when pygments fails
 - **Multiple Language Support**: Handles rust, bash, toml, json, yaml, and more
 - **Backward Compatibility**: Maintains support for old list format
-- **Data Validation Pattern**: `isinstance()` type checking applied uniformly across `ingest.py` and `app.py` embedding pipelines
+- **Data Validation Pattern**: `isinstance()` type checking applied uniformly across `ingest.py` and `endpoints.py` embedding pipelines
 - **Character Fragmentation Prevention**: Type validation ensures proper iteration over code blocks
 
 #### search_example_embeddings Function
@@ -5910,7 +6028,7 @@ async def warmup_embeddings() -> None:
 
 ### Integration Points
 
-**REST Mode Integration** (`app.py`):
+**REST Mode Integration** (`server.py/middleware.py`):
 - Activated during FastAPI startup event handler
 - Uses `asyncio.create_task()` for non-blocking initialization
 - Integrated with popular crates manager startup sequence
@@ -6200,7 +6318,7 @@ The IngestionScheduler provides periodic re-ingestion of popular crates to keep 
 
 ```mermaid
 sequenceDiagram
-    participant Startup as Server Startup (app.py/mcp_server.py)
+    participant Startup as Server Startup (server.py/mcp_server.py)
     participant Scheduler as IngestionScheduler
     participant Manager as PopularCratesManager
     participant DiskCache as Msgpack Disk Cache
@@ -6380,7 +6498,7 @@ classDiagram
 ### Integration Points
 
 #### Startup Integration
-- **app.py**: `asyncio.create_task(popular_manager.start_background_tasks())` during FastAPI startup
+- **server.py/middleware.py**: `asyncio.create_task(popular_manager.start_background_tasks())` during FastAPI startup event
 - **mcp_server.py**: `PreIngestionWorker` initialization in MCP server startup sequence
 - **Scheduler**: `asyncio.create_task(scheduler.start())` when `SCHEDULER_ENABLED=true`
 - **Non-blocking**: Background tasks don't delay server startup
