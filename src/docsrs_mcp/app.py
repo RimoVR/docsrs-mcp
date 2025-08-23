@@ -21,8 +21,6 @@ from .endpoints import (
     health_check,
     pre_ingestion_health,
     root,
-    search_examples,
-    search_items,
 )
 from .endpoints_tools import (
     compare_versions,
@@ -31,6 +29,8 @@ from .endpoints_tools import (
     ingest_cargo_file,
     list_versions,
     recover_ingestions,
+    search_examples,
+    search_items,
     start_pre_ingestion_tool,
 )
 from .middleware import (

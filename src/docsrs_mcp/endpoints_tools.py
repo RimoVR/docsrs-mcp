@@ -1,6 +1,7 @@
 """Additional MCP tool endpoints for docsrs-mcp server."""
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -8,11 +9,17 @@ from pathlib import Path
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Request
 
-from .database import CACHE_DIR
+from .database import (
+    CACHE_DIR,
+    get_see_also_suggestions,
+    search_embeddings,
+    search_example_embeddings,
+)
 from .database import get_module_tree as get_module_tree_from_db
 from .ingest import ingest_crate
 from .middleware import limiter
 from .models import (
+    CodeExample,
     CompareVersionsRequest,
     GetModuleTreeRequest,
     IngestCargoFileRequest,
@@ -20,11 +27,17 @@ from .models import (
     ModuleTreeNode,
     PreIngestionControlRequest,
     PreIngestionControlResponse,
+    SearchExamplesRequest,
+    SearchExamplesResponse,
+    SearchItemsRequest,
+    SearchItemsResponse,
+    SearchResult,
     StartPreIngestionRequest,
     StartPreIngestionResponse,
     VersionDiffResponse,
 )
 from .popular_crates import get_popular_crates_status, start_pre_ingestion
+from .utils import extract_smart_snippet
 
 logger = logging.getLogger(__name__)
 
@@ -471,4 +484,320 @@ async def list_versions(request: Request, crate_name: str):
 
     except Exception as e:
         logger.error(f"Error in list_versions: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post(
+    "/mcp/tools/search_items",
+    response_model=SearchItemsResponse,
+    tags=["tools"],
+    summary="Search Documentation with Smart Snippets",
+    response_description="Ranked search results",
+    operation_id="searchItems",
+)
+@limiter.limit("30/second")
+async def search_items(request: Request, params: SearchItemsRequest):
+    """
+    Search for items in a crate's documentation using semantic similarity.
+
+    Performs vector similarity search across all documentation in the specified crate.
+    Results are ranked by semantic similarity to the query using BAAI/bge-small-en-v1.5
+    embeddings. Snippets use smart extraction (200-400 chars) with intelligent boundary
+    detection for improved readability.
+
+    **Performance**: Warm searches typically complete in < 50ms.
+    **Rate limit**: 30 requests/second per IP address.
+    """
+    try:
+        # Ingest crate if not already done
+        db_path = await ingest_crate(params.crate_name, params.version)
+
+        # Generate embedding for query
+        from .ingest import get_embedding_model
+
+        model = get_embedding_model()
+        query_embedding = list(model.embed([params.query]))[0]
+
+        # Search embeddings with filters
+        results = await search_embeddings(
+            db_path,
+            query_embedding,
+            k=params.k or 5,
+            type_filter=params.item_type,
+            crate_filter=params.crate_filter,
+            module_path=params.module_path,
+            has_examples=params.has_examples,
+            min_doc_length=params.min_doc_length,
+            visibility=params.visibility,
+            deprecated=params.deprecated,
+        )
+
+        # Get see-also suggestions if we have results
+        suggestions = []
+        if results:
+            # Get the item paths from the main results to exclude from suggestions
+            original_paths = {item_path for _, item_path, _, _ in results}
+
+            # Get suggestions using the same query embedding
+            # This finds items similar to what the user is searching for
+            suggestions = await get_see_also_suggestions(
+                db_path,
+                query_embedding,
+                original_paths,
+                k=10,  # Over-fetch to allow filtering
+                similarity_threshold=0.7,
+                max_suggestions=5,
+            )
+
+        # Convert to response format, adding suggestions only to the first result
+        search_results = []
+        for i, (score, item_path, header, content) in enumerate(results):
+            result = SearchResult(
+                score=score,
+                item_path=item_path,
+                header=header,
+                snippet=extract_smart_snippet(content),
+            )
+            # Add suggestions only to the first result to avoid redundancy
+            if i == 0 and suggestions:
+                result.suggestions = suggestions
+            search_results.append(result)
+
+        return SearchItemsResponse(results=search_results)
+
+    except Exception as e:
+        logger.error(f"Error in search_items: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post(
+    "/mcp/tools/search_examples",
+    response_model=SearchExamplesResponse,
+    tags=["tools"],
+    summary="Search Code Examples with Smart Context",
+    response_description="Code examples from documentation",
+    operation_id="searchExamples",
+)
+@limiter.limit("30/second")
+async def search_examples(request: Request, params: SearchExamplesRequest):
+    """
+    Search for code examples in a crate's documentation.
+
+    Searches through extracted code examples from documentation and returns
+    matching examples with language detection and metadata. Context snippets
+    use smart extraction (200-400 chars) with intelligent boundary detection.
+
+    **Features**:
+    - Language detection for code blocks
+    - Filtering by programming language
+    - Semantic search across example content
+    - Smart context snippets with boundary detection
+    """
+    try:
+        # Ingest crate if not already done
+        db_path = await ingest_crate(params.crate_name, params.version)
+
+        # Generate embedding for query
+        from .ingest import get_embedding_model
+
+        model = get_embedding_model()
+        query_embedding = list(model.embed([params.query]))[0]
+
+        # Get crate version info from the database path
+        version = "latest"
+        if db_path:
+            db_name = Path(db_path).stem  # Gets "1.0.219" from "1.0.219.db"
+            if db_name and db_name != "latest":
+                version = db_name
+
+        # Try to use dedicated example embeddings first
+        try:
+            example_results = await search_example_embeddings(
+                db_path,
+                query_embedding,
+                k=params.k,
+                crate_filter=params.crate_name,
+                language_filter=params.language,
+            )
+
+            if example_results:
+                # Convert to response format
+                examples_list = [
+                    CodeExample(
+                        code=result["code"],
+                        language=result["language"],
+                        detected=False,  # We don't track this in new format
+                        item_path=result["item_path"],
+                        context=result["context"],
+                        score=result["score"],
+                    )
+                    for result in example_results
+                ]
+
+                return SearchExamplesResponse(
+                    crate_name=params.crate_name,
+                    version=version,
+                    query=params.query,
+                    examples=examples_list,
+                    total_count=len(examples_list),
+                )
+        except Exception as e:
+            logger.debug(f"Dedicated example search failed, falling back: {e}")
+
+        # Fallback to searching in the main embeddings table
+        import sqlite_vec
+
+        async with aiosqlite.connect(db_path) as db:
+            # Load sqlite-vec extension
+            await db.enable_load_extension(True)
+            await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
+            await db.enable_load_extension(False)
+
+            # Search for items containing examples with semantic similarity
+            query_sql = """
+                SELECT 
+                    vec_distance_L2(embedding, ?) as distance,
+                    item_path,
+                    examples,
+                    content
+                FROM embeddings
+                WHERE examples IS NOT NULL
+                ORDER BY distance
+                LIMIT ?
+            """
+
+            cursor = await db.execute(
+                query_sql,
+                (
+                    bytes(sqlite_vec.serialize_float32(query_embedding)),
+                    params.k * 3,
+                ),  # Get more results to filter
+            )
+
+            examples_list = []
+            seen_codes = set()  # For deduplication
+
+            async for row in cursor:
+                distance, item_path, examples_json, content = row
+
+                if not examples_json:
+                    continue
+
+                try:
+                    # Parse the JSON examples - handle both old list format and new dict format
+                    examples_data = json.loads(examples_json)
+
+                    # Handle string input - wrap in list to prevent character iteration
+                    if isinstance(examples_data, str):
+                        # Ensure string is not fragmented into characters
+                        examples_data = [
+                            {
+                                "code": examples_data,
+                                "language": "rust",
+                                "detected": False,
+                            }
+                        ]
+                    elif not examples_data:
+                        logger.warning(
+                            f"Empty examples_data for {params.crate_name}/{params.version} at {item_path}"
+                        )
+                        continue
+
+                    # Additional validation for unexpected data types
+                    if not isinstance(examples_data, (list, dict)):
+                        logger.warning(
+                            f"Unexpected examples_data type {type(examples_data).__name__} for {item_path}"
+                        )
+                        continue
+
+                    # Handle old format (list of strings)
+                    if isinstance(examples_data, list) and all(
+                        isinstance(e, str) for e in examples_data
+                    ):
+                        examples_data = [
+                            {"code": e, "language": "rust", "detected": False}
+                            for e in examples_data
+                        ]
+
+                    for example in examples_data:
+                        # Wrap in try-catch for resilience
+                        try:
+                            # Handle both dict format and potential string format
+                            if isinstance(example, str):
+                                example = {
+                                    "code": example,
+                                    "language": "rust",
+                                    "detected": False,
+                                }
+
+                            # Validate example structure
+                            if not isinstance(example, dict):
+                                logger.debug(
+                                    f"Skipping non-dict example: {type(example).__name__}"
+                                )
+                                continue
+
+                            # Filter by language if specified
+                            if (
+                                params.language
+                                and example.get("language") != params.language
+                            ):
+                                continue
+
+                            code = example.get("code", "")
+
+                            # Validate code content
+                            if not code or not isinstance(code, str):
+                                logger.debug(
+                                    f"Skipping example with invalid code for {item_path}"
+                                )
+                                continue
+
+                            # Simple deduplication by code hash
+                            code_hash = hash(code)
+                            if code_hash in seen_codes:
+                                continue
+                            seen_codes.add(code_hash)
+
+                            # Calculate relevance score (inverse of distance)
+                            score = 1.0 / (1.0 + distance)
+
+                            examples_list.append(
+                                CodeExample(
+                                    code=code,
+                                    language=example.get("language", "rust"),
+                                    detected=example.get("detected", False),
+                                    item_path=item_path,
+                                    context=extract_smart_snippet(content)
+                                    if content
+                                    else None,
+                                    score=score,
+                                )
+                            )
+                        except Exception as ex:
+                            logger.debug(
+                                f"Error processing example for {item_path}: {ex}"
+                            )
+                            continue
+
+                        if len(examples_list) >= params.k:
+                            break
+
+                    if len(examples_list) >= params.k:
+                        break
+
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse examples JSON for {item_path}")
+                    continue
+
+            return SearchExamplesResponse(
+                crate_name=params.crate_name,
+                version=version,
+                query=params.query,
+                examples=examples_list[: params.k],
+                total_count=len(examples_list),
+            )
+
+    except Exception as e:
+        logger.error(f"Error in search_examples: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
