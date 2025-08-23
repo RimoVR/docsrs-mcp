@@ -463,18 +463,44 @@ class PopularCratesManager:
     async def get_popular_crates_with_metadata(
         self, count: int = None
     ) -> list[PopularCrate]:
-        """Get popular crates with full metadata (for pre-ingestion priority)."""
+        """Get popular crates with full metadata (for pre-ingestion priority).
+
+        Standard library crates are prioritized first if STDLIB_PRE_CACHE is enabled.
+        """
         if count is None:
             count = config.POPULAR_CRATES_COUNT
 
         # Ensure cache is populated
         await self.get_popular_crates(count)
 
-        if self._cached_list:
-            return self._cached_list[:count]
+        crates_list = []
 
-        # Fallback
-        return self._get_fallback_crates_as_objects(count)
+        # Add stdlib crates first if enabled
+        if config.STDLIB_PRE_CACHE:
+            current_time = time.time()
+            for stdlib_crate in config.STDLIB_CRATES:
+                stdlib_obj = PopularCrate(
+                    name=stdlib_crate,
+                    downloads=float("inf"),  # Maximum priority
+                    description=f"Rust standard library: {stdlib_crate}",
+                    version="stable",
+                    last_updated=current_time,
+                )
+                crates_list.append(stdlib_obj)
+            logger.info(
+                f"Added {len(config.STDLIB_CRATES)} stdlib crates with highest priority"
+            )
+
+        # Add popular crates
+        if self._cached_list:
+            remaining_count = max(0, count - len(crates_list))
+            crates_list.extend(self._cached_list[:remaining_count])
+        else:
+            # Fallback
+            remaining_count = max(0, count - len(crates_list))
+            crates_list.extend(self._get_fallback_crates_as_objects(remaining_count))
+
+        return crates_list
 
 
 class PreIngestionWorker:
@@ -575,7 +601,11 @@ class PreIngestionWorker:
                     continue
 
                 # Priority based on downloads (negative for max-heap)
-                priority = -crate.downloads if crate.downloads > 0 else 0
+                # Handle infinity for stdlib crates
+                if crate.downloads == float("inf"):
+                    priority = float("-inf")  # Highest priority (most negative)
+                else:
+                    priority = -crate.downloads if crate.downloads > 0 else 0
                 await self.queue.put((priority, crate.name))
 
             # Start worker tasks with adaptive concurrency

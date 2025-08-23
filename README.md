@@ -24,6 +24,8 @@ uvx docsrs-mcp
 - 🏃 **Zero cold-start** - Embeddings warmup eliminates first-query latency
 - 📦 **Popular crate pre-ingestion** - Instant responses for commonly used crates
 - 🔗 **Re-export discovery** - Automatic path alias resolution from rustdoc JSON
+- 🦀 **Rust stdlib support** - Priority ingestion and detection of standard library crates
+- 🔍 **Dependency filtering** - Intelligent filtering of dependency documentation
 
 ## Installation
 
@@ -201,6 +203,15 @@ LOG_LEVEL=INFO              # Logging level
 PRE_INGEST_ENABLED=true     # Enable popular crate pre-loading
 PRE_INGEST_COUNT=100        # Number of crates to pre-load
 EMBEDDINGS_WARMUP=true      # Eliminate cold-start latency
+
+# Rust stdlib support
+STDLIB_PRE_CACHE=true       # Prioritize stdlib crates in pre-ingestion
+RUSTUP_HOME=~/.rustup       # Override rustup location (auto-detected by default)
+
+# Dependency filtering
+DEPENDENCY_FILTER=true      # Enable dependency filtering in results
+BLOOM_FILTER_CAPACITY=100000  # Expected number of dependency items
+BLOOM_FILTER_ERROR_RATE=0.001 # Acceptable false positive rate
 
 # Advanced
 RANKING_DIVERSITY_WEIGHT=0.1    # MMR diversification strength

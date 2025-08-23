@@ -209,12 +209,26 @@ class CrateService:
         search_results = []
         for i, (score, item_path, header, content) in enumerate(results):
             from ..app import extract_smart_snippet
+            from .. import config
+
+            # Check if item is from stdlib or dependency
+            is_stdlib = crate_name in config.STDLIB_CRATES
+            is_dependency = False
+
+            # Check if this is a dependency item (if dependency filter is enabled)
+            if config.DEPENDENCY_FILTER_ENABLED:
+                from ..dependency_filter import DependencyFilter
+
+                dep_filter = DependencyFilter()
+                is_dependency = dep_filter.is_dependency(crate_name, item_path)
 
             result = SearchResult(
                 score=score,
                 item_path=item_path,
                 header=header,
                 snippet=extract_smart_snippet(content),
+                is_stdlib=is_stdlib,
+                is_dependency=is_dependency,
             )
             # Add suggestions only to the first result to avoid redundancy
             if i == 0 and suggestions:
@@ -259,9 +273,24 @@ class CrateService:
             row = await cursor.fetchone()
 
             if row:
+                from .. import config
+
+                # Check if item is from stdlib or dependency
+                is_stdlib = crate_name in config.STDLIB_CRATES
+                is_dependency = False
+
+                # Check if this is a dependency item (if dependency filter is enabled)
+                if config.DEPENDENCY_FILTER_ENABLED:
+                    from ..dependency_filter import DependencyFilter
+
+                    dep_filter = DependencyFilter()
+                    is_dependency = dep_filter.is_dependency(crate_name, row[0])
+
                 return {
                     "item_path": row[0],
-                    "content": row[1],
+                    "documentation": row[1],
+                    "is_stdlib": is_stdlib,
+                    "is_dependency": is_dependency,
                 }
 
             # If not found, try fuzzy suggestions
