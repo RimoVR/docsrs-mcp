@@ -3950,6 +3950,56 @@
         "Processes entire codebase in milliseconds",
         "No need for separate tools or complex configuration"
       ]
+    },
+    "refactoring": {
+      "description": "Patterns and lessons learned for effective code refactoring",
+      "fileBloat": {
+        "problem": "Refactored files becoming larger than originals, violating refactoring goals",
+        "commonCauses": [
+          "Inline configuration data (JSON schemas, tool definitions) not recognized as bloat",
+          "Hardcoded data structures mixed with business logic",
+          "Configuration constants defined within functions instead of external files"
+        ],
+        "identificationTechnique": {
+          "description": "Find largest functions in a file to identify bloat sources",
+          "bashCommand": "grep -n \"^async def\\\\|^def\" file.py | while read line; do\n  num=$(echo $line | cut -d: -f1)\n  func=$(echo $line | cut -d: -f2-)\n  echo \"$func: line $num\"\ndone",
+          "manualCalculation": "echo \"function_name: $((end_line-start_line)) lines\"",
+          "example": "get_mcp_manifest: 273 lines (602-329) - mostly configuration data"
+        },
+        "solutionPattern": {
+          "step1": "Analyze WHY file is large, not just THAT it's large",
+          "step2": "Identify configuration data vs business logic",
+          "step3": "Extract configuration to separate data files (e.g., mcp_tools_config.py)",
+          "step4": "Verify refactoring actually improves maintainability",
+          "example": "Reduced get_mcp_manifest from 273 to ~30 lines by extracting tool definitions"
+        },
+        "lessonsLearned": [
+          "Configuration data (JSON schemas, tool definitions) should be extracted to separate files",
+          "Line count includes both logic AND data - both affect maintainability", 
+          "Always check if refactoring result actually improves the situation",
+          "When refactoring, verify the end result meets the original goals"
+        ],
+        "debuggingTechniques": [
+          "Use grep to find function boundaries and calculate sizes",
+          "Identify hardcoded data structures within functions",
+          "Compare before/after line counts to validate improvements",
+          "Look for repeated patterns that can be extracted to configuration"
+        ],
+        "bestPractices": [
+          "Separate configuration data from business logic",
+          "Use external data files for schemas and tool definitions",
+          "Balance file splitting to avoid over-modularization",
+          "Always validate that refactoring achieves intended goals"
+        ],
+        "dateDocumented": "2025-08-23",
+        "relatedFiles": ["endpoints.py", "mcp_tools_config.py", "endpoints_tools.py"],
+        "realWorldExample": {
+          "problem": "endpoints.py became 1070 lines after refactoring from 981-line app.py",
+          "analysis": "get_mcp_manifest function contained 273 lines of hardcoded tool definitions",
+          "solution": "Created mcp_tools_config.py for data, reduced function to ~30 lines",
+          "outcome": "Achieved original refactoring goal of smaller, more maintainable files"
+        }
+      }
     }
   },
   "securityConsiderations": {

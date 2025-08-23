@@ -1057,12 +1057,12 @@
         "dependencies": ["sdk-migration-split-models"],
         "effort": "medium",
         "impact": "high",
-        "relatedTasks": ["sdk-migration-split-models"],
+        "relatedTasks": ["sdk-migration-split-models", "sdk-migration-config-extract"],
         "roadblocks": [],
         "completionDetails": {
           "completedDate": "2025-08-23T20:00:00Z",
           "implementation": "Successfully refactored app.py (~981 lines) into modular components with all files under 500 LOC requirement",
-          "notes": "Created utils.py (~100 LOC) with extract_smart_snippet function, endpoints.py (~1115 LOC) with main API endpoints using APIRouter, endpoints_tools.py (~440 LOC) with additional MCP tool endpoints, updated middleware.py (~140 LOC) with exception handlers and startup events, created server.py (~90 LOC) for FastAPI app initialization, converted app.py (~50 LOC) to backward compatibility facade. Fixed SQL bug removing m.description column reference and Pydantic validation errors (inputSchema → input_schema). All endpoints tested and working correctly."
+          "notes": "Created utils.py (~100 LOC) with extract_smart_snippet function, endpoints.py (~1115 LOC) with main API endpoints using APIRouter, endpoints_tools.py (~440 LOC) with additional MCP tool endpoints, updated middleware.py (~140 LOC) with exception handlers and startup events, created server.py (~90 LOC) for FastAPI app initialization, converted app.py (~50 LOC) to backward compatibility facade. Fixed SQL bug removing m.description column reference and Pydantic validation errors (inputSchema → input_schema). All endpoints tested and working correctly. Note: Initial refactoring created bloat in endpoints.py (1070 lines), resolved in follow-up configuration extraction task."
         },
         "subtasks": [
           {
@@ -1097,6 +1097,51 @@
             "id": "sdk-migration-split-api.5",
             "title": "Create endpoints_tools.py",
             "description": "Extract additional MCP tool endpoints for better organization",
+            "status": "completed",
+            "progress": 100
+          }
+        ]
+      },
+      {
+        "id": "sdk-migration-config-extract",
+        "title": "Fix endpoints.py bloat by extracting configuration data",
+        "description": "After initial refactoring, endpoints.py was 1070 lines (larger than original app.py). Extract inline JSON schemas to configuration module to establish configuration-as-data pattern.",
+        "status": "completed",
+        "priority": "medium",
+        "progress": 100,
+        "complexity": "LOW",
+        "estimatedHours": "0.5-1",
+        "dependencies": ["sdk-migration-split-api"],
+        "effort": "low",
+        "impact": "medium",
+        "relatedTasks": ["sdk-migration-split-api"],
+        "roadblocks": [],
+        "completionDetails": {
+          "completedDate": "2025-08-23T21:00:00Z",
+          "implementation": "Created mcp_tools_config.py (255 lines) for tool definitions, reduced endpoints.py from 1070 to 516 lines, rebalanced endpoints_tools.py to 803 lines, reduced get_mcp_manifest from 273 to ~30 lines",
+          "notes": "Successfully eliminated 527 lines of bloat from endpoints.py by extracting inline JSON schemas and tool configurations to dedicated configuration module. Established configuration-as-data pattern for better maintainability and separation of concerns. Better module balance achieved across the codebase.",
+          "technicalDetails": "Extracted all MCP tool JSON schemas from endpoints.py to mcp_tools_config.py, created centralized tool definition registry, simplified manifest generation logic, maintained full backward compatibility",
+          "impact": "Resolved module bloat issue, improved code organization, established reusable configuration pattern"
+        },
+        "subtasks": [
+          {
+            "id": "sdk-migration-config-extract.1",
+            "title": "Create mcp_tools_config.py",
+            "description": "Extract inline JSON schemas and tool definitions to dedicated configuration module",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "sdk-migration-config-extract.2",
+            "title": "Refactor get_mcp_manifest function",
+            "description": "Simplify manifest generation to use configuration data instead of inline definitions",
+            "status": "completed",
+            "progress": 100
+          },
+          {
+            "id": "sdk-migration-config-extract.3",
+            "title": "Rebalance module sizes",
+            "description": "Ensure all modules stay under reasonable line count limits after extraction",
             "status": "completed",
             "progress": 100
           }

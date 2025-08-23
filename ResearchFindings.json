@@ -1407,6 +1407,79 @@
         "solution": "Enhanced AST parsing and schema standardization across all ingestion tiers"
       }
     },
+    "configuration_as_data": {
+      "overview": "Critical architectural pattern discovered during FastAPI refactoring - separating configuration data from business logic",
+      "research_date": "2025-08-23",
+      "context": "Investigation during massive code size reduction in MCP server refactoring",
+      "key_findings": {
+        "inline_configuration_bloat": {
+          "description": "Large inline JSON/dictionary structures cause massive code bloat in function implementations",
+          "evidence": "get_mcp_manifest function was 273 lines primarily due to hardcoded MCP tool definitions",
+          "impact": "Single function contained 9 tools × 30 lines = 270 lines of configuration data",
+          "solution": "Extract configuration to dedicated modules"
+        },
+        "file_size_analysis_insights": {
+          "original_problem": "app.py was 981 lines, refactored endpoints.py grew to 1070 lines",
+          "root_cause": "Inline configuration bloat, not logic complexity - tool schemas dominated line count",
+          "post_extraction": "endpoints.py reduced to 516 lines after configuration extraction",
+          "lesson": "Large data structures count toward line limits just as much as complex logic"
+        },
+        "fastapi_schema_management": {
+          "tool_definition_size": "MCP tool definitions average 20-50 lines each",
+          "calculation": "9 tools × 30 lines = 270 lines of pure configuration",
+          "recommendation": "Keep schemas in separate configuration modules",
+          "implementation": "Use list/dict comprehensions to convert config to Pydantic models"
+        }
+      },
+      "module_balancing_best_practices": {
+        "consider_both_logic_and_data": "When splitting modules, consider both business logic complexity AND data volume",
+        "configuration_counts_toward_limits": "Large data structures like JSON schemas count toward maintainability line limits",
+        "related_function_grouping": "Move logically related functions together (search_items + search_examples pattern)",
+        "file_size_targets": "<500 LOC files for maintainability across modules",
+        "balance_principle": "Balance file sizes across modules rather than creating single large configuration dumps"
+      },
+      "configuration_extraction_patterns": {
+        "dedicated_config_modules": {
+          "purpose": "Separate configuration data from business logic implementation",
+          "structure": "config/mcp_tools.py, config/api_schemas.py, config/validation_patterns.py",
+          "benefits": ["Cleaner function implementations", "Easier configuration management", "Better separation of concerns"]
+        },
+        "data_to_model_conversion": {
+          "pattern": "Use list/dict comprehensions to convert configuration to Pydantic models at runtime",
+          "example": "tools = [MCPTool(**tool_config) for tool_config in MCP_TOOL_DEFINITIONS]",
+          "performance": "Configuration parsed once at startup, not per request"
+        },
+        "configuration_organization": {
+          "by_domain": "Group related configurations (search tools, ingestion tools, etc.)",
+          "versioning": "Version configuration files for backward compatibility",
+          "validation": "Apply Pydantic validation to configuration data itself"
+        }
+      },
+      "refactoring_outcomes": {
+        "before_extraction": {
+          "get_mcp_manifest": "273 lines (mostly configuration)",
+          "endpoints_py": "1070 lines (bloated with inline data)",
+          "maintainability": "Poor - business logic buried in configuration"
+        },
+        "after_extraction": {
+          "get_mcp_manifest": "~30 lines (pure logic)",
+          "endpoints_py": "516 lines (clean business logic)",
+          "maintainability": "Excellent - clear separation of concerns"
+        },
+        "line_reduction": "554 lines (52% reduction) through configuration extraction alone"
+      },
+      "applicability": {
+        "json_api_definitions": "OpenAPI schemas, tool definitions, validation rules",
+        "database_schemas": "Table definitions, migration scripts, seed data",
+        "ui_configurations": "Form definitions, menu structures, component configurations", 
+        "integration_mappings": "API endpoint mappings, data transformation rules, external service configurations"
+      },
+      "implementation_guidelines": {
+        "detection_criteria": ["Functions >100 lines with >50% static data", "Repeated dictionary/list structures", "Hard-to-maintain schema definitions"],
+        "extraction_process": ["Identify configuration blocks", "Extract to dedicated modules", "Create runtime conversion logic", "Validate extracted configuration"],
+        "maintenance_benefits": ["Easier schema updates", "Better version control", "Cleaner code reviews", "Improved testability"]
+      }
+    },
     "defensive_programming": {
       "null_safety": {
         "principle": "Always check for None before string operations",
@@ -1521,6 +1594,8 @@
       "p2: Replace binary existence checks with multi-level ingestion completion tracking",
       "p2: Remove CLI flag dependency from health endpoint status reporting in MCP mode",
       "p2: Enhance Tier 2/3 fallback ingestion with complete schema standardization including generic_params and trait_bounds",
+      "p11: Extract large configuration data (JSON schemas, tool definitions) to dedicated modules to prevent code bloat",
+      "p11: Consider both logic AND data volume when splitting modules - configuration counts toward line limits",
       "p13: Use APIRouter for FastAPI modularization to avoid circular import issues",
       "p11: Maintain <500 LOC files and group related endpoints in separate router modules",
       "p14: Apply facade pattern with re-exports for backward compatibility during refactoring",
@@ -1555,6 +1630,8 @@
       "Recursive CTEs for tree traversal",
       "Hash-based deduplication strategies",
       "Background task separation for resource isolation",
+      "Configuration extraction to dedicated modules for large data structures (MCP tool definitions, API schemas)",
+      "List/dict comprehensions for runtime configuration-to-Pydantic model conversion",
       "APIRouter-based modularization to prevent circular imports",
       "Router separation for logical endpoint grouping and independent middleware",
       "Facade pattern with re-exports for backward compatibility during refactoring",
@@ -1649,10 +1726,10 @@
     }
   },
   "stats": {
-    "original_tokens": 52400,
-    "compressed_tokens_estimate": 18900,
-    "compression_ratio": "63.9%",
-    "token_reduction": 33500,
+    "original_tokens": 54200,
+    "compressed_tokens_estimate": 19800,
+    "compression_ratio": "63.5%",
+    "token_reduction": 34400,
     "preservation": {
       "technical_details": "100%",
       "library_versions": "100%", 

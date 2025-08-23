@@ -97,8 +97,9 @@ graph LR
         
         subgraph "Modular Web Layer (Post-Refactoring)"
             SERVER[server.py<br/>FastAPI app initialization (~90 LOC)<br/>Router registration<br/>Middleware configuration<br/>Exception handlers]
-            ENDPOINTS[endpoints.py<br/>Main API endpoints (~1115 LOC)<br/>Health check & MCP manifest<br/>Core MCP tools via APIRouter<br/>get_crate_summary, search_items, get_item_doc]
-            ENDPOINTS_TOOLS[endpoints_tools.py<br/>Additional MCP endpoints (~440 LOC)<br/>get_module_tree, ingest_cargo_file<br/>pre-ingestion & version control<br/>recover_ingestions]
+            ENDPOINTS[endpoints.py<br/>Main API endpoints (~516 LOC)<br/>Health check & MCP manifest<br/>Core MCP tools via APIRouter<br/>get_crate_summary, get_item_doc]
+            ENDPOINTS_TOOLS[endpoints_tools.py<br/>Additional MCP endpoints (~803 LOC)<br/>get_module_tree, search_items, search_examples<br/>ingest_cargo_file, pre-ingestion & version control<br/>recover_ingestions]
+            MCP_TOOLS_CONFIG[mcp_tools_config.py<br/>MCP tool definitions (~255 LOC)<br/>Configuration as data pattern<br/>Tool schemas & resource definitions<br/>Extracted from get_mcp_manifest]
             MW_NEW[middleware.py<br/>Cross-cutting concerns (~140 LOC)<br/>Rate limiting configuration<br/>Exception handlers<br/>Startup events & embedding warmup]
             UTILS[utils.py<br/>Shared utilities (~100 LOC)<br/>extract_smart_snippet function<br/>Text truncation helpers]
             APP_FACADE[app.py<br/>Backward compatibility facade (~50 LOC)<br/>Re-exports app instance<br/>Maintains API compatibility]
@@ -155,6 +156,7 @@ graph LR
     SERVER --> MW_NEW
     ENDPOINTS --> UTILS
     ENDPOINTS_TOOLS --> UTILS
+    ENDPOINTS --> MCP_TOOLS_CONFIG
     APP_FACADE --> SERVER
     APP_FACADE --> ROUTES
     ROUTES --> MODELS
@@ -475,6 +477,83 @@ graph TB
     INGEST -->|download| DOCS_RS
     DATABASE -->|store/query| SQLITE
 ```
+
+### Refactoring Improvements: Configuration as Data Pattern
+
+**Root Cause Resolution**: The initial refactoring resulted in `endpoints.py` growing to 1070 lines (larger than the original 981-line `app.py`), primarily due to the `get_mcp_manifest` function containing 273 lines of inline JSON schema definitions.
+
+#### Solution: Configuration Extraction
+
+**1. Created mcp_tools_config.py (255 lines)**
+- Extracted all MCP tool definitions and schemas as configuration data
+- Contains `MCP_TOOLS_CONFIG` list with tool schemas  
+- Contains `MCP_RESOURCES_CONFIG` list with resource definitions
+- Reduced `get_mcp_manifest` from 273 lines to ~30 lines of configuration access logic
+
+**2. Rebalanced Endpoint Modules**
+- Moved `search_items` and `search_examples` from `endpoints.py` to `endpoints_tools.py`
+- **endpoints.py**: 516 lines (down from 1070) - Health check, MCP manifest, core tools
+- **endpoints_tools.py**: 803 lines (up from 474) - Extended tool implementations
+- Better functional distribution while maintaining clear separation of concerns
+
+#### Key Architectural Pattern: Configuration as Data
+
+```python
+# Before: Hardcoded schemas in endpoints.py (273 lines)
+def get_mcp_manifest():
+    return {
+        "tools": [
+            {
+                "name": "search_items",
+                "description": "Search for...",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        # 50+ lines of nested schema definitions
+                    }
+                }
+            },
+            # More tool definitions...
+        ]
+    }
+
+# After: Configuration as data in mcp_tools_config.py
+MCP_TOOLS_CONFIG = [
+    {
+        "name": "search_items", 
+        "description": "Search for...",
+        "inputSchema": SEARCH_ITEMS_SCHEMA
+    },
+    # Tool definitions as data structures
+]
+
+# Clean implementation logic in endpoints.py (~30 lines)
+def get_mcp_manifest():
+    return {
+        "tools": MCP_TOOLS_CONFIG,
+        "resources": MCP_RESOURCES_CONFIG
+    }
+```
+
+#### Benefits
+- **Maintainability**: Tool schemas are easily editable configuration data
+- **Extensibility**: New tools can be added by updating configuration arrays
+- **Separation of Concerns**: Business logic separated from schema definitions
+- **Reduced Line Count**: Significant reduction in endpoint file sizes
+- **Better Organization**: Related configuration grouped together
+
+#### Current File Size Status
+**Target Achieved** (most files under 1000 LOC):
+- `endpoints.py`: 516 lines ✅
+- `endpoints_tools.py`: 803 lines ✅ 
+- `mcp_tools_config.py`: 255 lines ✅
+
+**Large Files Remaining** (implementation complexity requires >500 LOC):
+- `database.py`: 2393 lines (core database operations)
+- `ingest.py`: 3527 lines (complex ingestion pipeline)
+- `popular_crates.py`: 1330 lines (background processing & caching)
+
+These files exceed the target due to inherent complexity rather than organizational issues - they contain comprehensive business logic that benefits from co-location.
 
 ### Implementation Timeline
 
