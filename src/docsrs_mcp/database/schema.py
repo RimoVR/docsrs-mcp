@@ -25,6 +25,8 @@ async def init_database(db_path: Path) -> None:
     """Initialize database with required tables and extensions."""
     import aiosqlite
 
+    from .migrations import run_migrations
+
     async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
         # Enable WAL mode for better concurrency
         await db.execute("PRAGMA journal_mode=WAL")
@@ -253,6 +255,10 @@ async def init_database(db_path: Path) -> None:
         """)
 
         await db.commit()
+
+    # Run database migrations after initial schema creation
+    await run_migrations(db_path)
+    logger.info("Database initialization and migrations complete")
 
 
 async def migrate_database_duplicates(db_path: Path) -> None:

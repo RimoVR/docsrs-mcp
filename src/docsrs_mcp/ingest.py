@@ -5,59 +5,6 @@ All functionality has been preserved through re-exports for backward compatibili
 """
 
 # Re-export all public functions and classes from the ingestion package
-from .ingestion import (
-    # Main orchestration
-    IngestionOrchestrator,
-    get_crate_lock,
-    ingest_crate,
-    recover_incomplete_ingestion,
-    # Embedding management
-    cleanup_embedding_model,
-    get_embedding_model,
-    get_warmup_status,
-    warmup_embedding_model,
-    # Version resolution
-    construct_stdlib_url,
-    decompress_content,
-    download_rustdoc,
-    fetch_crate_info,
-    fetch_current_stable_version,
-    is_stdlib_crate,
-    resolve_stdlib_version,
-    resolve_version,
-    resolve_version_from_crate_info,
-    # Rustdoc parsing
-    build_module_hierarchy,
-    parse_rustdoc_items,
-    parse_rustdoc_items_streaming,
-    resolve_parent_id,
-    # Signature extraction
-    extract_deprecated,
-    extract_generics,
-    extract_signature,
-    extract_type_name,
-    extract_visibility,
-    extract_where_clause,
-    extract_where_predicate,
-    format_signature,
-    # Code examples
-    batch_examples,
-    calculate_example_hash,
-    extract_code_examples,
-    format_example_for_embedding,
-    generate_example_embeddings,
-    normalize_code,
-    # Storage management
-    clean_existing_embeddings,
-    generate_embeddings,
-    generate_embeddings_streaming,
-    store_embeddings,
-    store_embeddings_streaming,
-    # Cache management
-    calculate_cache_size,
-    evict_cache_if_needed,
-)
-
 # Re-export constants for backward compatibility
 from .ingestion import (
     CACHE_DIR,
@@ -67,6 +14,56 @@ from .ingestion import (
     MAX_CACHE_SIZE,
     RUST_VERSION_MANIFEST_URL,
     STDLIB_CRATES,
+    # Main orchestration
+    IngestionOrchestrator,
+    # Code examples
+    batch_examples,
+    # Rustdoc parsing
+    build_module_hierarchy,
+    # Cache management
+    calculate_cache_size,
+    calculate_example_hash,
+    # Storage management
+    clean_existing_embeddings,
+    # Embedding management
+    cleanup_embedding_model,
+    # Version resolution
+    construct_stdlib_url,
+    decompress_content,
+    download_rustdoc,
+    evict_cache_if_needed,
+    extract_code_examples,
+    # Signature extraction
+    extract_deprecated,
+    extract_generics,
+    extract_signature,
+    extract_type_name,
+    extract_visibility,
+    extract_where_clause,
+    extract_where_predicate,
+    fetch_crate_info,
+    fetch_current_stable_version,
+    format_example_for_embedding,
+    format_signature,
+    generate_embeddings,
+    generate_embeddings_streaming,
+    generate_example_embeddings,
+    get_crate_lock,
+    get_embedding_model,
+    get_warmup_status,
+    ingest_crate,
+    is_stdlib_crate,
+    normalize_code,
+    parse_rustdoc_items,
+    parse_rustdoc_items_streaming,
+    recover_incomplete_ingestion,
+    resolve_parent_id,
+    resolve_stdlib_version,
+    resolve_version,
+    resolve_version_from_crate_info,
+    store_embeddings,
+    store_embeddings_streaming,
+    warmup_embedding_model,
 )
 
 # This allows the module to be used exactly as before

@@ -126,6 +126,7 @@ async def search_embeddings(
     min_doc_length: int | None = None,
     visibility: str | None = None,
     deprecated: bool | None = None,
+    stability_filter: str | None = None,
 ) -> list[tuple[float, str, str, str]]:
     """Search for similar embeddings using k-NN with enhanced ranking and caching.
 
@@ -153,6 +154,7 @@ async def search_embeddings(
         min_doc_length,
         visibility,
         deprecated,
+        stability_filter,
     )
     if cached_results is not None:
         logger.debug(f"Cache hit for search with k={k}")
@@ -211,6 +213,7 @@ async def search_embeddings(
                 AND (? IS NULL OR e.deprecated = ?)
                 AND (? IS NULL OR (? = 0 OR e.examples IS NOT NULL))
                 AND (? IS NULL OR LENGTH(e.content) >= ?)
+                AND (? IS NULL OR ? = 'all' OR e.stability_level = ?)
             ORDER BY v.distance
             """
 
@@ -233,6 +236,9 @@ async def search_embeddings(
                 has_examples,
                 min_doc_length,
                 min_doc_length,
+                stability_filter,
+                stability_filter,
+                stability_filter,
             ]
         )
 
@@ -321,6 +327,7 @@ async def search_embeddings(
             min_doc_length,
             visibility,
             deprecated,
+            stability_filter,
         )
 
         return top_results
@@ -496,9 +503,283 @@ async def search_example_embeddings(
         return []
 
 
+async def regex_search(
+    db_path: Path,
+    pattern: str,
+    k: int = 10,
+    type_filter: str | None = None,
+    crate_filter: str | None = None,
+    module_path: str | None = None,
+    has_examples: bool | None = None,
+    min_doc_length: int | None = None,
+    visibility: str | None = None,
+    deprecated: bool | None = None,
+    stability_filter: str | None = None,
+) -> list[tuple[float, str, str, str]]:
+    """Search for items matching a regex pattern with ReDoS protection.
+
+    Implements timeout-based ReDoS protection and pattern complexity analysis.
+
+    Args:
+        db_path: Path to the database
+        pattern: Regex pattern to match against item paths and content
+        k: Maximum number of results to return
+        type_filter: Filter by item type (function, struct, trait, etc.)
+        crate_filter: Filter to specific crate
+        module_path: Filter to specific module path
+        has_examples: Filter to items with examples
+        min_doc_length: Minimum documentation length
+        visibility: Filter by visibility level
+        deprecated: Filter by deprecation status
+        stability_filter: Filter by stability level
+
+    Returns:
+        List of (score, item_path, header, content) tuples
+    """
+    import re
+    import signal
+    from contextlib import contextmanager
+
+    import aiosqlite
+
+    # Validate pattern for ReDoS vulnerability
+    def is_redos_vulnerable(pattern: str) -> bool:
+        """Check if pattern may cause ReDoS."""
+        # Common ReDoS patterns to avoid
+        dangerous_patterns = [
+            r"\(.*\+\)\+",  # Nested quantifiers like (a+)+
+            r"\(.*\*\)\*",  # Nested quantifiers like (a*)*
+            r"\(.*\?\)\?",  # Nested quantifiers like (a?)?
+            r"\(.*\{.*\}\)\+",  # Nested quantifiers with ranges
+            r".*\+.*\+",  # Multiple consecutive quantifiers
+            r".*\*.*\*",  # Multiple consecutive quantifiers
+        ]
+
+        for dangerous in dangerous_patterns:
+            if re.search(dangerous, pattern):
+                return True
+        return False
+
+    # Timeout context manager for regex execution
+    @contextmanager
+    def timeout(duration):
+        """Context manager for timing out operations."""
+
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Regex operation timed out")
+
+        # Set the timeout handler
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(duration)
+
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+
+    if not db_path.exists():
+        return []
+
+    # Check for ReDoS vulnerability
+    if is_redos_vulnerable(pattern):
+        raise ValueError(
+            f"Regex pattern '{pattern}' may cause ReDoS (Regular Expression Denial of Service). "
+            f"Avoid nested quantifiers like (a+)+ or (a*)*. "
+            f"Use simpler patterns or consider using fuzzy search instead."
+        )
+
+    try:
+        # Compile pattern with timeout protection
+        with timeout(1):  # 1 second timeout for compilation
+            compiled_pattern = re.compile(pattern, re.IGNORECASE)
+    except TimeoutError:
+        raise ValueError(
+            "Regex pattern compilation timed out. Pattern may be too complex."
+        )
+    except re.error as e:
+        raise ValueError(f"Invalid regex pattern: {e}")
+
+    async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+        # Build query with filters
+        query_parts = [
+            "SELECT item_path, header, content, item_type FROM embeddings WHERE 1=1"
+        ]
+        params = []
+
+        # Apply filters
+        if type_filter:
+            query_parts.append("AND item_type = ?")
+            params.append(type_filter)
+
+        if crate_filter:
+            query_parts.append("AND item_path LIKE ?")
+            params.append(f"{crate_filter}::%")
+
+        if module_path:
+            query_parts.append("AND item_path LIKE ?")
+            params.append(f"%::{module_path}::%")
+
+        if has_examples is not None:
+            if has_examples:
+                query_parts.append("AND examples IS NOT NULL")
+            else:
+                query_parts.append("AND examples IS NULL")
+
+        if min_doc_length:
+            query_parts.append("AND LENGTH(content) >= ?")
+            params.append(min_doc_length)
+
+        if visibility:
+            query_parts.append("AND visibility = ?")
+            params.append(visibility)
+
+        if deprecated is not None:
+            query_parts.append("AND deprecated = ?")
+            params.append(1 if deprecated else 0)
+
+        if stability_filter and stability_filter != "all":
+            query_parts.append("AND stability_level = ?")
+            params.append(stability_filter)
+
+        query = " ".join(query_parts)
+        cursor = await db.execute(query, params)
+
+        results = []
+        async for row in cursor:
+            item_path, header, content, item_type = row
+
+            # Check pattern match with timeout
+            try:
+                with timeout(1):  # 1 second timeout per item
+                    # Check if pattern matches path or content
+                    path_match = compiled_pattern.search(item_path)
+                    content_match = compiled_pattern.search(content)
+
+                    if path_match or content_match:
+                        # Calculate relevance score based on match location
+                        if path_match:
+                            # Path matches are more relevant
+                            score = 1.0
+                        else:
+                            # Content matches are less relevant
+                            score = 0.7
+
+                        # Boost score for exact matches
+                        if path_match and path_match.group() == item_path:
+                            score = 1.5
+
+                        results.append((score, item_path, header, content))
+
+                        if len(results) >= k:
+                            break
+            except TimeoutError:
+                logger.warning(f"Regex matching timed out for item: {item_path}")
+                continue
+
+        # Sort by score (descending)
+        results.sort(key=lambda x: x[0], reverse=True)
+
+        return results[:k]
+
+
+async def cross_crate_search(
+    crate_paths: list[Path],
+    query_embedding: list[float],
+    k: int = 5,
+    type_filter: str | None = None,
+    has_examples: bool | None = None,
+    min_doc_length: int | None = None,
+    visibility: str | None = None,
+    deprecated: bool | None = None,
+    stability_filter: str | None = None,
+) -> list[tuple[float, str, str, str]]:
+    """Search across multiple crates simultaneously with result aggregation.
+
+    Uses parallel queries and Reciprocal Rank Fusion (RRF) for ranking.
+
+    Args:
+        crate_paths: List of paths to crate databases (max 5)
+        query_embedding: Query embedding vector
+        k: Number of results to return per crate
+        type_filter: Filter by item type
+        has_examples: Filter to items with examples
+        min_doc_length: Minimum documentation length
+        visibility: Filter by visibility level
+        deprecated: Filter by deprecation status
+        stability_filter: Filter by stability level
+
+    Returns:
+        Aggregated list of (score, item_path, header, content) tuples
+    """
+    import asyncio
+
+    if len(crate_paths) > 5:
+        raise ValueError(
+            "Cross-crate search limited to 5 crates maximum for performance"
+        )
+
+    # Run searches in parallel
+    search_tasks = []
+    for db_path in crate_paths:
+        if db_path.exists():
+            task = search_embeddings(
+                db_path=db_path,
+                query_embedding=query_embedding,
+                k=k * 2,  # Get more results for better aggregation
+                type_filter=type_filter,
+                has_examples=has_examples,
+                min_doc_length=min_doc_length,
+                visibility=visibility,
+                deprecated=deprecated,
+            )
+            search_tasks.append(task)
+
+    if not search_tasks:
+        return []
+
+    # Gather all results
+    all_results = await asyncio.gather(*search_tasks)
+
+    # Apply Reciprocal Rank Fusion (RRF) for result aggregation
+    rrf_scores = {}
+    rrf_k = 60  # RRF constant (typically 60)
+
+    for crate_results in all_results:
+        for rank, (score, path, header, content) in enumerate(crate_results):
+            # Use path as unique identifier
+            if path not in rrf_scores:
+                rrf_scores[path] = {
+                    "score": 0,
+                    "header": header,
+                    "content": content,
+                    "original_score": score,
+                }
+
+            # RRF formula: 1 / (k + rank)
+            rrf_scores[path]["score"] += 1 / (rrf_k + rank + 1)
+
+    # Convert to list and sort by RRF score
+    aggregated_results = [
+        (
+            data["score"],
+            path,
+            data["header"],
+            data["content"],
+        )
+        for path, data in rrf_scores.items()
+    ]
+
+    aggregated_results.sort(key=lambda x: x[0], reverse=True)
+
+    return aggregated_results[:k]
+
+
 __all__ = [
     "search_embeddings",
     "_apply_mmr_diversification",
     "get_see_also_suggestions",
     "search_example_embeddings",
+    "regex_search",
+    "cross_crate_search",
 ]

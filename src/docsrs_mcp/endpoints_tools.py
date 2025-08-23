@@ -509,28 +509,100 @@ async def search_items(request: Request, params: SearchItemsRequest):
     **Rate limit**: 30 requests/second per IP address.
     """
     try:
-        # Ingest crate if not already done
-        db_path = await ingest_crate(params.crate_name, params.version)
-
-        # Generate embedding for query
-        from .ingest import get_embedding_model
-
-        model = get_embedding_model()
-        query_embedding = list(model.embed([params.query]))[0]
-
-        # Search embeddings with filters
-        results = await search_embeddings(
-            db_path,
-            query_embedding,
-            k=params.k or 5,
-            type_filter=params.item_type,
-            crate_filter=params.crate_filter,
-            module_path=params.module_path,
-            has_examples=params.has_examples,
-            min_doc_length=params.min_doc_length,
-            visibility=params.visibility,
-            deprecated=params.deprecated,
-        )
+        # Handle cross-crate search
+        if params.crates and len(params.crates) > 1:
+            # Cross-crate search
+            from .database.search import cross_crate_search
+            from .ingest import get_embedding_model
+            
+            crate_paths = []
+            for crate in params.crates[:5]:  # Limit to 5 crates
+                db_path = await ingest_crate(crate, "latest")
+                crate_paths.append(db_path)
+            
+            model = get_embedding_model()
+            query_embedding = list(model.embed([params.query]))[0]
+            
+            results = await cross_crate_search(
+                crate_paths,
+                query_embedding,
+                k=params.k or 5,
+                type_filter=params.item_type,
+                has_examples=params.has_examples,
+                min_doc_length=params.min_doc_length,
+                visibility=params.visibility,
+                deprecated=params.deprecated,
+                stability_filter=params.stability_filter,
+            )
+        else:
+            # Single crate search
+            db_path = await ingest_crate(params.crate_name, params.version)
+            
+            # Route based on search mode
+            if params.search_mode == "regex" and params.regex_pattern:
+                # Regex search
+                from .database.search import regex_search
+                
+                results = await regex_search(
+                    db_path,
+                    params.regex_pattern,
+                    k=params.k or 10,
+                    type_filter=params.item_type,
+                    crate_filter=params.crate_filter,
+                    module_path=params.module_path,
+                    has_examples=params.has_examples,
+                    min_doc_length=params.min_doc_length,
+                    visibility=params.visibility,
+                    deprecated=params.deprecated,
+                    stability_filter=params.stability_filter,
+                )
+            elif params.search_mode == "fuzzy":
+                # Enhanced fuzzy search
+                from .fuzzy_resolver import get_fuzzy_suggestions
+                
+                # Get fuzzy suggestions first
+                fuzzy_paths = await get_fuzzy_suggestions(
+                    params.query,
+                    db_path,
+                    params.crate_name,
+                    params.version or "latest",
+                    limit=params.k or 5,
+                    threshold=params.fuzzy_tolerance or 0.7,
+                )
+                
+                # Then retrieve full docs for those paths
+                results = []
+                if fuzzy_paths:
+                    import aiosqlite
+                    async with aiosqlite.connect(db_path) as db:
+                        for path in fuzzy_paths:
+                            cursor = await db.execute(
+                                "SELECT item_path, header, content FROM embeddings WHERE item_path = ?",
+                                (path,)
+                            )
+                            row = await cursor.fetchone()
+                            if row:
+                                results.append((1.0, row[0], row[1], row[2]))
+            else:
+                # Default vector search (including hybrid mode)
+                from .ingest import get_embedding_model
+                
+                model = get_embedding_model()
+                query_embedding = list(model.embed([params.query]))[0]
+                
+                results = await search_embeddings(
+                    db_path,
+                    query_embedding,
+                    k=params.k or 5,
+                    type_filter=params.item_type,
+                    crate_filter=params.crate_filter,
+                    module_path=params.module_path,
+                    has_examples=params.has_examples,
+                    min_doc_length=params.min_doc_length,
+                    visibility=params.visibility,
+                    deprecated=params.deprecated,
+                    stability_filter=params.stability_filter,
+                )
 
         # Get see-also suggestions if we have results
         suggestions = []

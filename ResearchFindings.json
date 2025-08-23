@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-23T16:30:00",
+    "lastUpdated": "2025-08-23T18:45:00",
     "compressionVersion": "1.2",
     "originalTokens": 51200,
     "legend": {
@@ -83,7 +83,11 @@
         "fuzzy_normalization_overhead": "<1ms per query",
         "bloom_filter_lookup": "O(1) with 0.1% false positive rate",
         "priority_queue_insert": "O(log n) with negative values for max-heap",
-        "memory_mapped_hash": "mmh3 provides fast hashing for bloom filters"
+        "memory_mapped_hash": "mmh3 provides fast hashing for bloom filters",
+        "rapidfuzz_simd_memory": "10x memory reduction with SIMD optimizations",
+        "prefix_scope_reduction": "60-80% search space reduction",
+        "rrf_fusion_overhead": "Minimal latency for Reciprocal Rank Fusion",
+        "partial_index_improvement": "Optimized filtering with partial database indices"
       },
       "memory_limits": {
         "embeddings_10k": "1GB",
@@ -1469,6 +1473,100 @@
         "rate_limiting": "Subject to standard API rate limits"
       }
     },
+    "phase_3_optimization_research": {
+      "research_date": "2025-08-23",
+      "context": "Performance optimization discoveries for Phase 3 implementation",
+      "overview": "Comprehensive research on search optimization, security, and performance enhancements",
+      "rapidfuzz_optimization": {
+        "version": "3.13.0",
+        "simd_optimizations": {
+          "desc": "SIMD optimizations provide significant memory reduction",
+          "memory_improvement": "10x memory reduction vs previous versions",
+          "performance_impact": "Maintains 4000%+ speedup over FuzzyWuzzy baseline",
+          "implementation": "Built-in SIMD acceleration automatically leveraged"
+        },
+        "prefix_matching": {
+          "desc": "Prefix matching reduces fuzzy search scope significantly",
+          "scope_reduction": "60-80% reduction in search space",
+          "strategy": "Filter candidates by prefix before fuzzy scoring",
+          "performance_gain": "Substantial latency reduction for large datasets"
+        },
+        "score_cutoff": {
+          "desc": "Score cutoff enables early termination in RapidFuzz",
+          "benefit": "Prevents processing of low-relevance candidates",
+          "implementation": "Set minimum score threshold for result inclusion",
+          "optimization": "Early termination improves worst-case performance"
+        }
+      },
+      "regex_security": {
+        "google_re2": {
+          "desc": "Linear-time regex guarantees but Python built-in sufficient",
+          "assessment": "google-re2 offers guaranteed linear time complexity",
+          "decision": "Python's built-in re with timeout is sufficient for current needs",
+          "rationale": "Timeout-based protection adequate without additional dependency"
+        },
+        "redos_protection": {
+          "desc": "ReDoS patterns must be detected before compilation",
+          "strategy": "Pattern complexity analysis prevents nested quantifiers",
+          "implementation": "Analyze regex patterns for dangerous constructs",
+          "prevention": "Block or rewrite patterns with exponential complexity"
+        },
+        "signal_timeouts": {
+          "desc": "Signal-based timeouts effective for regex protection",
+          "mechanism": "Unix signal interruption for long-running regex operations",
+          "reliability": "Prevents regex DoS attacks through timeout enforcement",
+          "fallback": "Graceful handling of interrupted operations"
+        }
+      },
+      "sqlite_vec_advances": {
+        "version": "0.1.0",
+        "stability": "Stable release enables hybrid search capabilities",
+        "hybrid_search": {
+          "desc": "Combination of vector similarity and traditional text search",
+          "capability": "Cross-crate result aggregation using RRF algorithm",
+          "performance": "Maintains <100ms query time for 1M+ vectors",
+          "scalability": "SIMD acceleration supports large-scale deployments"
+        },
+        "rrf_algorithm": {
+          "desc": "Reciprocal Rank Fusion effective for cross-crate result aggregation",
+          "formula": "RRF score = sum(1/(k + rank_i)) for all ranking lists",
+          "benefit": "Combines multiple ranking signals without score normalization",
+          "implementation": "Aggregates vector and metadata rankings effectively"
+        },
+        "database_optimization": {
+          "partial_indices": {
+            "desc": "Partial database indices optimize stability filtering",
+            "strategy": "Create indices on filtered subsets of data",
+            "performance": "Improves WHERE clause performance on large datasets",
+            "maintenance": "Reduced index maintenance overhead"
+          },
+          "connection_pooling": {
+            "desc": "Connection pooling improves cross-crate search performance",
+            "benefit": "Reduces connection overhead for multiple queries",
+            "implementation": "Persistent connection pool for database operations",
+            "scaling": "Better resource utilization under load"
+          }
+        }
+      },
+      "performance_benchmarks": {
+        "prefix_optimization": "60-80% search scope reduction",
+        "memory_efficiency": "10x improvement with RapidFuzz 3.13.0 SIMD",
+        "early_termination": "Score cutoff enables performance guarantees",
+        "hybrid_search_latency": "<100ms with sqlite-vec 0.1.0 stable",
+        "rrf_overhead": "Minimal additional latency for result fusion",
+        "connection_pooling": "Improved throughput for concurrent operations"
+      },
+      "security_findings": {
+        "regex_timeout": "Signal-based protection sufficient for ReDoS prevention",
+        "pattern_analysis": "Pre-compilation validation prevents dangerous constructs",
+        "linear_guarantees": "Built-in timeout mechanism adequate vs google-re2 dependency"
+      },
+      "implementation_priorities": {
+        "high": ["RapidFuzz 3.13.0 SIMD optimization", "Prefix matching optimization", "Score cutoff implementation"],
+        "medium": ["RRF algorithm for hybrid search", "Partial database indices", "Connection pooling"],
+        "low": ["Advanced ReDoS protection", "google-re2 evaluation for future needs"]
+      }
+    },
     "critical_bugs": {
       "crate_name_unwind_bug": {
         "desc": "getCrateSummary tool missing from tools_to_fix dictionary causes parameter processing failures",
@@ -1800,6 +1898,14 @@
       "MMR λ=0.6 provides optimal relevance-diversity balance",
       "Dynamic fetch_k adjustment based on filter selectivity improves performance",
       "Fuzzy normalization handles British/American spellings with <1ms overhead",
+      "RapidFuzz 3.13.0 SIMD provides 10x memory reduction over previous versions",
+      "Prefix matching reduces fuzzy search scope by 60-80% for better performance",
+      "Score cutoff enables early termination in RapidFuzz for optimal worst-case performance",
+      "Reciprocal Rank Fusion (RRF) effective for cross-crate result aggregation with minimal overhead",
+      "Partial database indices optimize stability filtering on large datasets",
+      "Connection pooling improves cross-crate search performance under concurrent load",
+      "sqlite-vec 0.1.0 stable release enables hybrid search with <100ms query times",
+      "Signal-based timeouts provide adequate ReDoS protection without google-re2 dependency",
       "List comprehensions with None filtering provide 40% speedup over filter() function",
       "Generator expressions avoid intermediate storage for memory-efficient None handling",
       "ijson with yajl2_c backend delivers 1329K objects/sec streaming JSON parsing performance",
@@ -1902,7 +2008,10 @@
       "Prometheus monitoring with <5% overhead",
       "Error masking in production environments",
       "Schema allowlisting for security",
-      "Volume mounts for cache persistence"
+      "Volume mounts for cache persistence",
+      "Signal-based regex timeouts for ReDoS protection",
+      "Pattern complexity analysis prevents dangerous regex constructs",
+      "Built-in timeout mechanism adequate vs google-re2 dependency overhead"
     ],
     "monitoring": {
       "prometheus": {
@@ -1920,10 +2029,10 @@
     }
   },
   "stats": {
-    "original_tokens": 54200,
-    "compressed_tokens_estimate": 19800,
-    "compression_ratio": "63.5%",
-    "token_reduction": 34400,
+    "original_tokens": 56800,
+    "compressed_tokens_estimate": 21500,
+    "compression_ratio": "62.1%",
+    "token_reduction": 35300,
     "preservation": {
       "technical_details": "100%",
       "library_versions": "100%", 

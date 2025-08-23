@@ -21,7 +21,12 @@ import aiosqlite
 from rapidfuzz import fuzz
 from rapidfuzz.utils import default_process
 
-from .config import FUZZY_WEIGHTS
+from .config import (
+    FUZZY_MAX_EXPANSIONS,
+    FUZZY_PREFIX_LENGTH,
+    FUZZY_SCORE_CUTOFF,
+    FUZZY_WEIGHTS,
+)
 from .database import get_discovered_reexports
 
 logger = logging.getLogger(__name__)
@@ -159,7 +164,9 @@ def normalize_query(query: str) -> str:
     return default_process(normalized) if normalized else ""
 
 
-def composite_path_score(query: str, candidate: str) -> float:
+def composite_path_score(
+    query: str, candidate: str, score_cutoff: float | None = None
+) -> float:
     """
     Calculate a composite similarity score using multiple RapidFuzz algorithms.
 
@@ -169,18 +176,45 @@ def composite_path_score(query: str, candidate: str) -> float:
     Args:
         query: The user's search query
         candidate: The candidate path to compare against
+        score_cutoff: Optional minimum score threshold for early termination
 
     Returns:
         Normalized similarity score between 0.0 and 1.0
     """
+    # Use global score cutoff if not provided
+    if score_cutoff is None:
+        score_cutoff = FUZZY_SCORE_CUTOFF / 100.0  # Convert from percentage
+
     # Normalize both strings for consistent comparison
     query_norm = normalize_query(query)
     candidate_norm = normalize_query(candidate)
 
-    # Calculate individual scores (RapidFuzz returns 0-100)
-    token_set = fuzz.token_set_ratio(query_norm, candidate_norm) / 100.0
-    token_sort = fuzz.token_sort_ratio(query_norm, candidate_norm) / 100.0
-    partial = fuzz.partial_ratio(query_norm, candidate_norm) / 100.0
+    # Early termination: Check prefix match for performance
+    if FUZZY_PREFIX_LENGTH > 0 and len(query_norm) >= FUZZY_PREFIX_LENGTH:
+        prefix = query_norm[:FUZZY_PREFIX_LENGTH].lower()
+        if not candidate_norm.lower().startswith(prefix):
+            # Quick rejection if prefix doesn't match (unless it's a substring)
+            if prefix not in candidate_norm.lower():
+                return 0.0
+
+    # Calculate individual scores with score_cutoff for optimization
+    # RapidFuzz can use score_cutoff internally for early termination
+    cutoff_percentage = score_cutoff * 100 if score_cutoff else 0
+
+    token_set = (
+        fuzz.token_set_ratio(query_norm, candidate_norm, score_cutoff=cutoff_percentage)
+        / 100.0
+    )
+    token_sort = (
+        fuzz.token_sort_ratio(
+            query_norm, candidate_norm, score_cutoff=cutoff_percentage
+        )
+        / 100.0
+    )
+    partial = (
+        fuzz.partial_ratio(query_norm, candidate_norm, score_cutoff=cutoff_percentage)
+        / 100.0
+    )
 
     # Weighted combination using configurable weights
     score = (
@@ -419,9 +453,24 @@ async def get_fuzzy_suggestions(
 
     # Calculate scores for all candidates with enhanced scoring
     scored_candidates = []
-    for candidate in cached_paths:
-        # Calculate composite similarity score
-        base_score = composite_path_score(normalized_query, candidate)
+
+    # Limit the number of candidates to evaluate for performance
+    # Use FUZZY_MAX_EXPANSIONS to cap the number of paths checked
+    paths_to_check = (
+        cached_paths[: FUZZY_MAX_EXPANSIONS * 10]
+        if len(cached_paths) > FUZZY_MAX_EXPANSIONS * 10
+        else cached_paths
+    )
+
+    for candidate in paths_to_check:
+        # Calculate composite similarity score with cutoff for early termination
+        base_score = composite_path_score(
+            normalized_query, candidate, score_cutoff=effective_threshold
+        )
+
+        # Skip if base score is 0 (early termination)
+        if base_score == 0:
+            continue
 
         # Add path component bonus for better Rust path matching
         path_bonus = calculate_path_bonus(query, candidate)
@@ -432,6 +481,10 @@ async def get_fuzzy_suggestions(
         # Only keep candidates above threshold
         if final_score >= effective_threshold:
             scored_candidates.append((candidate, final_score))
+
+            # Stop early if we have enough high-quality matches
+            if len(scored_candidates) >= FUZZY_MAX_EXPANSIONS:
+                break
 
     # Sort by score (descending) and take top matches
     scored_candidates.sort(key=lambda x: x[1], reverse=True)

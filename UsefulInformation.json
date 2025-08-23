@@ -881,6 +881,42 @@
           "codeExample": "# Verify changes exist when git status is unclear:\ngrep -n \"specific_change_text\" src/docsrs_mcp/models/responses.py\n\n# Ensure all changes are staged:\ngit add -A\n\n# Check what's actually staged:\ngit diff --cached --name-only",
           "verification": "Use grep to confirm changes exist in files regardless of git status output",
           "debuggingTechnique": "Cross-reference git status with grep searches to verify all changes are tracked"
+        },
+        {
+          "error": "RapidFuzz PyInstaller compatibility issues with stdout/stderr",
+          "rootCause": "RapidFuzz library outputs compatibility warnings to stdout/stderr that interfere with PyInstaller packaging and MCP communication protocols",
+          "solution": "Redirect stdout/stderr to devnull when importing RapidFuzz to suppress compatibility warnings during PyInstaller packaging",
+          "context": "PyInstaller packaging fails or produces noisy output due to RapidFuzz stdout/stderr writes during import",
+          "lesson": "Third-party libraries that write to stdout/stderr during import require explicit redirection for clean packaging",
+          "pattern": "Use context managers to temporarily redirect stdout/stderr during problematic imports",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/search.py"],
+          "codeExample": "import os\nimport sys\n\n# Suppress RapidFuzz stdout/stderr for PyInstaller compatibility\nwith open(os.devnull, 'w') as devnull:\n    old_stdout, old_stderr = sys.stdout, sys.stderr\n    sys.stdout, sys.stderr = devnull, devnull\n    try:\n        from rapidfuzz import fuzz, process\n    finally:\n        sys.stdout, sys.stderr = old_stdout, old_stderr",
+          "debuggingTechnique": "Test PyInstaller packaging with verbose output to identify stdout/stderr interference"
+        },
+        {
+          "error": "Signal.SIGALRM not available on Windows systems",
+          "rootCause": "signal.SIGALRM is Unix-specific and not available on Windows, causing AttributeError during timeout handling implementation",
+          "solution": "Use platform detection to conditionally implement SIGALRM-based timeouts only on Unix systems, with alternative timeout strategies for Windows",
+          "context": "Cross-platform timeout handling fails when using Unix-specific signal mechanisms on Windows systems",
+          "lesson": "Signal-based timeout mechanisms require platform-specific implementation for cross-platform compatibility",
+          "pattern": "Use platform.system() or hasattr(signal, 'SIGALRM') checks before implementing signal-based timeouts",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/search.py"],
+          "codeExample": "import signal\nimport platform\n\n# Platform-specific timeout handling\nif platform.system() != 'Windows' and hasattr(signal, 'SIGALRM'):\n    # Unix-specific SIGALRM implementation\n    signal.signal(signal.SIGALRM, timeout_handler)\n    signal.alarm(timeout_seconds)\nelse:\n    # Windows-compatible alternative (threading.Timer, etc.)\n    pass",
+          "debuggingTechnique": "Test timeout mechanisms across different platforms to ensure cross-platform compatibility"
+        },
+        {
+          "error": "SQLite ALTER TABLE limitations require migration workarounds",
+          "rootCause": "SQLite does not support all ALTER TABLE operations (like adding constraints or modifying column types), requiring manual table recreation for complex schema changes",
+          "solution": "Use migration pattern with temporary table creation, data copying, and table replacement for complex schema modifications not supported by SQLite ALTER TABLE",
+          "context": "Database schema migrations fail when attempting unsupported ALTER TABLE operations in SQLite",
+          "lesson": "SQLite schema migrations require understanding of ALTER TABLE limitations and workaround patterns for complex changes",
+          "pattern": "Implement upgrade/downgrade migration functions that handle SQLite limitations with table recreation patterns",
+          "dateEncountered": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/database.py"],
+          "codeExample": "# SQLite migration pattern for complex schema changes\nasync def upgrade_table_with_new_constraints():\n    # Create new table with desired schema\n    await db.execute(\"CREATE TABLE items_new (id TEXT PRIMARY KEY, ...)\")\n    # Copy data from old table\n    await db.execute(\"INSERT INTO items_new SELECT * FROM items\")\n    # Drop old table and rename new table\n    await db.execute(\"DROP TABLE items\")\n    await db.execute(\"ALTER TABLE items_new RENAME TO items\")",
+          "debuggingTechnique": "Test migrations with sample data to ensure data preservation during schema changes"
         }
       ]
     },
@@ -1329,6 +1365,25 @@
           "dateIdentified": "2025-08-09",
           "relatedFiles": ["src/docsrs_mcp/app.py", "src/docsrs_mcp/ingest.py"],
           "measuredImpact": "Memory leak of ~1.5GB over 3 crate ingestions"
+        },
+        {
+          "issue": "Fuzzy search performance optimization with tuned weights and parameters",
+          "impact": "Improved search accuracy and performance through optimized RapidFuzz configuration",
+          "solution": "Fine-tune FUZZY_WEIGHTS parameters: token_set_ratio=0.5, token_sort_ratio=0.2, partial_ratio=0.3 for optimal relevance scoring",
+          "optimizationStrategy": "Configure FUZZY_PREFIX_LENGTH=2 for optimal prefix matching, FUZZY_SCORE_CUTOFF=60.0 for early termination, FUZZY_MAX_EXPANSIONS=50 to limit search scope",
+          "dateIdentified": "2025-08-23",
+          "relatedFiles": ["src/docsrs_mcp/search.py"],
+          "measuredImpact": "Significant improvement in search result relevance and query performance through parameter optimization",
+          "configuration": {
+            "FUZZY_WEIGHTS": {
+              "token_set_ratio": 0.5,
+              "token_sort_ratio": 0.2,
+              "partial_ratio": 0.3
+            },
+            "FUZZY_PREFIX_LENGTH": 2,
+            "FUZZY_SCORE_CUTOFF": 60.0,
+            "FUZZY_MAX_EXPANSIONS": 50
+          }
         },
         {
           "error": "Model loading delay on first request",
@@ -3421,6 +3476,50 @@
             "patterns": "Word boundary regex: -ise→-ize, -our→-or, -re→-er",
             "casePreservation": "Maintains original case patterns (SERIALISE → SERIALIZE)",
             "performance": "<1ms overhead per query with precompiled regex"
+          }
+        },
+        {
+          "pattern": "Database migrations with upgrade/downgrade support",
+          "implementation": "Implement migration functions that handle SQLite limitations with table recreation patterns",
+          "description": "Database migrations use upgrade/downgrade pattern to handle SQLite ALTER TABLE limitations and ensure data integrity",
+          "details": {
+            "upgrade_pattern": "Create new table, copy data, drop old table, rename new table",
+            "downgrade_pattern": "Reverse operation with data preservation",
+            "validation": "Test migrations with sample data to ensure data preservation",
+            "limitations": "SQLite does not support all ALTER TABLE operations like adding constraints or modifying column types"
+          }
+        },
+        {
+          "pattern": "Search modes with parameter-based routing",
+          "implementation": "Use parameter-based routing to handle different search modes within unified endpoints",
+          "description": "Search modes use parameter-based routing to support multiple search strategies through single API endpoints",
+          "details": {
+            "routing_strategy": "Examine request parameters to determine search mode (semantic, fuzzy, hybrid)",
+            "parameter_validation": "Validate mode-specific parameters using Pydantic models with field validators",
+            "fallback_handling": "Implement graceful fallbacks between search modes when one fails",
+            "caching_strategy": "Update caching keys to include search mode parameters for proper cache isolation"
+          }
+        },
+        {
+          "pattern": "MCP compatibility with string coercion validators",
+          "implementation": "Use comprehensive string-to-type coercion validators for all MCP parameters",
+          "description": "MCP compatibility requires string coercion validators to handle diverse client input formats while maintaining type safety",
+          "details": {
+            "validator_pattern": "Always use mode='before' field validators for MCP parameters",
+            "type_coercion": "Implement coercion functions for int, bool, float types with comprehensive string handling",
+            "error_handling": "Provide clear error messages with valid input examples",
+            "performance_optimization": "Use lookup tables for boolean string mapping to achieve 10x performance improvement"
+          }
+        },
+        {
+          "pattern": "Caching updated for new search parameters",
+          "implementation": "Update cache key generation to include new search parameters for proper cache isolation",
+          "description": "Caching updated for new search parameters to ensure different search modes don't interfere with each other",
+          "details": {
+            "cache_key_strategy": "Include all search parameters (mode, fuzzy settings, diversity settings) in cache keys",
+            "invalidation_pattern": "Implement selective cache invalidation based on parameter changes",
+            "namespace_isolation": "Use parameter-based namespaces to prevent cross-contamination between search modes",
+            "performance_monitoring": "Track cache hit rates across different search parameter combinations"
           }
         }
       ],

@@ -99,7 +99,7 @@ graph LR
         subgraph "Modular Web Layer (Post-Refactoring)"
             SERVER[server.py<br/>FastAPI app initialization (~90 LOC)<br/>Router registration<br/>Middleware configuration<br/>Exception handlers]
             ENDPOINTS[endpoints.py<br/>Main API endpoints (~516 LOC)<br/>Health check & MCP manifest<br/>Core MCP tools via APIRouter<br/>get_crate_summary, get_item_doc]
-            ENDPOINTS_TOOLS[endpoints_tools.py<br/>Additional MCP endpoints (~803 LOC)<br/>get_module_tree, search_items, search_examples<br/>ingest_cargo_file, pre-ingestion & version control<br/>recover_ingestions]
+            ENDPOINTS_TOOLS[endpoints_tools.py<br/>Additional MCP endpoints (~803 LOC)<br/>Search mode routing with parameter validation<br/>get_module_tree, search_items, search_examples<br/>ingest_cargo_file, pre-ingestion & version control<br/>recover_ingestions]
             MCP_TOOLS_CONFIG[mcp_tools_config.py<br/>MCP tool definitions (~255 LOC)<br/>Configuration as data pattern<br/>Tool schemas & resource definitions<br/>Extracted from get_mcp_manifest]
             MW_NEW[middleware.py<br/>Cross-cutting concerns (~140 LOC)<br/>Rate limiting configuration<br/>Exception handlers<br/>Startup events & embedding warmup]
             UTILS[utils.py<br/>Shared utilities (~100 LOC)<br/>extract_smart_snippet function<br/>Text truncation helpers]
@@ -949,8 +949,10 @@ sequenceDiagram
     participant DB as SQLite+VSS
     
     Client->>API: POST /mcp/tools/search_items
-    Note over API: MCP Parameter Validation<br/>String-only parameters<br/>Handle string "5" → int 5
+    Note over API: MCP Parameter Validation<br/>String-only parameters<br/>New: search_mode, fuzzy_tolerance, regex_pattern, stability_filter, crates<br/>Handle string "5" → int 5
     API->>API: Query preprocessing (Unicode normalization NFKC)
+    API->>API: Search mode routing in endpoints_tools.py
+    Note over API: Route to: vector_search, regex_search, or cross_crate_search
     API->>DB: Check if crate@version exists
     
     alt Cache Miss
@@ -1301,6 +1303,52 @@ graph TB
 - Table definitions for `crate_metadata`, `modules`, `embeddings`, `reexports`, etc.
 - Index creation for performance optimization
 - Foreign key relationship enforcement
+
+### Database Migration System
+
+The system includes a comprehensive database migration framework for managing schema updates and version compatibility across different deployments.
+
+**Migration Runner Architecture**:
+```mermaid
+graph TB
+    subgraph "Migration System Components"
+        MIGRATION_RUNNER[Migration Runner<br/>database/migrations/runner.py<br/>Version-aware execution]
+        MIGRATION_TABLE[schema_migrations table<br/>Version tracking<br/>Execution history]
+        
+        subgraph "Migration Files"
+            MIGRATION_001[001_add_search_modes.sql<br/>Add search mode support]
+            MIGRATION_002[002_stability_indexes.sql<br/>Add stability filtering indexes]
+            MIGRATION_003[003_regex_performance.sql<br/>Optimize regex search tables]
+        end
+        
+        VERSION_CHECK[Version Check<br/>Compare current vs target schema<br/>Determine required migrations]
+        EXECUTION_ENGINE[Execution Engine<br/>Transaction-safe migration<br/>Rollback on failure]
+    end
+    
+    MIGRATION_RUNNER --> VERSION_CHECK
+    VERSION_CHECK --> MIGRATION_TABLE
+    MIGRATION_TABLE --> EXECUTION_ENGINE
+    EXECUTION_ENGINE --> MIGRATION_001
+    EXECUTION_ENGINE --> MIGRATION_002
+    EXECUTION_ENGINE --> MIGRATION_003
+```
+
+**Migration Features**:
+- **Version Tracking**: `schema_migrations` table tracks applied migrations with timestamps
+- **Transaction Safety**: Each migration runs in a separate transaction with rollback support
+- **Idempotent Operations**: Migrations can be safely re-run without side effects
+- **Dependency Management**: Migration dependencies ensure correct execution order
+- **Performance Impact**: <5s typical migration time for schema updates
+
+**Migration File Structure**:
+```
+database/migrations/
+├── runner.py              # Migration execution engine
+├── 001_add_search_modes.sql    # Search mode parameter support
+├── 002_stability_indexes.sql   # Stability filtering indexes
+├── 003_regex_performance.sql   # Regex search optimizations
+└── schema_migrations.sql       # Migration tracking table
+```
 
 **storage.py** (155 LOC):
 - `store_crate_metadata` for crate information persistence
@@ -1709,12 +1757,20 @@ def migrate_database_schema(db_path: str):
 
 ### Performance Characteristics
 
-- **Resolution Time**: <1ms for cached aliases, <5ms for database queries
-- **Cross-Reference Lookup**: <10ms for bidirectional queries on large crates
-- **Storage Overhead**: ~50-200KB per average crate for re-export metadata, ~100-500KB for cross-references
+| Search Mode | Performance Target | Optimization | Notes |
+|-------------|-------------------|--------------|-------|
+| **Vector Search** | <300ms P95 | Prefix optimization, fuzzy tolerance | Enhanced with fuzzy normalization |
+| **Regex Search** | <500ms with timeout | ReDoS protection, pattern validation | 2-second timeout guard |
+| **Cross-Crate Search** | <1s for 5 crates | Parallel execution, RRF aggregation | Semaphore(5) concurrency |
+| **Re-export Resolution** | <1ms cached, <5ms DB | LRU cache, indexed lookups | Sub-linear performance scaling |
+| **Cross-Reference Lookup** | <10ms bidirectional | Specialized indexes | Large crate support |
+| **Stability Filtering** | <50ms additional | Native SQL filtering | Indexed stability fields |
+
+**Storage and Memory**:
+- **Re-export Storage**: ~50-200KB per crate for metadata, ~100-500KB for cross-references  
 - **Memory Usage**: ~1-5MB in-memory cache for active aliases and cross-references
-- **Ingestion Impact**: <10% overhead added to rustdoc parsing pipeline (includes cross-ref extraction)
-- **Query Optimization**: Indexed lookups support sub-linear performance scaling
+- **Ingestion Impact**: <10% overhead for cross-reference extraction
+- **Migration Performance**: <5s typical schema update time
 
 ## Version Diff System Architecture
 
@@ -4206,6 +4262,105 @@ graph TD
 - **Consistency**: Uniform snippet lengths improve scan-ability of search results
 - **Efficiency**: No preprocessing required - generated on-demand during search
 - **Backward Compatibility**: Transparent enhancement to existing search functionality
+
+## Enhanced Search Modes Architecture
+
+### Multi-Mode Search System
+
+The system now supports multiple search modes with intelligent routing and parameter validation, extending beyond traditional vector search to support regex patterns, cross-crate queries, and stability filtering.
+
+```mermaid
+graph TB
+    subgraph "Search Mode Router"
+        INPUT[Client Search Request<br/>query, search_mode, parameters]
+        VALIDATOR[Parameter Validation<br/>Mode-specific validation<br/>Safety checks]
+        ROUTER[Mode Router<br/>Route to appropriate handler]
+        
+        VECTOR_MODE[Vector Search Mode<br/>Default semantic search<br/>Fuzzy tolerance support]
+        REGEX_MODE[Regex Search Mode<br/>Pattern matching<br/>ReDoS protection]
+        CROSS_CRATE_MODE[Cross-Crate Mode<br/>Parallel multi-crate search<br/>RRF result aggregation]
+    end
+    
+    INPUT --> VALIDATOR
+    VALIDATOR --> ROUTER
+    ROUTER --> VECTOR_MODE
+    ROUTER --> REGEX_MODE
+    ROUTER --> CROSS_CRATE_MODE
+```
+
+### Regex Search with ReDoS Protection
+
+The regex search mode provides powerful pattern matching capabilities with built-in protection against Regular expression Denial of Service (ReDoS) attacks through timeout mechanisms.
+
+**Components**:
+- **regex_search() function**: Core regex search implementation with pattern validation
+- **Timeout Protection**: 2-second execution limit to prevent ReDoS attacks
+- **Pattern Validation**: Pre-validation of regex patterns for safety
+- **Performance**: <500ms typical execution with timeout safeguards
+
+```mermaid
+graph TD
+    subgraph "Regex Search Pipeline"
+        REGEX_INPUT[Regex Pattern Input<br/>e.g., ".*Error.*|.*Exception.*"]
+        PATTERN_VALIDATE[Pattern Validation<br/>Syntax check<br/>Complexity analysis]
+        TIMEOUT_GUARD[Timeout Guard<br/>2-second limit<br/>ReDoS protection]
+        PATTERN_MATCH[Pattern Matching<br/>Against item_path and docs]
+        RESULTS[Regex Results<br/>With context snippets]
+    end
+    
+    REGEX_INPUT --> PATTERN_VALIDATE
+    PATTERN_VALIDATE --> TIMEOUT_GUARD
+    TIMEOUT_GUARD --> PATTERN_MATCH
+    PATTERN_MATCH --> RESULTS
+```
+
+### Cross-Crate Search with RRF Aggregation
+
+The cross-crate search mode enables parallel querying across multiple crates with sophisticated result aggregation using Reciprocal Rank Fusion (RRF).
+
+**Components**:
+- **cross_crate_search() function**: Parallel query execution across specified crates
+- **RRF Aggregation**: Combines results from multiple crates using reciprocal rank fusion
+- **Parallel Execution**: Concurrent searches with semaphore-controlled concurrency
+- **Performance**: <1s for 5 crates with parallel execution
+
+```mermaid
+graph TB
+    subgraph "Cross-Crate Search Architecture"
+        CRATE_LIST[Target Crates<br/>User-specified or dependency-based]
+        PARALLEL_DISPATCH[Parallel Query Dispatch<br/>Semaphore(5) concurrency control]
+        
+        subgraph "Individual Crate Searches"
+            CRATE_A[Crate A Search<br/>Independent query execution]
+            CRATE_B[Crate B Search<br/>Independent query execution]
+            CRATE_N[Crate N Search<br/>Independent query execution]
+        end
+        
+        RRF_AGGREGATOR[RRF Result Aggregation<br/>Reciprocal Rank Fusion<br/>Score normalization]
+        FINAL_RESULTS[Unified Results<br/>Cross-crate relevance ranking]
+    end
+    
+    CRATE_LIST --> PARALLEL_DISPATCH
+    PARALLEL_DISPATCH --> CRATE_A
+    PARALLEL_DISPATCH --> CRATE_B
+    PARALLEL_DISPATCH --> CRATE_N
+    
+    CRATE_A --> RRF_AGGREGATOR
+    CRATE_B --> RRF_AGGREGATOR
+    CRATE_N --> RRF_AGGREGATOR
+    
+    RRF_AGGREGATOR --> FINAL_RESULTS
+```
+
+### Stability Filtering Integration
+
+The system integrates stability filtering directly into vector search operations, allowing users to filter results by API stability levels (stable, beta, unstable, deprecated).
+
+**Features**:
+- **stability_filter parameter**: Integrated into vector search with native SQL filtering
+- **Performance Optimization**: Uses indexed stability fields for fast filtering
+- **Backward Compatibility**: Optional parameter with no impact on existing queries
+- **Multi-level Support**: Supports filtering by single or multiple stability levels
 
 ### Query Preprocessing Pipeline
 

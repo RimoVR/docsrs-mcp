@@ -26,6 +26,10 @@ uvx docsrs-mcp
 - 🔗 **Re-export discovery** - Automatic path alias resolution from rustdoc JSON
 - 🦀 **Rust stdlib support** - Priority ingestion and detection of standard library crates
 - 🔍 **Dependency filtering** - Intelligent filtering of dependency documentation
+- 🎯 **Advanced Search Modes** - Vector (semantic), fuzzy (typo-tolerant), regex (pattern matching), and hybrid search
+- 🛡️ **ReDoS Protection** - Secure regex search with timeout and pattern validation
+- 🌐 **Cross-Crate Search** - Search across up to 5 crates simultaneously with RRF ranking
+- ⚖️ **Stability Filtering** - Filter results by API stability level (stable/unstable/experimental)
 
 ## Installation
 
@@ -159,6 +163,9 @@ claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx --from git+https://github
 ### Performance
 
 - **Search**: <50ms P95 warm latency
+- **Fuzzy search**: <300ms with 90% accuracy for common typos
+- **Regex search**: <500ms with ReDoS protection
+- **Cross-crate search**: <1s for 5 crates in parallel
 - **Ingestion**: ≤3s for crates up to 10MB
 - **Memory**: ≤1GB RSS including embeddings
 - **Cache**: Auto-evicts at 2GB with LRU
@@ -246,6 +253,21 @@ response = await client.post(
         "version_b": "1.0.100"
     }
 )
+```
+
+### Advanced Search Examples
+```python
+# Fuzzy search for typo tolerance
+search_items(query="tokio::spwan", search_mode="fuzzy")
+
+# Regex pattern matching
+search_items(regex_pattern="async.*spawn", search_mode="regex")
+
+# Cross-crate search
+search_items(query="error handling", crates=["tokio", "anyhow", "thiserror"])
+
+# Stability filtering
+search_items(query="async runtime", stability_filter="stable")
 ```
 
 ## Troubleshooting

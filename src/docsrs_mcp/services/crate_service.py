@@ -208,8 +208,8 @@ class CrateService:
         # Convert to response format
         search_results = []
         for i, (score, item_path, header, content) in enumerate(results):
-            from ..app import extract_smart_snippet
             from .. import config
+            from ..app import extract_smart_snippet
 
             # Check if item is from stdlib or dependency
             is_stdlib = crate_name in config.STDLIB_CRATES

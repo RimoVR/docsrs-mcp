@@ -24,7 +24,7 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
     },
     {
         "name": "search_items",
-        "description": "Search for items in crate documentation",
+        "description": "Search for items in crate documentation with advanced modes",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -71,6 +71,30 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                 "min_doc_length": {
                     "type": "integer",
                     "description": "Minimum documentation length filter",
+                },
+                "search_mode": {
+                    "type": "string",
+                    "description": "Search mode: 'vector' (default), 'fuzzy', 'regex', or 'hybrid'",
+                    "enum": ["vector", "fuzzy", "regex", "hybrid"],
+                },
+                "fuzzy_tolerance": {
+                    "type": "number",
+                    "description": "Fuzzy match threshold (0.0-1.0, default: 0.7)",
+                },
+                "regex_pattern": {
+                    "type": "string",
+                    "description": "Regex pattern for pattern matching mode",
+                },
+                "stability_filter": {
+                    "type": "string",
+                    "description": "Filter by stability: 'stable', 'unstable', 'experimental', or 'all'",
+                    "enum": ["stable", "unstable", "experimental", "all"],
+                },
+                "crates": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of crates for cross-crate search (max 5)",
+                    "maxItems": 5,
                 },
             },
             "required": ["crate_name", "query"],

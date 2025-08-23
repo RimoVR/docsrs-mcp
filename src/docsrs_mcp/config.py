@@ -63,14 +63,19 @@ TYPE_WEIGHTS = {
     "trait_impl": float(os.getenv("DOCSRS_TYPE_WEIGHT_TRAIT_IMPL", "1.1")),
 }
 
-# Fuzzy matching configuration
+# Fuzzy matching configuration - optimized for Rust identifiers
 FUZZY_WEIGHTS = {
-    "token_set_ratio": float(os.getenv("DOCSRS_FUZZY_TOKEN_SET_WEIGHT", "0.4")),
-    "token_sort_ratio": float(os.getenv("DOCSRS_FUZZY_TOKEN_SORT_WEIGHT", "0.3")),
+    "token_set_ratio": float(os.getenv("DOCSRS_FUZZY_TOKEN_SET_WEIGHT", "0.5")),
+    "token_sort_ratio": float(os.getenv("DOCSRS_FUZZY_TOKEN_SORT_WEIGHT", "0.2")),
     "partial_ratio": float(os.getenv("DOCSRS_FUZZY_PARTIAL_WEIGHT", "0.3")),
     "path_component_bonus": float(os.getenv("DOCSRS_FUZZY_PATH_BONUS", "0.15")),
     "partial_component_bonus": float(os.getenv("DOCSRS_FUZZY_PARTIAL_BONUS", "0.08")),
 }
+
+# Fuzzy search performance optimization
+FUZZY_PREFIX_LENGTH = int(os.getenv("DOCSRS_FUZZY_PREFIX_LENGTH", "2"))
+FUZZY_SCORE_CUTOFF = float(os.getenv("DOCSRS_FUZZY_SCORE_CUTOFF", "60.0"))
+FUZZY_MAX_EXPANSIONS = int(os.getenv("DOCSRS_FUZZY_MAX_EXPANSIONS", "50"))
 
 # Caching configuration
 CACHE_SIZE = int(os.getenv("DOCSRS_CACHE_SIZE", "1000"))
