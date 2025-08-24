@@ -22,6 +22,7 @@ from .models import (
     CodeExample,
     CompareVersionsRequest,
     GetModuleTreeRequest,
+    GetModuleTreeResponse,
     IngestCargoFileRequest,
     IngestCargoFileResponse,
     ModuleTreeNode,
@@ -96,13 +97,37 @@ async def get_module_tree(request: Request, params: GetModuleTreeRequest):
             return nodes
 
         # Build and return tree
-        tree = build_tree(modules)
+        tree_nodes = build_tree(modules)
 
-        return {
-            "crate_name": params.crate_name,
-            "modules": tree,
-            "total_modules": len(modules),
-        }
+        # Create root node if there are modules
+        if tree_nodes:
+            # If there's only one root module, use it directly
+            if len(tree_nodes) == 1:
+                root_node = tree_nodes[0]
+            else:
+                # Create a synthetic root node to hold multiple top-level modules
+                root_node = ModuleTreeNode(
+                    name=params.crate_name,
+                    path=params.crate_name,
+                    depth=0,
+                    item_count=sum(node.item_count for node in tree_nodes),
+                    children=tree_nodes,
+                )
+        else:
+            # Empty tree
+            root_node = ModuleTreeNode(
+                name=params.crate_name,
+                path=params.crate_name,
+                depth=0,
+                item_count=0,
+                children=[],
+            )
+
+        return GetModuleTreeResponse(
+            crate_name=params.crate_name,
+            version=version,
+            tree=root_node,
+        )
 
     except HTTPException:
         raise

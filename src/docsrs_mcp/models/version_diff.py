@@ -66,7 +66,9 @@ class IngestionTier(str, Enum):
     RUSTDOC_JSON = "rustdoc_json"  # Full rustdoc JSON with complete metadata
     SOURCE_EXTRACTION = "source_extraction"  # Fallback source extraction from CDN
     DESCRIPTION_ONLY = "description_only"  # Minimal description fallback
-    RUST_LANG_STDLIB = "rust_lang_stdlib"  # rust-lang.org standard library documentation
+    RUST_LANG_STDLIB = (
+        "rust_lang_stdlib"  # rust-lang.org standard library documentation
+    )
 
 
 # Version diff models
@@ -242,4 +244,3 @@ class VersionDiffResponse(BaseModel):
 
     class Config:
         json_encoders = {Enum: lambda v: v.value}
-

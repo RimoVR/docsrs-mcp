@@ -12,6 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # Base configuration used by all models to prevent injection attacks
 strict_config = ConfigDict(extra="forbid")
 
+# Flexible configuration for models that may receive dynamic data
+flexible_config = ConfigDict(
+    extra="ignore", str_strip_whitespace=True, validate_assignment=True
+)
+
 
 class ErrorResponse(BaseModel):
     """
@@ -55,4 +60,3 @@ class ErrorResponse(BaseModel):
         )
 
     model_config = strict_config
-

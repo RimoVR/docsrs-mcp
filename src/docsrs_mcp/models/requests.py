@@ -495,11 +495,12 @@ class SearchItemsRequest(BaseModel):
         """
         if v is None or v == "":
             return None
-            
+
         # Use centralized boolean coercion function
         from docsrs_mcp.validation import coerce_to_bool_with_validation
+
         return coerce_to_bool_with_validation(v)
-    
+
     @field_validator("search_mode", mode="before")
     @classmethod
     def validate_search_mode(cls, v):
@@ -515,7 +516,7 @@ class SearchItemsRequest(BaseModel):
                 f"'regex' for pattern matching, 'hybrid' for combined approaches."
             )
         return normalized
-    
+
     @field_validator("fuzzy_tolerance", mode="before")
     @classmethod
     def coerce_fuzzy_tolerance(cls, v):
@@ -535,7 +536,7 @@ class SearchItemsRequest(BaseModel):
                 f"fuzzy_tolerance must be a number between 0.0 and 1.0, got '{v}'. "
                 f"Examples: 0.7 (default), 0.5 (lenient), 0.9 (strict)."
             ) from e
-    
+
     @field_validator("stability_filter", mode="before")
     @classmethod
     def validate_stability_filter(cls, v):
@@ -828,6 +829,7 @@ class StartPreIngestionRequest(BaseModel):
         """Validate and coerce force parameter to boolean."""
         # Use centralized boolean coercion function
         from docsrs_mcp.validation import coerce_to_bool_with_validation
+
         return coerce_to_bool_with_validation(v)
 
     @field_validator("concurrency", mode="before")
@@ -911,6 +913,7 @@ class IngestCargoFileRequest(BaseModel):
         """Coerce skip_existing to bool."""
         # Use centralized boolean coercion function with default
         from docsrs_mcp.validation import coerce_to_bool_with_validation
+
         if v is None:
             return True  # default
         return coerce_to_bool_with_validation(v)
@@ -921,6 +924,7 @@ class IngestCargoFileRequest(BaseModel):
         """Coerce resolve_versions to bool."""
         # Use centralized boolean coercion function
         from docsrs_mcp.validation import coerce_to_bool_with_validation
+
         return coerce_to_bool_with_validation(v)
 
     model_config = strict_config
@@ -998,4 +1002,3 @@ class RankingConfig(BaseModel):
         return v
 
     model_config = strict_config
-

@@ -130,9 +130,7 @@ class TestMigrationSuggestions:
     async def test_migration_suggestions_performance(self, cross_ref_service):
         """Verify <300ms migration suggestions performance requirement."""
         start = time.time()
-        await cross_ref_service.suggest_migrations(
-            "serde", "1.0.0", "1.0.193"
-        )
+        await cross_ref_service.suggest_migrations("serde", "1.0.0", "1.0.193")
         elapsed = time.time() - start
 
         # Note: This might take longer on first run due to ingestion

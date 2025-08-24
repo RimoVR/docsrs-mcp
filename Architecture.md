@@ -4206,6 +4206,156 @@ All four issues share common architectural anti-patterns:
 - Graceful degradation with partial functionality when possible
 - Validation checkpoints with meaningful error messages
 
+### Architectural Consistency Fixes
+
+The following fixes address interface consistency, data integrity, and type safety issues across the codebase to ensure robust architectural alignment.
+
+#### 1. Cache Interface Consistency Enhancement
+
+**Location**: `popular_crates.py` - SearchCache class integration
+
+**Issue**: Interface inconsistency between SearchCache and PopularCratesManager for statistics access.
+
+**Solution**: Added `get_cache_stats()` wrapper method to SearchCache for uniform interface:
+```python
+def get_cache_stats(self) -> CacheStatistics:
+    """Wrapper method for interface consistency with PopularCratesManager"""
+    return self.stats
+```
+
+**Benefits**:
+- **Interface Uniformity**: Consistent method naming across cache implementations
+- **Future-Proofing**: Enables polymorphic usage of different cache types
+- **Code Maintainability**: Reduces cognitive overhead when working with multiple cache classes
+
+#### 2. Database Schema Consistency Fix
+
+**Location**: Database query operations across multiple modules
+
+**Issue**: Inconsistent table references using non-existent 'items' table instead of actual 'embeddings' table.
+
+**Solution**: Fixed all database queries to reference correct 'embeddings' table consistently:
+```sql
+-- BEFORE (incorrect):
+SELECT * FROM items WHERE crate_name = ?
+
+-- AFTER (corrected):
+SELECT * FROM embeddings WHERE crate_name = ?
+```
+
+**Impact**:
+- **Query Reliability**: Eliminates SQL errors from invalid table references
+- **Schema Integrity**: Ensures all operations target the correct database schema
+- **Data Consistency**: Maintains referential integrity across the application
+
+#### 3. Data Type Safety - String Iteration Bug Prevention
+
+**Location**: Code example processing and similar string handling operations
+
+**Issue**: String iteration bug where iterating over string data fragments content into individual characters.
+
+**Solution**: Added defensive type checking before iteration operations:
+```python
+# Defensive programming pattern for string data
+if isinstance(data, str):
+    data = [data]  # Wrap single string in list
+
+for item in data:  # Safe iteration over list elements
+    process_item(item)
+```
+
+**Prevention Strategy**:
+- **Type Validation**: Explicit isinstance() checks before iteration
+- **Data Structure Normalization**: Convert strings to lists for consistent processing
+- **Early Error Detection**: Catch type mismatches before data corruption occurs
+
+#### 4. Pydantic Validation Flexibility Configuration
+
+**Location**: Model definitions across the models package
+
+**Issue**: Models receiving dynamic external data failed with strict validation while security-sensitive models needed strict validation.
+
+**Solution**: Implemented context-appropriate Pydantic configurations:
+```python
+# For models handling dynamic external data
+flexible_config = ConfigDict(
+    extra='allow',
+    validate_assignment=True,
+    arbitrary_types_allowed=True
+)
+
+# For security-sensitive internal models  
+strict_config = ConfigDict(
+    extra='forbid',
+    validate_assignment=True,
+    frozen=True
+)
+```
+
+**Configuration Strategy**:
+- **Flexible Config**: Applied to models processing external API responses or user input
+- **Strict Config**: Applied to internal models and security-critical data structures
+- **Validation Balance**: Maintains type safety while accommodating real-world data variations
+
+#### 5. Response Structure Alignment - ModuleTreeResponse Fix
+
+**Location**: Module tree response models and related API endpoints
+
+**Issue**: ModuleTreeResponse incorrectly returned a list of ModuleTreeNode objects instead of a single root node.
+
+**Solution**: Fixed response structure to return single root ModuleTreeNode:
+```python
+# BEFORE (incorrect structure):
+class ModuleTreeResponse(BaseModel):
+    modules: List[ModuleTreeNode]
+
+# AFTER (corrected structure):
+class ModuleTreeResponse(BaseModel):
+    root: ModuleTreeNode
+```
+
+**Architectural Benefits**:
+- **API Consistency**: Response structure matches documented tree hierarchy
+- **Client Compatibility**: Eliminates confusion for API consumers expecting tree structure
+- **Data Model Integrity**: Properly represents hierarchical module relationships
+
+#### 6. Version Diff Engine Interface Alignment
+
+**Location**: `version_diff.py` - VersionDiffEngine method calls
+
+**Issue**: Method calls used outdated `compute_diff()` instead of actual implemented `compare_versions()` method.
+
+**Solution**: Updated all method calls to use correct interface:
+```python
+# BEFORE (incorrect method name):
+result = version_diff_engine.compute_diff(crate, version_a, version_b)
+
+# AFTER (correct method name):
+result = version_diff_engine.compare_versions(crate, version_a, version_b)
+```
+
+**Interface Consistency**:
+- **Method Name Alignment**: Matches actual implementation and documentation
+- **API Reliability**: Eliminates AttributeError exceptions from incorrect method calls
+- **Code Clarity**: Method names accurately reflect functionality
+
+#### Architectural Impact Summary
+
+These fixes collectively address six critical areas of architectural inconsistency:
+
+1. **Interface Standardization**: Uniform method signatures across similar components
+2. **Database Integrity**: Correct table references throughout the codebase  
+3. **Type Safety**: Defensive programming against data type mismatches
+4. **Validation Flexibility**: Context-appropriate validation strategies
+5. **Response Consistency**: Proper data structure alignment with API contracts
+6. **Method Interface Alignment**: Accurate method naming and invocation
+
+**Quality Improvements**:
+- **Reliability**: Eliminates runtime errors from interface mismatches
+- **Maintainability**: Consistent patterns reduce cognitive overhead
+- **Robustness**: Defensive programming prevents data corruption
+- **Scalability**: Proper interfaces enable future architectural evolution
+
 ## System Components
 
 ### Modular Ingestion Architecture

@@ -1851,8 +1851,10 @@ async def run_sdk_server():
         await initialize_stdio_server_with_retry(
             server,
             InitializationOptions(
-                server_name="docsrs-mcp", server_version="0.1.0", capabilities={"tools": {}}
-            )
+                server_name="docsrs-mcp",
+                server_version="0.1.0",
+                capabilities={"tools": {}},
+            ),
         )
     except Exception as e:
         sys.stderr.write(f"MCP Server: Fatal error during initialization: {e}\n")

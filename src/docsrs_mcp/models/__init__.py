@@ -11,6 +11,19 @@ will continue to work without modification.
 # Re-export from base module
 from .base import ErrorResponse
 
+# Re-export from cross_references module
+from .cross_references import (
+    CrossReferenceInfo,
+    CrossReferencesResponse,
+    DependencyGraphResponse,
+    DependencyNode,
+    ImportAlternative,
+    MigrationSuggestion,
+    MigrationSuggestionsResponse,
+    ReexportTrace,
+    ResolveImportResponse,
+)
+
 # Re-export from MCP module
 from .mcp import (
     AssociatedItemResponse,
@@ -70,19 +83,6 @@ from .version_diff import (
     MigrationHint,
     Severity,
     VersionDiffResponse,
-)
-
-# Re-export from cross_references module
-from .cross_references import (
-    CrossReferenceInfo,
-    CrossReferencesResponse,
-    DependencyGraphResponse,
-    DependencyNode,
-    ImportAlternative,
-    MigrationSuggestion,
-    MigrationSuggestionsResponse,
-    ReexportTrace,
-    ResolveImportResponse,
 )
 
 # Define __all__ for explicit exports
@@ -150,4 +150,3 @@ __all__ = [
     "ReexportTrace",
     "ResolveImportResponse",
 ]
-

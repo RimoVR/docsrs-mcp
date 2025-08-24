@@ -965,6 +965,79 @@
           "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py"],
           "codeExample": "# Wrong - empty capabilities prevents tool discovery:\nInitializationOptions(\n    server_name='docsrs-mcp',\n    server_version='1.0.0',\n    capabilities={}  # This prevents clients from discovering tools\n)\n\n# Correct - declare tool capabilities:\nInitializationOptions(\n    server_name='docsrs-mcp',\n    server_version='1.0.0',\n    capabilities={'tools': {}}  # This allows clients to discover tools\n)",
           "debuggingTechnique": "Check MCP client logs for capability negotiation during handshake; verify that server declares 'tools' in capabilities object during initialization"
+        },
+        {
+          "error": "SearchCache TypeError 'get_cache_stats() not found'",
+          "rootCause": "Cache statistics method name mismatch between expected interface and implementation",
+          "solution": "Add wrapper method get_cache_stats() that calls get_stats()",
+          "context": "MCP tools failing when trying to retrieve cache statistics for monitoring",
+          "lesson": "Always maintain consistent API interfaces even when underlying implementations change",
+          "pattern": "Create wrapper methods for interface compatibility when method names change",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/cache.py"],
+          "codeExample": "def get_cache_stats(self) -> dict:\n    \"\"\"Wrapper for compatibility with expected interface\"\"\"\n    return self.get_stats()",
+          "debuggingTechnique": "Check method signatures and create compatibility wrappers for API changes"
+        },
+        {
+          "error": "SQL Error 'no such table: items'",
+          "rootCause": "Database query references incorrect table name - should be 'embeddings' not 'items'",
+          "solution": "Change table reference from 'items' to 'embeddings' in SQL queries",
+          "context": "Database operations failing due to table name mismatch after schema changes",
+          "lesson": "Always verify table names match current database schema when writing queries",
+          "pattern": "Use consistent table naming conventions throughout the codebase",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/services/crate_service.py"],
+          "affectedLines": ["261-272"],
+          "codeExample": "# Wrong:\nSELECT * FROM items WHERE ...\n# Correct:\nSELECT * FROM embeddings WHERE ...",
+          "debuggingTechnique": "Use PRAGMA table_info() to verify actual table names in database schema"
+        },
+        {
+          "error": "String iteration returns individual characters",
+          "rootCause": "Code attempts to iterate over string data expecting list/array, causing individual character processing",
+          "solution": "Check if examples_data is string before iteration, wrap in list if needed",
+          "context": "Data processing failing when string data is passed to functions expecting iterables",
+          "lesson": "Always validate data types before iteration - strings are iterable but may not be the intended behavior",
+          "pattern": "Use isinstance() checks before iteration to handle string vs list data types",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["validation.py", "code_examples.py", "endpoints_tools.py"],
+          "codeExample": "# Before iteration:\nif isinstance(examples_data, str):\n    examples_data = [examples_data]\n# Then iterate safely:\nfor example in examples_data:",
+          "debuggingTechnique": "Add type checks and logging to identify unexpected string vs list data types"
+        },
+        {
+          "error": "Pydantic ValidationError for extra fields",
+          "rootCause": "Dynamic data models receive extra fields that strict Pydantic validation rejects",
+          "solution": "Add flexible_config with extra='ignore' for dynamic data models",
+          "context": "API responses containing additional fields causing validation errors in strict mode",
+          "lesson": "Use flexible validation for external API responses that may contain unexpected fields",
+          "pattern": "Configure Pydantic models with extra='ignore' for dynamic data sources",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/models/base.py"],
+          "codeExample": "class FlexibleModel(BaseModel):\n    model_config = ConfigDict(extra='ignore')  # Allow extra fields\n    # model fields...",
+          "debuggingTechnique": "Use Pydantic's extra='ignore' for models handling dynamic external data"
+        },
+        {
+          "error": "ModuleTreeNode type error",
+          "rootCause": "Function returns dict instead of expected GetModuleTreeResponse with single root node",
+          "solution": "Return GetModuleTreeResponse with single root node instead of dict",
+          "context": "MCP tool type validation failing due to incorrect response format",
+          "lesson": "Always return properly typed response objects that match MCP tool schemas",
+          "pattern": "Wrap response data in appropriate Pydantic response models for type safety",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/endpoints_tools.py"],
+          "codeExample": "# Wrong:\nreturn {\"modules\": tree_data}\n# Correct:\nreturn GetModuleTreeResponse(root=ModuleTreeNode(...), total_modules=count)",
+          "debuggingTechnique": "Verify return types match MCP tool schema definitions"
+        },
+        {
+          "error": "AttributeError 'compute_diff' not found",
+          "rootCause": "Method name mismatch - VersionDiffEngine has compare_versions() method, not compute_diff()",
+          "solution": "Use compare_versions() method on VersionDiffEngine",
+          "context": "Version comparison functionality failing due to incorrect method name",
+          "lesson": "Verify method names exist on target classes before calling - use IDE navigation to confirm",
+          "pattern": "Use IDE 'Go to Definition' to verify method signatures before implementation",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/services/crate_service.py"],
+          "codeExample": "# Wrong:\nresult = engine.compute_diff(v1, v2)\n# Correct:\nresult = engine.compare_versions(v1, v2)",
+          "debuggingTechnique": "Use IDE navigation and method inspection to verify available methods on objects"
         }
       ]
     },
@@ -4123,6 +4196,90 @@
             "boundaryDetection": "Use word boundaries to avoid partial matches",
             "testCoverage": "Extensive test cases for edge cases and boundary conditions"
           }
+        },
+        {
+          "error": "get_crate_summary returns empty modules array despite successful SQL query execution",
+          "rootCause": "SQL query executes successfully but returns empty array. Likely due to missing parent_id IS NULL constraint in the query or data ingestion not properly populating the modules table",
+          "solution": "Add parent_id IS NULL constraint to filter for top-level modules, or verify that data ingestion process correctly populates modules table with proper hierarchy",
+          "context": "MCP server debugging - crate summary tool returns empty modules list despite database containing data",
+          "lesson": "SQL queries can execute successfully but return unexpected results due to missing filters or data ingestion gaps",
+          "pattern": "Always validate data ingestion completeness and add appropriate hierarchy filters for tree-structured data",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/mcp_tools.py"],
+          "codeExample": "# Add hierarchy filter:\nSELECT * FROM modules WHERE crate_id = ? AND parent_id IS NULL;\n# Verify ingestion:\nSELECT COUNT(*) FROM modules WHERE crate_id = ?;",
+          "debuggingTechnique": "Check database contents directly and verify ingestion process populates all expected tables"
+        },
+        {
+          "error": "SearchCache.get() method signature mismatch - expects 9 parameters but called with 11",
+          "rootCause": "Method signature drift where parameters were added to calling code but the method definition wasn't updated to match, specifically stability_filter parameter was added but not reflected in method signature",
+          "solution": "Remove stability_filter parameter from the method call or update SearchCache.get() method signature to accept the additional parameters",
+          "context": "MCP server debugging - search functionality failing due to parameter count mismatch",
+          "lesson": "Method signature changes must be synchronized across all call sites to prevent parameter count mismatches",
+          "pattern": "Use IDE refactoring tools or grep to find all call sites when changing method signatures",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/search.py", "src/docsrs_mcp/cache.py"],
+          "codeExample": "# Fix method signature:\ndef get(self, query, k, item_type, crate_name, version, include_examples, threshold, use_knn, stability_filter):\n# Or remove extra parameter:\nresult = cache.get(query, k, item_type, crate_name, version, include_examples, threshold, use_knn)",
+          "debuggingTechnique": "Count parameters in method definition vs call sites, use static analysis tools to catch signature mismatches"
+        },
+        {
+          "error": "get_item_doc references 'items' table but schema only contains 'embeddings' table",
+          "rootCause": "Schema evolution where tables were renamed from 'items' to 'embeddings' but not all service layer references were updated, causing table mismatch errors",
+          "solution": "Standardize all database references to use 'embeddings' table name, or create view/alias to maintain backward compatibility",
+          "context": "MCP server debugging - documentation retrieval failing due to table name inconsistency",
+          "lesson": "Schema migrations must update all references consistently across the entire codebase, not just the table definitions",
+          "pattern": "Use database views or aliases during migration periods to maintain compatibility while updating references",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/database.py", "src/docsrs_mcp/services.py"],
+          "codeExample": "# Update table reference:\nSELECT * FROM embeddings WHERE item_path = ?;\n# Or create compatibility view:\nCREATE VIEW items AS SELECT * FROM embeddings;",
+          "debuggingTechnique": "Use PRAGMA table_info() to verify actual table names in database vs code references"
+        },
+        {
+          "error": "get_module_tree returns list[dict] but ModuleTreeNode expects specific Pydantic structure",
+          "rootCause": "Database query returns raw dictionary data but the calling code expects structured Pydantic models. The return type annotation doesn't match the actual return format",
+          "solution": "Wrap raw dictionary results in proper ModuleTreeNode Pydantic models or update the calling code to handle dictionary format",
+          "context": "MCP server debugging - module tree navigation failing due to type mismatch between database layer and service layer",
+          "lesson": "Pydantic validation requires exact structure matching - raw database results must be transformed to model instances",
+          "pattern": "Create adapter functions to transform database results into Pydantic models at the data layer boundary",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "src/docsrs_mcp/database.py"],
+          "codeExample": "# Transform to Pydantic model:\nresults = [ModuleTreeNode(**row) for row in db_results]\n# Or handle raw dict:\nif isinstance(result, dict): result = ModuleTreeNode(**result)",
+          "debuggingTechnique": "Check return type annotations vs actual return values, use Pydantic validation in development mode"
+        },
+        {
+          "error": "search_examples treats string data as character arrays during iteration",
+          "rootCause": "Code assumes examples data is always a list/array but sometimes receives string data, causing iteration over individual characters instead of example items",
+          "solution": "Add isinstance(data, str) check before iteration and handle string data appropriately, or ensure data is always properly structured",
+          "context": "MCP server debugging - example search returning individual characters instead of example items",
+          "lesson": "Always validate data types before iteration, especially when data comes from external sources or databases",
+          "pattern": "Use type guards and defensive programming for data structure assumptions",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/examples.py", "src/docsrs_mcp/search.py"],
+          "codeExample": "# Add type check:\nif isinstance(examples, str):\n    examples = [examples]  # or parse appropriately\nfor example in examples:\n    process_example(example)",
+          "debuggingTechnique": "Print data types and structure before iteration to identify unexpected formats"
+        },
+        {
+          "error": "list_versions response includes 'latest' field not defined in VersionInfo Pydantic model",
+          "rootCause": "Response data contains extra fields beyond what's defined in the Pydantic model schema, causing validation errors in strict mode",
+          "solution": "Remove extra 'latest' field from response data or add it to VersionInfo model definition, or disable Pydantic strict mode",
+          "context": "MCP server debugging - version listing failing due to extra fields in response",
+          "lesson": "Pydantic strict mode prevents extra fields - response data must match model schema exactly",
+          "pattern": "Align response data with Pydantic model definitions or use model_config to allow extra fields",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/models.py", "src/docsrs_mcp/versions.py"],
+          "codeExample": "# Remove extra field:\nresponse_data = {k: v for k, v in raw_data.items() if k in VersionInfo.model_fields}\n# Or add to model:\nclass VersionInfo(BaseModel):\n    latest: Optional[bool] = None",
+          "debuggingTechnique": "Compare response dictionary keys with Pydantic model field names to identify extra fields"
+        },
+        {
+          "error": "compare_versions code calls compute_diff() but engine only has compare_versions() method",
+          "rootCause": "Method name mismatch where the implementation provides compare_versions() but the calling code expects compute_diff(), indicating API design inconsistency",
+          "solution": "Fix method name to match the actual implementation (use compare_versions() instead of compute_diff()) or implement the missing compute_diff() method",
+          "context": "MCP server debugging - version comparison failing due to method name mismatch",
+          "lesson": "Method names must be consistent between implementation and usage - API design should be validated across all call sites",
+          "pattern": "Use consistent naming conventions and validate method existence before deployment",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/versions.py", "src/docsrs_mcp/engine.py"],
+          "codeExample": "# Fix method call:\nresult = engine.compare_versions(v1, v2)\n# Instead of:\nresult = engine.compute_diff(v1, v2)",
+          "debuggingTechnique": "Use IDE 'Go to Definition' to verify method names exist in target classes"
         }
       ]
     }
@@ -4249,7 +4406,15 @@
       "Add is_dependency flags to database schema for clean presentation layer filtering",
       "Profile search performance with concurrent.futures to optimize parallelization strategy",
       "Extract trait relationships from rustdoc JSON 'impls' section for type system navigation",
-      "Implement graceful degradation with enhanced user guidance when external sources fail"
+      "Implement graceful degradation with enhanced user guidance when external sources fail",
+      "SQL queries can execute successfully but return empty results - check parent_id IS NULL constraints for hierarchical data",
+      "Method signature drift causes parameter count mismatches - use IDE refactoring tools to update all call sites",
+      "Schema evolution requires updating all table references consistently, not just table definitions",
+      "Raw database results need transformation to Pydantic models at data layer boundaries",
+      "Always validate data types before iteration - use isinstance() checks for external data",
+      "Pydantic strict mode requires exact field matching - remove extra fields or update model definitions",
+      "Method name consistency is critical - validate method existence before deployment using IDE tools",
+      "Root cause pattern: Schema evolution gaps, method signature drift, type assumptions, and service layer coupling"
     ],
     "vectorSearch": [
       "Check embedding dimensions match (384 for BAAI/bge-small-en-v1.5)",

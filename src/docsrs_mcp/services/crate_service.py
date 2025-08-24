@@ -260,9 +260,9 @@ class CrateService:
             # Fetch item documentation with flexible path matching
             cursor = await db.execute(
                 """
-                SELECT path, content 
-                FROM items 
-                WHERE path = ? OR path = ? OR path LIKE ?
+                SELECT item_path, content 
+                FROM embeddings 
+                WHERE item_path = ? OR item_path = ? OR item_path LIKE ?
                 """,
                 (
                     resolved_item_path,
@@ -452,23 +452,31 @@ class CrateService:
         Returns:
             Dictionary with version diff
         """
-        # Ingest both versions
-        db_path_a = await ingest_crate(crate_name, version_a)
-        db_path_b = await ingest_crate(crate_name, version_b)
+        # Ingest both versions (ensure they're available)
+        await ingest_crate(crate_name, version_a)
+        await ingest_crate(crate_name, version_b)
 
-        # Compute diff
-        engine = get_diff_engine()
-        diff = await engine.compute_diff(
-            db_path_a,
-            db_path_b,
+        # Create comparison request
+        from ..models import CompareVersionsRequest
+
+        request = CompareVersionsRequest(
+            crate_name=crate_name,
+            version_a=version_a,
+            version_b=version_b,
             categories=categories,
             include_unchanged=include_unchanged,
             max_results=max_results,
         )
 
+        # Compute diff using correct method
+        engine = get_diff_engine()
+        diff_result = await engine.compare_versions(request)
+
+        # Convert response to dict format
         return {
-            "crate_name": crate_name,
-            "version_a": version_a,
-            "version_b": version_b,
-            "summary": diff,
+            "crate_name": diff_result.crate_name,
+            "version_a": diff_result.version_a,
+            "version_b": diff_result.version_b,
+            "summary": diff_result.summary,
+            "items": diff_result.items,
         }

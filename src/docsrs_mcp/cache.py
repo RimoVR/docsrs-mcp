@@ -292,6 +292,10 @@ class SearchCache:
             "ttl": self.ttl,
         }
 
+    def get_cache_stats(self) -> dict[str, int]:
+        """Wrapper for consistency with PopularCratesManager interface."""
+        return self.get_stats()
+
 
 # Global cache instances
 _search_cache = SearchCache()
