@@ -295,6 +295,166 @@ The architecture includes comprehensive memory management to handle long-running
 - **Memory Limit**: 1GB RSS memory usage before restart
 - **Health Check Interval**: Continuous monitoring with configurable intervals
 
+### STDIO Server Initialization with uvx Support
+
+The docsrs-mcp server implements a robust STDIO server initialization architecture that ensures reliable startup across different deployment scenarios, particularly supporting zero-install deployment via uvx command execution.
+
+#### Retry Mechanism with Exponential Backoff
+
+The initialization system implements a sophisticated retry mechanism to handle transient startup failures:
+
+- **Maximum Attempts**: 3 retry attempts for server startup
+- **Base Delay**: 0.1 seconds initial delay between attempts
+- **Exponential Backoff**: Delay doubles with each retry (0.1s, 0.2s, 0.4s)
+- **Jitter**: Random variance to prevent thundering herd issues
+- **Early Success**: Stops retrying immediately upon successful initialization
+
+```python
+# Retry implementation pattern
+max_attempts = 3
+base_delay = 0.1
+for attempt in range(max_attempts):
+    try:
+        return await start_server()
+    except RetryableError:
+        if attempt < max_attempts - 1:
+            delay = base_delay * (2 ** attempt) + random.uniform(-0.01, 0.01)
+            await asyncio.sleep(delay)
+    except NonRetryableError:
+        raise  # Fail fast for non-recoverable errors
+```
+
+#### Environment Configuration for uvx Execution
+
+The system configures optimal environment variables for uvx-based execution to ensure reliable STDIO communication:
+
+**PYTHONUNBUFFERED=1**:
+- Forces immediate stdout/stderr flushing
+- Prevents buffering delays that could disrupt MCP JSON-RPC protocol
+- Essential for real-time STDIO communication with MCP clients
+
+**PYTHONIOENCODING=utf-8**:
+- Ensures consistent UTF-8 encoding across all platforms
+- Prevents encoding-related communication failures
+- Standardizes text handling for international character sets
+
+```bash
+# uvx execution environment
+uvx --with 'docsrs-mcp[server]' \
+    --python 3.11 \
+    docsrs-mcp \
+    --mode mcp
+```
+
+#### Error Classification System
+
+The initialization architecture implements intelligent error classification to distinguish between recoverable and permanent failures:
+
+**Retryable Errors** (warrant retry with backoff):
+- Network timeouts during dependency resolution
+- Temporary resource unavailability (file locks, port conflicts)
+- Transient system resource constraints (memory pressure)
+- Database connection establishment failures
+- External service connectivity issues
+
+**Non-Retryable Errors** (immediate failure):
+- Invalid configuration parameters
+- Missing required dependencies or files
+- Permission denied errors
+- Malformed MCP protocol messages
+- Schema validation failures
+- Critical system resource exhaustion
+
+**Error Context Preservation**:
+- Maintains error chain across retry attempts
+- Logs each retry attempt with increasing verbosity
+- Provides comprehensive failure analysis on final failure
+- Includes system state information in error reports
+
+#### uvx Detection Logic in CLI Layer
+
+The CLI layer implements intelligent uvx detection to optimize initialization behavior:
+
+**Detection Mechanisms**:
+- **Environment Variable**: Checks for `UVXCOMMAND` or `UV_TOOL` environment variables
+- **Process Ancestry**: Examines parent process chain for uvx indicators
+- **Execution Context**: Analyzes sys.argv[0] and execution path patterns
+- **Package Context**: Detects if running from uvx-managed temporary environment
+
+**uvx-Specific Optimizations**:
+- **Dependency Warmup**: Pre-loads critical modules during uvx execution
+- **Cache Strategy**: Adjusts caching behavior for ephemeral uvx environments
+- **Resource Allocation**: Optimizes memory usage for single-execution contexts
+- **Error Reporting**: Enhanced diagnostics for uvx deployment issues
+
+```python
+# uvx detection implementation
+def detect_uvx_execution() -> bool:
+    # Check environment variables set by uvx
+    if os.environ.get('UVXCOMMAND') or os.environ.get('UV_TOOL'):
+        return True
+    
+    # Analyze execution path
+    if 'uvx' in sys.argv[0] or '/uvx/' in sys.executable:
+        return True
+        
+    # Check parent process chain (when available)
+    try:
+        import psutil
+        current = psutil.Process()
+        for parent in current.parents():
+            if 'uvx' in parent.name():
+                return True
+    except ImportError:
+        pass
+    
+    return False
+```
+
+#### Integration with Existing MCP SDK Server Architecture
+
+The STDIO initialization architecture seamlessly integrates with the existing MCP SDK server infrastructure:
+
+**MCPServerRunner Integration**:
+- Initialization retry logic occurs before MCPServerRunner startup
+- Memory monitoring begins only after successful initialization
+- Process health tracking includes initialization failure recovery
+- Graceful shutdown handles initialization-time resource cleanup
+
+**Transport Layer Coordination**:
+- STDIO transport activation waits for complete initialization
+- JSON-RPC protocol binding occurs post-initialization
+- Error handling maintains MCP protocol compliance throughout
+- Client connection establishment follows successful server startup
+
+**Service Layer Compatibility**:
+- CrateService and IngestionService remain transport-agnostic
+- Business logic initialization is decoupled from STDIO setup
+- Service health checks integrate with initialization status
+- Dependency injection works seamlessly across transport layers
+
+#### Deployment Compatibility Features
+
+**Zero-Install uvx Support**:
+- Eliminates need for pre-installed packages or virtual environments
+- Handles dynamic dependency resolution during initialization
+- Optimizes startup performance for ephemeral execution contexts
+- Provides fallback mechanisms for dependency resolution failures
+
+**Development vs Production Modes**:
+- Development mode includes enhanced debugging and retry logging
+- Production mode optimizes for fast startup and minimal resource usage
+- Configuration detection automatically adjusts retry parameters
+- Environment-specific error reporting balances detail with security
+
+**Platform Compatibility**:
+- Consistent behavior across Unix-like systems (Linux, macOS)
+- Windows compatibility with adjusted path and process handling
+- Container environment detection and optimization
+- CI/CD pipeline integration with appropriate timeout handling
+
+This STDIO server initialization architecture ensures that docsrs-mcp can be reliably deployed and executed across diverse environments while maintaining compatibility with the zero-install uvx deployment model and providing robust error handling for production scenarios.
+
 ### Parameter Handling Architecture
 
 The system implements robust parameter handling for MCP client compatibility:
