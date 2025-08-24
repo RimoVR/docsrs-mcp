@@ -1,11 +1,16 @@
 """MCP SDK implementation for docsrs-mcp server."""
 
+import asyncio
 import json
 import logging
+import os
+import random
+import sys
 
 from mcp import types
 from mcp.server import Server
 from mcp.server.models import InitializationOptions
+from mcp.server.stdio import stdio_server
 
 from .models import (
     AssociatedItemResponse,
@@ -806,7 +811,7 @@ async def suggest_migrations_handler(
         from .ingest import ingest_crate
 
         # Ensure both versions are ingested
-        db_path_from = await ingest_crate(crate_name, from_version)
+        await ingest_crate(crate_name, from_version)
         db_path_to = await ingest_crate(crate_name, to_version)
 
         # Use the newer version's database
@@ -1744,20 +1749,114 @@ async def handle_call_tool(
         return [types.TextContent(type="text", text=f"Error: {str(e)}")]
 
 
-async def run_sdk_server():
-    """Run the MCP SDK server."""
-    from mcp.server.stdio import stdio_server
+def setup_uvx_environment():
+    """Configure environment for uvx execution compatibility."""
+    # Essential for real-time STDIO output
+    os.environ["PYTHONUNBUFFERED"] = "1"
 
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
+    # Ensure proper encoding for JSON-RPC messages
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+
+    # Force asyncio to use proper event loop policy on Windows
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+    # Log environment setup to stderr
+    sys.stderr.write("MCP Server: Environment configured for uvx execution\n")
+    sys.stderr.flush()
+
+
+def is_retryable_error(error: Exception) -> bool:
+    """Determine if an error is retryable for STDIO connection."""
+    # Connection-related errors are retryable
+    retryable_types = (
+        ConnectionError,
+        BrokenPipeError,
+        asyncio.TimeoutError,
+        OSError,  # Includes stream-related errors
+    )
+
+    # Check error type
+    if isinstance(error, retryable_types):
+        return True
+
+    # Check error message for known retryable patterns
+    error_str = str(error).lower()
+    retryable_patterns = [
+        "broken pipe",
+        "connection reset",
+        "stream closed",
+        "eof",
+        "timeout",
+    ]
+
+    return any(pattern in error_str for pattern in retryable_patterns)
+
+
+async def initialize_stdio_server_with_retry(server_instance, options):
+    """Initialize STDIO server with retry logic for uvx compatibility."""
+    max_retries = 3
+    base_delay = 0.1  # Start with 100ms
+
+    for attempt in range(max_retries):
+        try:
+            # Add small jitter to prevent retry storms
+            if attempt > 0:
+                delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.1)
+                await asyncio.sleep(delay)
+                sys.stderr.write(
+                    f"MCP Server: Retry attempt {attempt + 1}/{max_retries} after {delay:.2f}s\n"
+                )
+                sys.stderr.flush()
+
+            # Attempt STDIO server initialization
+            async with stdio_server() as (read_stream, write_stream):
+                sys.stderr.write(
+                    "MCP Server: STDIO transport established successfully\n"
+                )
+                sys.stderr.flush()
+
+                # Run the server
+                await server_instance.run(read_stream, write_stream, options)
+                return  # Success
+
+        except asyncio.CancelledError:
+            # Non-retryable - propagate immediately
+            raise
+
+        except Exception as e:
+            error_msg = f"MCP Server: STDIO initialization failed (attempt {attempt + 1}/{max_retries}): {e}"
+            sys.stderr.write(error_msg + "\n")
+            sys.stderr.flush()
+            logger.error(error_msg)
+
+            # Check if error is retryable
+            if not is_retryable_error(e):
+                raise
+
+            if attempt == max_retries - 1:
+                # Final attempt failed
+                raise RuntimeError(
+                    f"Failed to initialize STDIO server after {max_retries} attempts"
+                ) from e
+
+
+async def run_sdk_server():
+    """Run the MCP SDK server with uvx compatibility."""
+    # Setup environment first
+    setup_uvx_environment()
+
+    # Initialize with retry logic
+    try:
+        await initialize_stdio_server_with_retry(
+            server,
             InitializationOptions(
-                server_name="docsrs-mcp",
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=types.NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
+                server_name="docsrs-mcp", server_version="0.1.0", capabilities={}
+            )
         )
+    except Exception as e:
+        sys.stderr.write(f"MCP Server: Fatal error during initialization: {e}\n")
+        sys.stderr.flush()
+        logger.error(f"Fatal STDIO server initialization error: {e}")
+        # Exit with error code for proper client notification
+        sys.exit(1)

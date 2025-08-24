@@ -320,32 +320,41 @@ subagents:
         "subagent_type": "code-linter-formatter",
         "description": "Run quality checks - can use agent or run commands directly",
         "testing_philosophy": {
-          "principle": "Prefer testing with production code over synthetic test suites when possible",
-          "rationale": "Production code testing validates real-world usage patterns and integration",
+          "principle": "Always test with production code to validate real-world usage",
+          "rationale": "Production testing ensures the implementation works in actual use cases",
           "approach": [
-            "If the feature/fix is command-line accessible, test it directly with production commands",
-            "For HTTP servers, use --mode rest flag for CLI-callable HTTP mode testing",
-            "Run synthetic test suites as supplementary validation, not primary testing",
-            "Prioritize end-to-end testing with real workflows over unit tests"
+            "Test the feature as end users would use it",
+            "Use the actual production commands and interfaces",
+            "Verify integration with existing systems",
+            "Ensure no regressions in functionality"
           ],
-          "examples": {
-            "cli_tool": "Test the actual CLI commands with real inputs instead of just unit tests",
-            "http_server": "Use 'uv run docsrs-mcp --mode rest' and test with curl/httpie",
-            "library": "Create small example programs that use the library in realistic ways"
+          "general_examples": {
+            "servers": "Test with actual client connections and production protocols",
+            "cli_tools": "Execute real commands with typical user inputs",
+            "libraries": "Write example code that uses the library as intended",
+            "apis": "Make actual API calls with production-like payloads"
           }
         },
-        "checks": {
-          "rust_components": [
-            "!cargo fmt",
-            "!cargo clippy -- -D warnings",
-            "!cargo test",
-            "Test with production code if CLI-accessible"
+        "language_specific_checks": {
+          "python": [
+            "Run formatters/linters (ruff, black, etc.)",
+            "Execute test suite if exists",
+            "Test with production usage patterns"
           ],
-          "typescript_react_components": [
-            "!npm run lint",
-            "!npm run typecheck",
-            "!npm test",
-            "Test with production build if applicable"
+          "rust": [
+            "cargo fmt && cargo clippy",
+            "cargo test",
+            "Test with production scenarios"
+          ],
+          "javascript_typescript": [
+            "npm/yarn lint && typecheck",
+            "npm/yarn test",
+            "Test with production builds"
+          ],
+          "general": [
+            "Apply language-appropriate quality tools",
+            "Run existing test suites",
+            "Always validate with production usage"
           ]
         },
         "requirement": "Address ALL errors and warnings before proceeding"

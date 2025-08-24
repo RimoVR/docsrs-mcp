@@ -151,7 +151,6 @@ temp/
 !package-lock.json
 
 # Model files (if downloaded locally)
-models/
 *.onnx
 *.bin
 

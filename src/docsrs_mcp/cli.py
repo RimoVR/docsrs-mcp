@@ -3,12 +3,23 @@
 import argparse
 import logging
 import os
+import sys
 
 import uvicorn
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def is_uvx_execution() -> bool:
+    """Detect if running under uvx."""
+    # Check for uvx-specific environment markers
+    return (
+        "UV_PROJECT_ROOT" in os.environ
+        or "UV_CACHE_DIR" in os.environ
+        or "uvx" in sys.executable.lower()
+    )
 
 
 def main() -> None:
@@ -66,6 +77,14 @@ def main() -> None:
     # Set pre-ingestion environment variable if needed
     if args.pre_ingest:
         os.environ["DOCSRS_PRE_INGEST_ENABLED"] = "true"
+
+    # Add uvx-specific environment setup for MCP mode
+    if args.mode == "mcp" and is_uvx_execution():
+        os.environ["PYTHONUNBUFFERED"] = "1"
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+        logger.info(
+            "Detected uvx execution, configured environment for STDIO transport"
+        )
 
     # Import modules after setting environment variables to ensure they see the correct config
     from . import config  # noqa: PLC0415

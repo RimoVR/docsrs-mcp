@@ -1754,6 +1754,44 @@
           "relatedFiles": ["src/docsrs_mcp/app.py"]
         },
         {
+          "error": "Failed to reconnect to docsrs - MCP STDIO transport initialization failure with uvx",
+          "rootCause": "STDIO transport initialization failure in uvx execution context due to environment variable isolation, missing error handling in run_sdk_server() function, and lack of retry logic for connection failures",
+          "solution": "Implement comprehensive error handling around stdio_server() context manager with retry logic (3 attempts with exponential backoff), set PYTHONUNBUFFERED=1 before server startup, add stderr logging for debugging, and use absolute path resolution for uvx context",
+          "context": "MCP server connection fails when using uvx method but works with direct uv run execution. Claude Code shows 'Failed to reconnect to docsrs' error",
+          "symptoms": [
+            "Failed to reconnect to docsrs error in Claude Code when using uvx",
+            "Works with direct uv run but fails with uvx execution", 
+            "STDIO transport initialization failure",
+            "Environment variable isolation in uvx temporary environment"
+          ],
+          "researchFindings": [
+            "uvx command not found in PATH is very common",
+            "PYTHONUNBUFFERED=1 must be set for proper STDIO communication",
+            "Use absolute paths to uvx executable in MCP configuration",
+            "All logging must go to stderr, never stdout (corrupts JSON-RPC)",
+            "MCP Inspector tool recommended for testing: npx @modelcontextprotocol/inspector uvx docsrs-mcp"
+          ],
+          "implementation": {
+            "errorHandling": "Add error handling around stdio_server() context manager",
+            "retryLogic": "Implement retry logic (3 attempts) with exponential backoff",
+            "environment": "Set PYTHONUNBUFFERED=1 before server startup",
+            "logging": "Add comprehensive stderr logging for debugging",
+            "pathResolution": "Use absolute path resolution for uvx context"
+          },
+          "testingStrategy": [
+            "Test with MCP Inspector for protocol validation",
+            "Check Claude Code logs in ~/Library/Logs/Claude/mcp*.log",
+            "Compare direct uv run vs uvx execution",
+            "Monitor STDIO stream integrity"
+          ],
+          "prevention": "Always implement comprehensive STDIO transport error handling with retry logic when supporting uvx execution method. Test both uv run and uvx paths during development",
+          "lesson": "uvx execution context requires different error handling than direct execution due to environment isolation. STDIO transport is fragile and needs robust error handling with retry mechanisms",
+          "pattern": "For MCP servers supporting uvx: implement STDIO transport error handling, set PYTHONUNBUFFERED=1, use stderr for logging, implement retry logic, test with MCP Inspector",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/app.py"],
+          "debuggingTechnique": "Use MCP Inspector (npx @modelcontextprotocol/inspector uvx docsrs-mcp) for protocol validation and check Claude Code MCP logs for detailed error traces"
+        },
+        {
           "error": "FastAPI to MCP protocol conversion",
           "context": "Converting REST endpoints to MCP protocol automatically",
           "solution": "Use FastMCP.from_fastapi() to automatically convert REST endpoints to MCP protocol",
@@ -4292,11 +4330,13 @@
     "serverManagement": [
       "Start MCP server (default): nohup uv run docsrs-mcp > server.log 2>&1 & echo $!",
       "Start REST server: nohup uv run docsrs-mcp --mode rest > server.log 2>&1 & echo $!",
-      "Alternative MCP: nohup uvx docsrs-mcp > server.log 2>&1 & echo $!",
+      "Alternative MCP: nohup uvx docsrs-mcp > server.log 2>&1 & echo $! (Note: uvx may have STDIO connection issues)",
       "Alternative REST: nohup uvx docsrs-mcp --mode rest > server.log 2>&1 & echo $!",
       "Kill server: kill <PID>",
       "Test REST endpoints: curl -s http://localhost:8000/endpoint | jq . (server runs on port 8000, not 8080)",
       "Test MCP manifest: Use --mode rest to test MCP manifest endpoints at localhost:8000",
+      "Test MCP STDIO: npx @modelcontextprotocol/inspector uvx docsrs-mcp (for uvx connection validation)",
+      "Check MCP logs: tail -f ~/Library/Logs/Claude/mcp*.log (Claude Code specific)",
       "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\""
     ],
     "cicdQuickReference": [
