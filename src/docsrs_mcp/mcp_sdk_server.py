@@ -1851,7 +1851,7 @@ async def run_sdk_server():
         await initialize_stdio_server_with_retry(
             server,
             InitializationOptions(
-                server_name="docsrs-mcp", server_version="0.1.0", capabilities={}
+                server_name="docsrs-mcp", server_version="0.1.0", capabilities={"tools": {}}
             )
         )
     except Exception as e:

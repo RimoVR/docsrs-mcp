@@ -953,6 +953,18 @@
           "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/server.py"],
           "codeExample": "# Wrong - trying to use @server.tool() with low-level Server:\n@server.tool()\ndef my_tool():\n    pass\n\n# Correct - manual registration with low-level Server:\n@server.list_tools()\nasync def handle_list_tools() -> list[types.Tool]:\n    return [types.Tool(name='my_tool', ...)]\n\n@server.call_tool()\nasync def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:\n    if name == 'my_tool':\n        return [types.TextContent(type='text', text='result')]",
           "debuggingTechnique": "Check MCP SDK documentation for correct API patterns; use dir(server) to inspect available methods on Server instances"
+        },
+        {
+          "error": "MCP server doesn't list tools as capabilities and clients can't discover tools",
+          "rootCause": "MCP SDK server declares empty capabilities={} at line 1854 of mcp_sdk_server.py instead of capabilities={'tools': {}}. The MCP protocol requires explicit capability declaration during the initialization handshake for clients to discover available tools.",
+          "solution": "Change capabilities={} to capabilities={'tools': {}} in the InitializationOptions when creating the MCP SDK server to properly declare tool capability support",
+          "context": "MCP clients (like Claude Code) show 'no tools available' or fail to discover server tools despite tools being properly implemented and registered",
+          "lesson": "MCP protocol requires explicit capability declaration during handshake - the SDK doesn't auto-discover capabilities like FastMCP does. Tool registration alone is insufficient without proper capability declaration",
+          "pattern": "Always declare capabilities={'tools': {}} when using MCP SDK servers that provide tools, even if tools are registered properly",
+          "dateEncountered": "2025-08-24",
+          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py"],
+          "codeExample": "# Wrong - empty capabilities prevents tool discovery:\nInitializationOptions(\n    server_name='docsrs-mcp',\n    server_version='1.0.0',\n    capabilities={}  # This prevents clients from discovering tools\n)\n\n# Correct - declare tool capabilities:\nInitializationOptions(\n    server_name='docsrs-mcp',\n    server_version='1.0.0',\n    capabilities={'tools': {}}  # This allows clients to discover tools\n)",
+          "debuggingTechnique": "Check MCP client logs for capability negotiation during handshake; verify that server declares 'tools' in capabilities object during initialization"
         }
       ]
     },
