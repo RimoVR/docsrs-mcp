@@ -276,19 +276,50 @@ class VersionDiffEngine:
                 )
             raise ValueError(error_msg)
 
+        # Convert list of items to dict keyed by item_path
+        # Add defensive None checks for all fields
+        items_dict_a = {}
+        items_dict_b = {}
+        
+        for item in items_a:
+            # Defensive check for item_path
+            path = item.get("item_path")
+            if path:
+                items_dict_a[path] = item
+            else:
+                logger.warning("Item without item_path found in version A, skipping")
+        
+        for item in items_b:
+            # Defensive check for item_path
+            path = item.get("item_path")
+            if path:
+                items_dict_b[path] = item
+            else:
+                logger.warning("Item without item_path found in version B, skipping")
+
         # Compute item hashes for change detection
         hashes_a = {}
         hashes_b = {}
 
-        for path, item in items_a.items():
-            hashes_a[path] = await compute_item_hash(item)
+        for path, item in items_dict_a.items():
+            try:
+                hashes_a[path] = await compute_item_hash(item)
+            except Exception as e:
+                logger.warning(f"Failed to compute hash for {path} in version A: {e}")
+                # Use a default hash to allow comparison to continue
+                hashes_a[path] = hashlib.md5(path.encode()).hexdigest()
 
-        for path, item in items_b.items():
-            hashes_b[path] = await compute_item_hash(item)
+        for path, item in items_dict_b.items():
+            try:
+                hashes_b[path] = await compute_item_hash(item)
+            except Exception as e:
+                logger.warning(f"Failed to compute hash for {path} in version B: {e}")
+                # Use a default hash to allow comparison to continue
+                hashes_b[path] = hashlib.md5(path.encode()).hexdigest()
 
         # Detect changes
-        paths_a = set(items_a.keys())
-        paths_b = set(items_b.keys())
+        paths_a = set(items_dict_a.keys())
+        paths_b = set(items_dict_b.keys())
 
         added_paths = paths_b - paths_a
         removed_paths = paths_a - paths_b
@@ -299,7 +330,7 @@ class VersionDiffEngine:
 
         # Process removed items
         for path in removed_paths:
-            item = items_a[path]
+            item = items_dict_a[path]
             change = await self._create_removed_change(path, item)
             changes[ChangeCategory.REMOVED.value].append(change)
             if change.severity == Severity.BREAKING:
@@ -307,15 +338,15 @@ class VersionDiffEngine:
 
         # Process added items
         for path in added_paths:
-            item = items_b[path]
+            item = items_dict_b[path]
             change = await self._create_added_change(path, item)
             changes[ChangeCategory.ADDED.value].append(change)
 
         # Process modified items
         for path in common_paths:
-            if hashes_a[path] != hashes_b[path]:
-                item_a = items_a[path]
-                item_b = items_b[path]
+            if hashes_a.get(path) != hashes_b.get(path):
+                item_a = items_dict_a[path]
+                item_b = items_dict_b[path]
                 change = await self._create_modified_change(path, item_a, item_b)
                 changes[ChangeCategory.MODIFIED.value].append(change)
 
@@ -378,19 +409,33 @@ class VersionDiffEngine:
         return response
 
     async def _create_removed_change(self, path: str, item: dict) -> ItemChange:
-        """Create change object for removed item."""
+        """Create change object for removed item with defensive None handling."""
+        # Defensive None checks for all accessed fields
+        item_type = item.get("item_type") if item else None
+        visibility = item.get("visibility") if item else None
+        signature = item.get("signature") if item else None
+        deprecated = item.get("deprecated") if item else None
+        
+        # Default values for None cases
+        if visibility is None:
+            visibility = "public"
+        if signature is None:
+            signature = ""
+        if deprecated is None:
+            deprecated = False
+            
         return ItemChange(
             path=path,
-            kind=self._map_item_type(item.get("item_type", "unknown")),
+            kind=self._map_item_type(item_type),
             change_type=ChangeType.REMOVED,
             severity=Severity.BREAKING
-            if item.get("visibility") == "public"
+            if visibility == "public"
             else Severity.MINOR,
             details=ChangeDetails(
                 before=ItemSignature(
-                    raw_signature=item.get("signature") or "",
-                    visibility=item.get("visibility", "public"),
-                    deprecated=item.get("deprecated", False),
+                    raw_signature=signature,
+                    visibility=visibility,
+                    deprecated=deprecated,
                 ),
                 after=None,
                 semantic_changes=["Item removed from API"],
@@ -398,18 +443,32 @@ class VersionDiffEngine:
         )
 
     async def _create_added_change(self, path: str, item: dict) -> ItemChange:
-        """Create change object for added item."""
+        """Create change object for added item with defensive None handling."""
+        # Defensive None checks for all accessed fields
+        item_type = item.get("item_type") if item else None
+        visibility = item.get("visibility") if item else None
+        signature = item.get("signature") if item else None
+        deprecated = item.get("deprecated") if item else None
+        
+        # Default values for None cases
+        if visibility is None:
+            visibility = "public"
+        if signature is None:
+            signature = ""
+        if deprecated is None:
+            deprecated = False
+            
         return ItemChange(
             path=path,
-            kind=self._map_item_type(item.get("item_type", "unknown")),
+            kind=self._map_item_type(item_type),
             change_type=ChangeType.ADDED,
             severity=Severity.MINOR,
             details=ChangeDetails(
                 before=None,
                 after=ItemSignature(
-                    raw_signature=item.get("signature") or "",
-                    visibility=item.get("visibility", "public"),
-                    deprecated=item.get("deprecated", False),
+                    raw_signature=signature,
+                    visibility=visibility,
+                    deprecated=deprecated,
                 ),
                 semantic_changes=["New item added to API"],
             ),
@@ -418,58 +477,86 @@ class VersionDiffEngine:
     async def _create_modified_change(
         self, path: str, item_a: dict, item_b: dict
     ) -> ItemChange:
-        """Create change object for modified item."""
+        """Create change object for modified item with defensive None handling."""
         semantic_changes = []
         severity = Severity.PATCH
 
+        # Defensive None checks for all fields
+        sig_a = item_a.get("signature") if item_a else None
+        sig_b = item_b.get("signature") if item_b else None
+        vis_a = item_a.get("visibility") if item_a else None
+        vis_b = item_b.get("visibility") if item_b else None
+        dep_a = item_a.get("deprecated") if item_a else None
+        dep_b = item_b.get("deprecated") if item_b else None
+        gen_a = item_a.get("generic_params") if item_a else None
+        gen_b = item_b.get("generic_params") if item_b else None
+        bounds_a = item_a.get("trait_bounds") if item_a else None
+        bounds_b = item_b.get("trait_bounds") if item_b else None
+        type_a = item_a.get("item_type") if item_a else None
+
         # Check signature changes
-        if item_a.get("signature") != item_b.get("signature"):
+        if sig_a != sig_b:
             semantic_changes.append("Function/type signature changed")
             severity = Severity.BREAKING
 
         # Check visibility changes
-        if item_a.get("visibility") != item_b.get("visibility"):
-            if item_b.get("visibility") == "private":
+        if vis_a != vis_b:
+            if vis_b == "private":
                 semantic_changes.append("Changed from public to private")
                 severity = Severity.BREAKING
             else:
+                vis_b_display = vis_b if vis_b else "unknown"
                 semantic_changes.append(
-                    f"Visibility changed to {item_b.get('visibility')}"
+                    f"Visibility changed to {vis_b_display}"
                 )
 
         # Check deprecation
-        if not item_a.get("deprecated") and item_b.get("deprecated"):
+        if not dep_a and dep_b:
             semantic_changes.append("Item marked as deprecated")
             if severity == Severity.PATCH:
                 severity = Severity.MINOR
 
         # Check generic changes
-        if item_a.get("generic_params") != item_b.get("generic_params"):
+        if gen_a != gen_b:
             semantic_changes.append("Generic parameters changed")
             severity = Severity.BREAKING
 
         # Check trait bounds
-        if item_a.get("trait_bounds") != item_b.get("trait_bounds"):
+        if bounds_a != bounds_b:
             semantic_changes.append("Trait bounds changed")
             severity = Severity.BREAKING
 
+        # Default values for None cases
+        if sig_a is None:
+            sig_a = ""
+        if sig_b is None:
+            sig_b = ""
+        if vis_a is None:
+            vis_a = "public"
+        if vis_b is None:
+            vis_b = "public"
+        if dep_a is None:
+            dep_a = False
+        if dep_b is None:
+            dep_b = False
+
         return ItemChange(
             path=path,
-            kind=self._map_item_type(item_a.get("item_type", "unknown")),
+            kind=self._map_item_type(type_a),
             change_type=ChangeType.MODIFIED,
             severity=severity,
             details=ChangeDetails(
                 before=ItemSignature(
-                    raw_signature=item_a.get("signature") or "",
-                    visibility=item_a.get("visibility", "public"),
-                    deprecated=item_a.get("deprecated", False),
-                    generics=item_a.get("generic_params"),
+                    raw_signature=sig_a,
+                    visibility=vis_a,
+                    deprecated=dep_a,
+                    generics=gen_a,
                 ),
                 after=ItemSignature(
-                    raw_signature=item_b.get("signature") or "",
-                    visibility=item_b.get("visibility", "public"),
-                    deprecated=item_b.get("deprecated", False),
-                    generics=item_b.get("generic_params"),
+                    raw_signature=sig_b,
+                    visibility=vis_b,
+                    deprecated=dep_b,
+                    generics=gen_b,
                 ),
                 semantic_changes=semantic_changes,
             ),

@@ -30,6 +30,9 @@ uvx docsrs-mcp
 - 🛡️ **ReDoS Protection** - Secure regex search with timeout and pattern validation
 - 🌐 **Cross-Crate Search** - Search across up to 5 crates simultaneously with RRF ranking
 - ⚖️ **Stability Filtering** - Filter results by API stability level (stable/unstable/experimental)
+- 📖 **Progressive Detail Levels** - Get documentation at summary, detailed, or expert levels
+- 🔬 **Usage Pattern Extraction** - Automatically extract common patterns from code examples
+- 🎓 **Learning Path Generation** - Generate migration paths or onboarding guides for APIs
 
 ## Installation
 
@@ -110,6 +113,14 @@ claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx --from git+https://github
 | `ingest_cargo_file` | Bulk ingest dependencies from Cargo.toml/Cargo.lock with version resolution |
 | `list_versions` | List all available crate versions |
 
+### Workflow Enhancement Tools
+
+| Tool | Description |
+|------|-------------|
+| `getDocumentationDetail` | Get documentation with progressive detail levels (summary/detailed/expert) |
+| `extractUsagePatterns` | Extract common usage patterns from documentation and code examples |
+| `generateLearningPath` | Generate learning paths for API migration or onboarding |
+
 ## MCP Parameter Requirements
 
 **MCP Client Compatibility**: All parameters are accepted as strings to ensure maximum compatibility with MCP clients like Claude Code. The server automatically converts these to appropriate types.
@@ -139,6 +150,33 @@ claude mcp add docsrs --env MAX_CACHE_SIZE_GB=5 -- uvx --from git+https://github
   "count": "100",
   "concurrency": "3",
   "force": "true"
+}
+```
+
+#### Progressive detail documentation:
+```json
+{
+  "crate_name": "serde",
+  "item_path": "serde::Serialize",
+  "detail_level": "expert"
+}
+```
+
+#### Extract usage patterns:
+```json
+{
+  "crate_name": "tokio",
+  "limit": "10",
+  "min_frequency": "2"
+}
+```
+
+#### Generate learning path:
+```json
+{
+  "crate_name": "actix-web",
+  "from_version": "3.0.0",
+  "to_version": "4.0.0"
 }
 ```
 

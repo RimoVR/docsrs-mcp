@@ -263,6 +263,85 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
             "required": ["crate_name", "version1", "version2"],
         },
     },
+    {
+        "name": "getDocumentationDetail",
+        "description": "Get documentation with progressive detail levels (summary/detailed/expert)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "crate_name": {
+                    "type": "string",
+                    "description": "Name of the Rust crate",
+                },
+                "item_path": {
+                    "type": "string",
+                    "description": "Path to the item (e.g., 'serde::Serialize')",
+                },
+                "detail_level": {
+                    "type": "string",
+                    "description": "Level of detail: summary, detailed, or expert",
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Specific version or 'latest'",
+                },
+            },
+            "required": ["crate_name", "item_path"],
+        },
+    },
+    {
+        "name": "extractUsagePatterns",
+        "description": "Extract common usage patterns from documentation and examples",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "crate_name": {
+                    "type": "string",
+                    "description": "Name of the Rust crate",
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Specific version or 'latest'",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of patterns to return",
+                },
+                "min_frequency": {
+                    "type": "integer",
+                    "description": "Minimum frequency for a pattern to be included",
+                },
+            },
+            "required": ["crate_name"],
+        },
+    },
+    {
+        "name": "generateLearningPath",
+        "description": "Generate learning path for API migration or onboarding",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "crate_name": {
+                    "type": "string",
+                    "description": "Name of the Rust crate",
+                },
+                "from_version": {
+                    "type": "string",
+                    "description": "Starting version (omit for new users)",
+                },
+                "to_version": {
+                    "type": "string",
+                    "description": "Target version",
+                },
+                "focus_areas": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of focus areas",
+                },
+            },
+            "required": ["crate_name"],
+        },
+    },
 ]
 
 # Resource definitions

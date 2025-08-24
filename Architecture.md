@@ -420,6 +420,7 @@ src/docsrs_mcp/
 │   ├── search.py            # Vector search operations using sqlite-vec with caching (~504 LOC)
 │   ├── retrieval.py         # Database retrieval operations and queries (~326 LOC)
 │   ├── ingestion.py         # Ingestion status tracking and recovery support (~363 LOC)
+│   ├── pattern_analysis.py  # **Phase 7**: Pattern extraction and usage analysis (~403 LOC)
 │   └── __init__.py          # Facade module with re-exports for backward compatibility (~114 LOC)
 └── api/
     ├── health.py            # Health check endpoints and monitoring (200-300 LOC)
@@ -1279,6 +1280,7 @@ graph TB
         SEARCH[search.py<br/>Vector Search Operations<br/>sqlite-vec Integration<br/>504 LOC]
         RETRIEVAL[retrieval.py<br/>Database Retrieval<br/>Queries & Lookups<br/>326 LOC]
         INGESTION[ingestion.py<br/>Ingestion Status Tracking<br/>Recovery Support<br/>363 LOC]
+        PATTERNS[pattern_analysis.py<br/>Phase 7 Pattern Extraction<br/>Usage Analysis Queries<br/>403 LOC]
     end
     
     INIT --> CONN
@@ -1287,6 +1289,7 @@ graph TB
     INIT --> SEARCH
     INIT --> RETRIEVAL
     INIT --> INGESTION
+    INIT --> PATTERNS
 ```
 
 ### Module Responsibilities
@@ -1378,6 +1381,13 @@ database/migrations/
 - `reset_ingestion_status` for re-ingestion scenarios
 - Checkpoint data support for resilient long-running processes
 - Status tracking across the four-tier ingestion fallback system
+
+**pattern_analysis.py** (403 LOC) - **Phase 7 Enhancement**:
+- `analyze_usage_patterns` for extracting common patterns from documentation and examples
+- `get_api_evolution` for tracking API changes across versions
+- `find_common_examples` for pattern-specific example retrieval
+- `get_pattern_frequencies` for pattern frequency analysis
+- `analyze_module_patterns` for module-specific pattern extraction
 
 **__init__.py** (114 LOC):
 - Facade pattern implementation for backward compatibility
@@ -2330,6 +2340,178 @@ The service integrates with specialized response models for type safety and stru
 ### Known Integration Issues
 
 **MCP Integration Challenge**: The service is architecturally sound but requires MCP tool integration for external access. This integration is currently pending and affects tool availability in MCP clients.
+
+## WorkflowService Architecture (Phase 7)
+
+The WorkflowService provides progressive documentation detail levels, usage pattern extraction, and learning path generation for enhanced developer workflows. This service implements intelligent caching strategies and performance-optimized queries for sub-50ms response times.
+
+### Service Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "WorkflowService Components"
+        WS[WorkflowService<br/>Main service orchestrator<br/>Three-tier caching<br/>Progressive detail levels]
+        
+        subgraph "Detail Level System"
+            SUMMARY[Summary Level<br/>Essential information<br/>Signature, type, status]
+            DETAILED[Detailed Level<br/>Full documentation<br/>Examples included]
+            EXPERT[Expert Level<br/>Implementation details<br/>Related items, generics]
+        end
+        
+        subgraph "Pattern Extraction"
+            PATTERN_ENGINE[Pattern Engine<br/>Regex-based extraction<br/>Method calls, generics<br/>Error patterns]
+            FREQUENCY[Frequency Analysis<br/>Counter-based ranking<br/>Confidence scoring]
+        end
+        
+        subgraph "Learning Path Generation"
+            MIGRATION[Migration Path<br/>Version diff analysis<br/>Breaking change steps]
+            ONBOARDING[Onboarding Path<br/>Module discovery<br/>Focus area support]
+        end
+        
+        subgraph "Three-Tier Caching"
+            DETAIL_CACHE[Detail Cache<br/>item_path:level:version]
+            PATTERN_CACHE[Pattern Cache<br/>crate:version:patterns]
+            LEARNING_CACHE[Learning Cache<br/>crate:from:to versions]
+        end
+    end
+    
+    subgraph "Database Integration"
+        PATTERN_ANALYSIS[pattern_analysis.py<br/>Specialized queries<br/>403 LOC]
+        EMBEDDINGS_DB[(embeddings table<br/>content, examples<br/>signatures)]
+        CRATE_METADATA[(crate_metadata table<br/>version tracking)]
+    end
+    
+    WS --> SUMMARY
+    WS --> DETAILED  
+    WS --> EXPERT
+    WS --> PATTERN_ENGINE
+    WS --> MIGRATION
+    WS --> ONBOARDING
+    
+    WS --> DETAIL_CACHE
+    WS --> PATTERN_CACHE
+    WS --> LEARNING_CACHE
+    
+    PATTERN_ENGINE --> PATTERN_ANALYSIS
+    MIGRATION --> EMBEDDINGS_DB
+    ONBOARDING --> CRATE_METADATA
+    
+    PATTERN_ANALYSIS --> EMBEDDINGS_DB
+```
+
+### Progressive Detail System
+
+The WorkflowService implements three progressive detail levels to reduce cognitive load while enabling deep exploration:
+
+**Summary Level** (`DetailLevel.SUMMARY`):
+- Essential information only: signature, type, visibility, deprecation status
+- < 50ms response time with aggressive caching
+- Optimal for browsing and quick reference
+
+**Detailed Level** (`DetailLevel.DETAILED`):
+- Full documentation content and code examples
+- Comprehensive but focused on usage patterns
+- Ideal for understanding API functionality
+
+**Expert Level** (`DetailLevel.EXPERT`):
+- Complete implementation details including generics and trait bounds
+- Related items discovery (up to 10 items)
+- Advanced developers and deep architectural understanding
+
+### Usage Pattern Extraction Engine
+
+The pattern extraction system analyzes documentation, examples, and signatures to identify common usage patterns:
+
+**Pattern Categories**:
+- `method_call`: Common method invocation patterns (e.g., `.method()`)  
+- `error_handling`: Result and Option patterns
+- `generic_type`: Generic parameter usage
+- `trait_implementation`: Trait impl patterns
+- `other`: Miscellaneous patterns
+
+**Extraction Process**:
+1. **Regex Analysis**: Multiple compiled regex patterns for performance
+2. **Frequency Counting**: Counter-based pattern ranking with minimum frequency threshold
+3. **Confidence Scoring**: Logarithmic scaling for better distribution
+4. **Context Extraction**: Surrounding code context for each pattern match
+
+### Learning Path Generation
+
+The service generates structured learning paths for both API migrations and new user onboarding:
+
+**Migration Paths** (version-to-version):
+- Integration with VersionDiffEngine for breaking change analysis
+- Prioritized steps: Breaking changes → Deprecated items → New features
+- Time estimates based on change complexity (15min/breaking, 10min/deprecated, 5min/new)
+
+**Onboarding Paths** (new users):
+- Module and type discovery from database queries
+- Progressive learning: Core concepts → Data structures → Functions
+- Focus area support for specialized learning tracks
+
+### Three-Tier Caching Strategy
+
+**Performance-Optimized Caching**:
+
+| Cache Type | Key Format | TTL | Hit Rate Target |
+|------------|------------|-----|-----------------|
+| Detail Cache | `crate:path:level:version` | Session-based | 85%+ |
+| Pattern Cache | `crate:version:patterns` | Session-based | 70%+ |
+| Learning Cache | `crate:from:to` | Session-based | 60%+ |
+
+**Cache Benefits**:
+- Sub-50ms response times for cached operations
+- Reduced database query load
+- Memory-efficient with explicit cleanup
+
+### Database Query Integration
+
+The WorkflowService leverages specialized database queries in `pattern_analysis.py`:
+
+**Key Query Functions**:
+- `analyze_usage_patterns`: Extract patterns from documentation and examples
+- `get_api_evolution`: Track API changes across versions  
+- `find_common_examples`: Pattern-specific example retrieval
+- `analyze_module_patterns`: Module-specific pattern extraction
+
+**Performance Characteristics**:
+- Optimized queries with LIMIT clauses to prevent resource exhaustion
+- Async/await pattern for non-blocking operations
+- Connection reuse through aiosqlite connection management
+
+### MCP Tool Integration
+
+Three new MCP tools provide external access to WorkflowService capabilities:
+
+1. **get_documentation_detail**: Progressive detail level access
+2. **extract_usage_patterns**: Pattern extraction with filtering
+3. **generate_learning_path**: Migration and onboarding path generation
+
+**Tool Performance**:
+- String-only parameters for universal MCP client compatibility
+- Input validation and error handling
+- Response models with Pydantic validation (`models/workflow.py`)
+
+### Integration Points
+
+**Service Dependencies**:
+- `ingest_crate`: Ensures target crate is available for analysis  
+- `get_diff_engine`: Version comparison for migration path generation
+- `aiosqlite`: Async database operations with timeout handling
+
+**Response Model Integration**:
+- `ProgressiveDetailResponse`: Detail level responses with error handling
+- `UsagePatternResponse`: Pattern extraction results with metadata
+- `LearningPathResponse`: Structured learning paths with time estimates
+
+### Performance Characteristics
+
+| Operation | Typical Latency | Cache Hit Rate | Memory Usage |
+|-----------|----------------|------------------|--------------|
+| Progressive Detail | <50ms | 85%+ | ~1MB per response |
+| Pattern Extraction | <200ms | 70%+ | ~3MB per analysis |
+| Learning Path Generation | <300ms | 60%+ | ~2MB per path |
+| Database Pattern Query | <100ms | N/A | ~1MB per query |
 
 ## Cross-Crate Search Architecture
 

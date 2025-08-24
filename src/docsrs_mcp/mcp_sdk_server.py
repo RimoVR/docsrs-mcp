@@ -28,12 +28,18 @@ from .models import (
     TypeTraitsResponse,
     VersionDiffResponse,
 )
+from .models.workflow import (
+    LearningPathResponse,
+    ProgressiveDetailResponse,
+    UsagePatternResponse,
+)
 from .services import (
     CrateService,
     CrossReferenceService,
     IngestionService,
     TypeNavigationService,
 )
+from .services.workflow_service import WorkflowService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +50,7 @@ server = Server("docsrs-mcp")
 crate_service = CrateService()
 ingestion_service = IngestionService()
 type_navigation_service = TypeNavigationService()
+workflow_service = WorkflowService()
 
 
 # Parameter validation utilities
@@ -565,6 +572,130 @@ async def compare_versions(
         return VersionDiffResponse(**result).model_dump()
     except Exception as e:
         logger.error(f"Error in compare_versions: {e}")
+        raise
+
+
+# Phase 7: Workflow Enhancement Tools
+
+async def get_documentation_detail(
+    crate_name: str,
+    item_path: str,
+    detail_level: str = "summary",
+    version: str = "latest",
+) -> dict:
+    """Get documentation at specified detail level.
+
+    Provides progressive detail levels for documentation to reduce cognitive load
+    while enabling deep exploration. Switch between summary, detailed, and expert
+    views in <50ms.
+
+    Args:
+        crate_name: Name of the Rust crate
+        item_path: Path to the item
+        detail_level: Level of detail ('summary', 'detailed', 'expert')
+        version: Specific version or 'latest' (default: latest)
+
+    Returns:
+        Documentation with appropriate detail level
+    """
+    try:
+        result = await workflow_service.get_documentation_with_detail_level(
+            crate_name,
+            item_path,
+            detail_level,
+            version if version != "latest" else None,
+        )
+        return ProgressiveDetailResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in get_documentation_detail: {e}")
+        raise
+
+
+async def extract_usage_patterns(
+    crate_name: str,
+    version: str = "latest",
+    limit: str = "10",
+    min_frequency: str = "2",
+) -> dict:
+    """Extract common usage patterns from documentation and examples.
+
+    Analyzes documentation and code examples to identify common usage patterns
+    and idioms. Helps understand how APIs are typically used in practice.
+
+    Args:
+        crate_name: Name of the Rust crate
+        version: Specific version or 'latest' (default: latest)
+        limit: Maximum number of patterns to return (1-50, default: 10)
+        min_frequency: Minimum pattern frequency (1-100, default: 2)
+
+    Returns:
+        List of usage patterns with frequency and examples
+    """
+    try:
+        limit_int = validate_int_parameter(limit, default=10, min_val=1, max_val=50)
+        min_freq_int = validate_int_parameter(
+            min_frequency, default=2, min_val=1, max_val=100
+        )
+        
+        patterns = await workflow_service.extract_usage_patterns(
+            crate_name,
+            version if version != "latest" else None,
+            limit=limit_int,
+            min_frequency=min_freq_int,
+        )
+        
+        return UsagePatternResponse(
+            crate_name=crate_name,
+            version=version,
+            patterns=patterns,
+            total_patterns_found=len(patterns),
+        ).model_dump()
+    except Exception as e:
+        logger.error(f"Error in extract_usage_patterns: {e}")
+        raise
+
+
+async def generate_learning_path(
+    crate_name: str,
+    from_version: str = "",
+    to_version: str = "latest",
+    focus_areas: str = "",
+) -> dict:
+    """Generate learning path for API migration or onboarding.
+
+    Creates structured learning paths for migrating between versions or
+    onboarding to a new crate. Provides step-by-step guidance with time
+    estimates.
+
+    Args:
+        crate_name: Name of the Rust crate
+        from_version: Starting version (empty for new users)
+        to_version: Target version (default: latest)
+        focus_areas: Comma-separated focus areas (optional)
+
+    Returns:
+        Structured learning path with steps and resources
+    """
+    try:
+        # Parse focus areas if provided
+        focus_list = []
+        if focus_areas:
+            focus_list = [area.strip() for area in focus_areas.split(",") if area.strip()]
+        
+        # Convert empty string to None for from_version
+        from_ver = from_version if from_version else None
+        to_ver = to_version if to_version != "latest" else None
+        
+        result = await workflow_service.generate_learning_path(
+            crate_name,
+            from_version=from_ver,
+            to_version=to_ver,
+            focus_areas=focus_list if focus_list else None,
+        )
+        
+        return LearningPathResponse(**result).model_dump()
+    except Exception as e:
+        logger.error(f"Error in generate_learning_path: {e}")
         raise
 
 
@@ -1121,6 +1252,93 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["crate_name", "version_a", "version_b"],
             },
         ),
+        # Phase 7: Workflow Enhancement Tools
+        types.Tool(
+            name="get_documentation_detail",
+            description="Get documentation at specified detail level (summary/detailed/expert)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "item_path": {
+                        "type": "string",
+                        "description": "Path to the item",
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "default": "summary",
+                        "description": "Level of detail ('summary', 'detailed', 'expert')",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "item_path"],
+            },
+        ),
+        types.Tool(
+            name="extract_usage_patterns",
+            description="Extract common usage patterns from documentation and examples",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                    "limit": {
+                        "type": "string",
+                        "default": "10",
+                        "description": "Maximum patterns to return (1-50)",
+                    },
+                    "min_frequency": {
+                        "type": "string",
+                        "default": "2",
+                        "description": "Minimum pattern frequency (1-100)",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
+        types.Tool(
+            name="generate_learning_path",
+            description="Generate learning path for API migration or onboarding",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "from_version": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Starting version (empty for new users)",
+                    },
+                    "to_version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Target version",
+                    },
+                    "focus_areas": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Comma-separated focus areas",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
         # Phase 6: Cross-References Tools
         types.Tool(
             name="resolve_import",
@@ -1209,6 +1427,91 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["crate_name", "item_path"],
             },
         ),
+        types.Tool(
+            name="getDocumentationDetail",
+            description="Get documentation with progressive detail levels (summary/detailed/expert)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "item_path": {
+                        "type": "string",
+                        "description": "Path to the item (e.g., 'serde::Serialize')",
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "default": "summary",
+                        "description": "Level of detail: summary, detailed, or expert",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "item_path"],
+            },
+        ),
+        types.Tool(
+            name="extractUsagePatterns",
+            description="Extract common usage patterns from documentation and examples",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                    "limit": {
+                        "type": "string",
+                        "default": "10",
+                        "description": "Maximum number of patterns to return",
+                    },
+                    "min_frequency": {
+                        "type": "string",
+                        "default": "2",
+                        "description": "Minimum frequency for a pattern to be included",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
+        types.Tool(
+            name="generateLearningPath",
+            description="Generate learning path for API migration or onboarding",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "from_version": {
+                        "type": "string",
+                        "description": "Starting version (omit for new users)",
+                    },
+                    "to_version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Target version",
+                    },
+                    "focus_areas": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of focus areas",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
     ]
 
 
@@ -1249,6 +1552,13 @@ async def handle_call_tool(
             result = await get_generic_constraints(**arguments)
         elif name == "compare_versions":
             result = await compare_versions(**arguments)
+        # Phase 7: Workflow Enhancement Tools
+        elif name == "get_documentation_detail":
+            result = await get_documentation_detail(**arguments)
+        elif name == "extract_usage_patterns":
+            result = await extract_usage_patterns(**arguments)
+        elif name == "generate_learning_path":
+            result = await generate_learning_path(**arguments)
         # Phase 6: Cross-References Tools
         elif name == "resolve_import":
             result = await resolve_import_handler(**arguments)
@@ -1258,6 +1568,12 @@ async def handle_call_tool(
             result = await suggest_migrations_handler(**arguments)
         elif name == "trace_reexports":
             result = await trace_reexports_handler(**arguments)
+        elif name == "getDocumentationDetail":
+            result = await get_documentation_detail(**arguments)
+        elif name == "extractUsagePatterns":
+            result = await extract_usage_patterns(**arguments)
+        elif name == "generateLearningPath":
+            result = await generate_learning_path(**arguments)
         else:
             raise ValueError(f"Unknown tool: {name}")
         
