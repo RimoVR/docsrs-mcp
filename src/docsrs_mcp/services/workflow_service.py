@@ -317,7 +317,11 @@ class WorkflowService:
     def _categorize_pattern(self, pattern: str) -> str:
         """Categorize a pattern type."""
         # Check for method call patterns (e.g., ".method()", "obj.method()")
-        if "." in pattern and "(" in pattern and pattern.index(".") < pattern.index("("):
+        if (
+            "." in pattern
+            and "(" in pattern
+            and pattern.index(".") < pattern.index("(")
+        ):
             return "method_call"
         elif "Result<" in pattern:
             return "error_handling"

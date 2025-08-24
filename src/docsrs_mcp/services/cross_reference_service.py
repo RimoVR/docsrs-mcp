@@ -15,7 +15,6 @@ class CircuitOpenError(Exception):
     """Exception raised when circuit breaker is open."""
 
 
-
 class SimpleCircuitBreaker:
     """Simple circuit breaker for resilience."""
 
@@ -116,7 +115,9 @@ class CrossReferenceService:
             return self._graph_cache[cache_key]
 
         # Try standard resolution first
-        resolved_path = await fuzzy_resolver.resolve_path_alias(crate_name, import_path, self.db_path)
+        resolved_path = await fuzzy_resolver.resolve_path_alias(
+            crate_name, import_path, self.db_path
+        )
 
         result = {
             "resolved_path": "",

@@ -577,6 +577,7 @@ async def compare_versions(
 
 # Phase 7: Workflow Enhancement Tools
 
+
 async def get_documentation_detail(
     crate_name: str,
     item_path: str,
@@ -636,14 +637,14 @@ async def extract_usage_patterns(
         min_freq_int = validate_int_parameter(
             min_frequency, default=2, min_val=1, max_val=100
         )
-        
+
         patterns = await workflow_service.extract_usage_patterns(
             crate_name,
             version if version != "latest" else None,
             limit=limit_int,
             min_frequency=min_freq_int,
         )
-        
+
         return UsagePatternResponse(
             crate_name=crate_name,
             version=version,
@@ -680,19 +681,21 @@ async def generate_learning_path(
         # Parse focus areas if provided
         focus_list = []
         if focus_areas:
-            focus_list = [area.strip() for area in focus_areas.split(",") if area.strip()]
-        
+            focus_list = [
+                area.strip() for area in focus_areas.split(",") if area.strip()
+            ]
+
         # Convert empty string to None for from_version
         from_ver = from_version if from_version else None
         to_ver = to_version if to_version != "latest" else None
-        
+
         result = await workflow_service.generate_learning_path(
             crate_name,
             from_version=from_ver,
             to_version=to_ver,
             focus_areas=focus_list if focus_list else None,
         )
-        
+
         return LearningPathResponse(**result).model_dump()
     except Exception as e:
         logger.error(f"Error in generate_learning_path: {e}")
@@ -854,6 +857,86 @@ async def trace_reexports_handler(
         return ReexportTrace(**result).model_dump()
     except Exception as e:
         logger.error(f"Error in trace_reexports: {e}")
+        raise
+
+
+# Phase 5: Code Intelligence Tools
+async def get_code_intelligence(
+    crate_name: str, item_path: str, version: str = "latest"
+) -> dict:
+    """Get comprehensive code intelligence for a specific item.
+
+    Args:
+        crate_name: Name of the Rust crate
+        item_path: Full path to the item (e.g., 'tokio::spawn')
+        version: Specific version or 'latest'
+
+    Returns:
+        Dictionary with code intelligence data including safety info,
+        error types, and feature requirements
+    """
+    try:
+        # Use type_navigation_service for intelligence data
+        result = await type_navigation_service.get_item_intelligence(
+            crate_name, item_path, version
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error in get_code_intelligence: {e}")
+        raise
+
+
+async def get_error_types(
+    crate_name: str, pattern: str | None = None, version: str = "latest"
+) -> dict:
+    """List all error types in a crate or matching a pattern.
+
+    Args:
+        crate_name: Name of the Rust crate
+        pattern: Optional pattern to filter error types
+        version: Specific version or 'latest'
+
+    Returns:
+        Dictionary with error types found in the crate
+    """
+    try:
+        # Use type_navigation_service for error catalog
+        result = await type_navigation_service.get_error_catalog(
+            crate_name, pattern, version
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error in get_error_types: {e}")
+        raise
+
+
+async def get_unsafe_items(
+    crate_name: str, include_reasons: str = "false", version: str = "latest"
+) -> dict:
+    """List all unsafe items in a crate with optional safety documentation.
+
+    Args:
+        crate_name: Name of the Rust crate
+        include_reasons: Include detailed unsafe reasons and safety docs ('true'/'false')
+        version: Specific version or 'latest'
+
+    Returns:
+        Dictionary with unsafe items and their safety information
+    """
+    try:
+        # Convert string boolean to actual boolean
+        include_reasons_bool = include_reasons.lower() == "true"
+
+        # Use type_navigation_service for safety search
+        result = await type_navigation_service.search_by_safety(
+            crate_name,
+            is_safe=False,
+            include_reasons=include_reasons_bool,
+            version=version,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error in get_unsafe_items: {e}")
         raise
 
 
@@ -1512,6 +1595,77 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["crate_name"],
             },
         ),
+        # Phase 5: Code Intelligence Tools
+        types.Tool(
+            name="get_code_intelligence",
+            description="Get comprehensive code intelligence for a specific item including safety info, error types, and feature requirements",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "item_path": {
+                        "type": "string",
+                        "description": "Full path to the item (e.g., 'tokio::spawn')",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name", "item_path"],
+            },
+        ),
+        types.Tool(
+            name="get_error_types",
+            description="List all error types in a crate or matching a pattern",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Optional pattern to filter error types",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
+        types.Tool(
+            name="get_unsafe_items",
+            description="List all unsafe items in a crate with optional safety documentation",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Name of the Rust crate",
+                    },
+                    "include_reasons": {
+                        "type": "string",
+                        "default": "false",
+                        "description": "Include detailed unsafe reasons and safety documentation ('true'/'false')",
+                    },
+                    "version": {
+                        "type": "string",
+                        "default": "latest",
+                        "description": "Specific version or 'latest'",
+                    },
+                },
+                "required": ["crate_name"],
+            },
+        ),
     ]
 
 
@@ -1574,9 +1728,16 @@ async def handle_call_tool(
             result = await extract_usage_patterns(**arguments)
         elif name == "generateLearningPath":
             result = await generate_learning_path(**arguments)
+        # Phase 5: Code Intelligence Tools
+        elif name == "get_code_intelligence":
+            result = await get_code_intelligence(**arguments)
+        elif name == "get_error_types":
+            result = await get_error_types(**arguments)
+        elif name == "get_unsafe_items":
+            result = await get_unsafe_items(**arguments)
         else:
             raise ValueError(f"Unknown tool: {name}")
-        
+
         return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
     except Exception as e:
         logger.error(f"Error calling tool {name}: {e}")

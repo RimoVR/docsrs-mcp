@@ -336,7 +336,7 @@ async def query_trait_implementations(
 
         results = []
         async for row in cursor:
-            results.append(dict(zip(columns, row)))
+            results.append(dict(zip(columns, row, strict=False)))
 
         return results
 
@@ -375,7 +375,7 @@ async def query_method_signatures(
 
         results = []
         async for row in cursor:
-            results.append(dict(zip(columns, row)))
+            results.append(dict(zip(columns, row, strict=False)))
 
         return results
 
@@ -414,7 +414,7 @@ async def query_associated_items(
 
         results = []
         async for row in cursor:
-            results.append(dict(zip(columns, row)))
+            results.append(dict(zip(columns, row, strict=False)))
 
         return results
 
@@ -448,7 +448,7 @@ async def query_generic_constraints(
 
         results = []
         async for row in cursor:
-            results.append(dict(zip(columns, row)))
+            results.append(dict(zip(columns, row, strict=False)))
 
         return results
 

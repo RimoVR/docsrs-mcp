@@ -58,7 +58,7 @@ async def upgrade(db_path: Path) -> None:
         # Partial index for unsafe items (much smaller than full index)
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_unsafe_items 
-            ON embeddings(item_type, crate_id) 
+            ON embeddings(item_type) 
             WHERE is_safe = 0
         """)
         logger.info("Created partial index for unsafe items")
@@ -66,7 +66,7 @@ async def upgrade(db_path: Path) -> None:
         # Partial index for items with error types
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_error_items 
-            ON embeddings(item_type, crate_id) 
+            ON embeddings(item_type) 
             WHERE error_types IS NOT NULL
         """)
         logger.info("Created partial index for items with error types")
@@ -74,7 +74,7 @@ async def upgrade(db_path: Path) -> None:
         # Partial index for items with feature requirements
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_feature_items 
-            ON embeddings(crate_id) 
+            ON embeddings(item_path) 
             WHERE feature_requirements IS NOT NULL
         """)
         logger.info("Created partial index for items with feature requirements")
@@ -100,10 +100,9 @@ async def downgrade(db_path: Path) -> None:
         await db.execute("""
             CREATE TABLE embeddings_temp AS 
             SELECT 
-                id, crate_id, item_path, item_type, embedding, signature,
-                description, module_path, visibility, deprecated, generic_params,
-                trait_bounds, return_type, parameters, examples, attributes,
-                source_file, source_line, documentation_url, created_at
+                id, item_path, header, content, embedding, item_type, signature,
+                parent_id, examples, visibility, deprecated, generic_params,
+                trait_bounds, stability_level
             FROM embeddings
         """)
 
@@ -115,16 +114,12 @@ async def downgrade(db_path: Path) -> None:
 
         # Recreate original indexes
         await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_embeddings_crate_id 
-            ON embeddings(crate_id)
-        """)
-        await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_embeddings_item_type 
             ON embeddings(item_type)
         """)
         await db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_embeddings_module_path 
-            ON embeddings(module_path)
+            CREATE INDEX IF NOT EXISTS idx_embeddings_item_path 
+            ON embeddings(item_path)
         """)
 
         await db.commit()

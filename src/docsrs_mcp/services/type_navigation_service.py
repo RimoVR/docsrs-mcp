@@ -3,11 +3,10 @@
 import json
 import logging
 from functools import lru_cache
-from typing import Any
 
 import aiosqlite
 
-from ..database import DB_TIMEOUT, execute_with_retry, get_db_path
+from ..database import DB_TIMEOUT
 from ..ingest import ingest_crate
 
 logger = logging.getLogger(__name__)
@@ -397,7 +396,7 @@ class TypeNavigationService:
 
         if inherent and trait_methods:
             hints.append("Multiple methods found: inherent and trait implementations")
-            hints.append(f"Inherent method takes precedence by default")
+            hints.append("Inherent method takes precedence by default")
 
             # List trait sources
             trait_sources = set(
@@ -427,3 +426,209 @@ class TypeNavigationService:
         """Uncached version of resolve_method for LRU caching."""
         # This is wrapped by the LRU cache
         return None
+
+    # Phase 5: Code Intelligence Methods
+
+    async def get_item_intelligence(
+        self, crate_name: str, item_path: str, version: str | None = None
+    ) -> dict:
+        """Get complete code intelligence for an item.
+
+        Args:
+            crate_name: Name of the crate
+            item_path: Full path to the item (e.g., 'tokio::spawn')
+            version: Optional version (defaults to latest)
+
+        Returns:
+            Dictionary with comprehensive intelligence data including:
+            - enhanced_signature: Complete signature with generics
+            - error_types: List of error types from Result patterns
+            - safety_info: Safety information and requirements
+            - feature_requirements: Required feature flags
+        """
+        # Ensure crate is ingested
+        db_path = await ingest_crate(crate_name, version)
+
+        # Query database for intelligence data
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            cursor = await db.execute(
+                """
+                SELECT 
+                    item_path,
+                    signature,
+                    safety_info,
+                    error_types,
+                    feature_requirements,
+                    is_safe,
+                    generic_params,
+                    trait_bounds,
+                    visibility,
+                    deprecated,
+                    content
+                FROM embeddings
+                WHERE item_path = ?
+                LIMIT 1
+                """,
+                (f"{crate_name}::{item_path}",),
+            )
+
+            row = await cursor.fetchone()
+            if not row:
+                return {
+                    "item_path": item_path,
+                    "error": "Item not found",
+                }
+
+            # Parse JSON fields
+            safety_info = json.loads(row[2]) if row[2] else {}
+            error_types = json.loads(row[3]) if row[3] else []
+            feature_requirements = json.loads(row[4]) if row[4] else []
+
+            return {
+                "item_path": item_path,
+                "enhanced_signature": row[1],
+                "safety_info": safety_info,
+                "error_types": error_types,
+                "feature_requirements": feature_requirements,
+                "is_safe": bool(row[5]),
+                "generic_params": row[6],
+                "trait_bounds": row[7],
+                "visibility": row[8],
+                "deprecated": bool(row[9]),
+                "documentation": row[10][:500] if row[10] else None,  # First 500 chars
+            }
+
+    async def search_by_safety(
+        self,
+        crate_name: str,
+        is_safe: bool = True,
+        include_reasons: bool = False,
+        version: str | None = None,
+    ) -> dict:
+        """Find items by safety status.
+
+        Args:
+            crate_name: Name of the crate
+            is_safe: Whether to search for safe (True) or unsafe (False) items
+            include_reasons: Include detailed safety information
+            version: Optional version (defaults to latest)
+
+        Returns:
+            Dictionary with items matching the safety criteria
+        """
+        # Ensure crate is ingested
+        db_path = await ingest_crate(crate_name, version)
+
+        # Query database using partial index for performance
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            # Build query based on safety filter
+            query = """
+                SELECT 
+                    item_path,
+                    item_type,
+                    signature,
+                    safety_info,
+                    content
+                FROM embeddings
+                WHERE is_safe = ?
+                ORDER BY item_path ASC
+                LIMIT 100
+            """
+
+            cursor = await db.execute(query, (1 if is_safe else 0,))
+
+            items = []
+            async for row in cursor:
+                item = {
+                    "item_path": row[0],
+                    "item_type": row[1],
+                    "signature": row[2],
+                }
+
+                if include_reasons and row[3]:
+                    safety_info = json.loads(row[3])
+                    item["safety_info"] = safety_info
+                    item["documentation_excerpt"] = row[4][:200] if row[4] else None
+
+                items.append(item)
+
+            return {
+                "crate_name": crate_name,
+                "safety_filter": "safe" if is_safe else "unsafe",
+                "items": items,
+                "total_count": len(items),
+            }
+
+    async def get_error_catalog(
+        self, crate_name: str, pattern: str | None = None, version: str | None = None
+    ) -> dict:
+        """Get catalog of all error types in crate.
+
+        Args:
+            crate_name: Name of the crate
+            pattern: Optional pattern to filter error types
+            version: Optional version (defaults to latest)
+
+        Returns:
+            Dictionary with error type catalog and occurrence counts
+        """
+        # Ensure crate is ingested
+        db_path = await ingest_crate(crate_name, version)
+
+        # Query database for error types
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            # Get all items with error types
+            cursor = await db.execute(
+                """
+                SELECT 
+                    item_path,
+                    error_types,
+                    signature
+                FROM embeddings
+                WHERE error_types IS NOT NULL AND error_types != '[]'
+                """,
+            )
+
+            # Aggregate error types
+            error_catalog = {}
+            items_by_error = {}
+
+            async for row in cursor:
+                item_path = row[0]
+                error_types = json.loads(row[1]) if row[1] else []
+                signature = row[2]
+
+                for error_type in error_types:
+                    # Apply pattern filter if provided
+                    if pattern and pattern.lower() not in error_type.lower():
+                        continue
+
+                    if error_type not in error_catalog:
+                        error_catalog[error_type] = 0
+                        items_by_error[error_type] = []
+
+                    error_catalog[error_type] += 1
+                    items_by_error[error_type].append(
+                        {"item_path": item_path, "signature": signature}
+                    )
+
+            # Sort by frequency
+            sorted_errors = sorted(
+                error_catalog.items(), key=lambda x: x[1], reverse=True
+            )
+
+            return {
+                "crate_name": crate_name,
+                "pattern_filter": pattern,
+                "error_types": [
+                    {
+                        "error_type": error_type,
+                        "occurrence_count": count,
+                        "example_items": items_by_error[error_type][
+                            :3
+                        ],  # First 3 examples
+                    }
+                    for error_type, count in sorted_errors
+                ],
+                "total_error_types": len(sorted_errors),
+            }

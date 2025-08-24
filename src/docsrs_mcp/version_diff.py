@@ -280,7 +280,7 @@ class VersionDiffEngine:
         # Add defensive None checks for all fields
         items_dict_a = {}
         items_dict_b = {}
-        
+
         for item in items_a:
             # Defensive check for item_path
             path = item.get("item_path")
@@ -288,7 +288,7 @@ class VersionDiffEngine:
                 items_dict_a[path] = item
             else:
                 logger.warning("Item without item_path found in version A, skipping")
-        
+
         for item in items_b:
             # Defensive check for item_path
             path = item.get("item_path")
@@ -415,7 +415,7 @@ class VersionDiffEngine:
         visibility = item.get("visibility") if item else None
         signature = item.get("signature") if item else None
         deprecated = item.get("deprecated") if item else None
-        
+
         # Default values for None cases
         if visibility is None:
             visibility = "public"
@@ -423,14 +423,12 @@ class VersionDiffEngine:
             signature = ""
         if deprecated is None:
             deprecated = False
-            
+
         return ItemChange(
             path=path,
             kind=self._map_item_type(item_type),
             change_type=ChangeType.REMOVED,
-            severity=Severity.BREAKING
-            if visibility == "public"
-            else Severity.MINOR,
+            severity=Severity.BREAKING if visibility == "public" else Severity.MINOR,
             details=ChangeDetails(
                 before=ItemSignature(
                     raw_signature=signature,
@@ -449,7 +447,7 @@ class VersionDiffEngine:
         visibility = item.get("visibility") if item else None
         signature = item.get("signature") if item else None
         deprecated = item.get("deprecated") if item else None
-        
+
         # Default values for None cases
         if visibility is None:
             visibility = "public"
@@ -457,7 +455,7 @@ class VersionDiffEngine:
             signature = ""
         if deprecated is None:
             deprecated = False
-            
+
         return ItemChange(
             path=path,
             kind=self._map_item_type(item_type),
@@ -506,9 +504,7 @@ class VersionDiffEngine:
                 severity = Severity.BREAKING
             else:
                 vis_b_display = vis_b if vis_b else "unknown"
-                semantic_changes.append(
-                    f"Visibility changed to {vis_b_display}"
-                )
+                semantic_changes.append(f"Visibility changed to {vis_b_display}")
 
         # Check deprecation
         if not dep_a and dep_b:

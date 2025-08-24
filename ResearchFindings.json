@@ -1,9 +1,9 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-24T12:00:00",
+    "lastUpdated": "2025-08-24T18:30:00",
     "compressionVersion": "1.2",
-    "originalTokens": 51200,
+    "originalTokens": 58200,
     "legend": {
       "keys": {
         "desc": "description",
@@ -31,7 +31,11 @@
         "bloom": "bloom filter",
         "cross_platform": "cross-platform",
         "priority_q": "priority queue",
-        "mmap": "memory-mapped"
+        "mmap": "memory-mapped",
+        "regex": "regular expressions",
+        "stream": "streaming",
+        "partial_idx": "partial indexes",
+        "unsafe": "unsafe blocks"
       },
       "phrases": {
         "p1": "Use for optimal performance",
@@ -52,7 +56,11 @@
         "p16": "Cross-platform path detection",
         "p17": "JSON API unavailable",
         "p18": "Priority queue optimization",
-        "p19": "Memory efficiency strategy"
+        "p19": "Memory efficiency strategy",
+        "p20": "Compile regex patterns at module initialization for performance",
+        "p21": "Use partial indexes for sparse columns to reduce storage overhead",
+        "p22": "Implement streaming architecture for constant memory usage",
+        "p23": "Service layer abstraction provides clean separation of concerns"
       }
     },
     "globals": {
@@ -87,7 +95,12 @@
         "rapidfuzz_simd_memory": "10x memory reduction with SIMD optimizations",
         "prefix_scope_reduction": "60-80% search space reduction",
         "rrf_fusion_overhead": "Minimal latency for Reciprocal Rank Fusion",
-        "partial_index_improvement": "Optimized filtering with partial database indices"
+        "partial_index_improvement": "Optimized filtering with partial database indices",
+        "precompiled_regex_speedup": "10x performance improvement over dynamic compilation",
+        "session_cache_reduction": "Eliminates repeated pattern matching overhead",
+        "streaming_memory_usage": "O(1) memory usage with streaming architecture",
+        "graceful_extraction_degradation": "System stability maintained on extraction failures",
+        "partial_index_size_reduction": "90% index size reduction for sparse columns"
       },
       "memory_limits": {
         "embeddings_10k": "1GB",
@@ -133,6 +146,73 @@
           "serialization_strategy": "JSON serialization adequate for moderate-sized dependency sets",
           "bloom_alternative": "Set-based implementation when bloom filters unavailable",
           "performance_characteristics": "Hash-based lookups maintain O(1) complexity"
+        }
+      },
+      "phase_5_implementation": {
+        "performance_optimization": {
+          "precompiled_regex_patterns": {
+            "improvement": "10x performance improvement over dynamic compilation",
+            "implementation": "Compile regex patterns at module initialization",
+            "caching_strategy": "Session-based caching reduces repeated pattern matching overhead",
+            "pattern": "Store compiled patterns as module-level constants for reuse"
+          },
+          "partial_database_indexes": {
+            "size_reduction": "90% index size reduction for sparse columns", 
+            "implementation": "CREATE INDEX idx_name ON table(column) WHERE column IS NOT NULL",
+            "performance_impact": "Significantly improved filtered query performance",
+            "use_case": "Boolean flags and optional fields with high NULL ratio"
+          }
+        },
+        "rust_documentation_patterns": {
+          "result_error_types": {
+            "pattern": "Result<T, E> commonly found in function signatures",
+            "extraction": "Parse return type annotations from function documentation",
+            "error_handling": "Document both Ok and Err variants in tool responses"
+          },
+          "unsafe_blocks": {
+            "safety_requirements": "Unsafe blocks documented with safety requirements in doc comments",
+            "pattern": "/// # Safety\\n/// Requirements for safe usage documented",
+            "extraction": "Identify unsafe keyword and extract associated safety documentation"
+          },
+          "feature_attributes": {
+            "encoding": "Feature requirements in #[cfg(feature = \"...\")] attributes", 
+            "extraction": "Parse conditional compilation attributes for feature dependencies",
+            "documentation": "Include feature requirements in symbol information"
+          }
+        },
+        "implementation_patterns": {
+          "json_serialization_sqlite": {
+            "pattern": "JSON serialization for complex data in SQLite TEXT columns",
+            "advantage": "Allows flexible schema evolution without migrations",
+            "performance": "Boolean flags enable fast filtering without JSON parsing",
+            "implementation": "Store structured data as JSON, index primitive fields separately"
+          },
+          "streaming_architecture": {
+            "memory_efficiency": "O(1) memory usage maintained regardless of data size",
+            "pattern": "Process data in chunks without loading entire dataset",
+            "implementation": "Generator-based processing with yield statements",
+            "stability": "Graceful degradation on extraction failures preserves system stability"
+          }
+        },
+        "mcp_integration": {
+          "async_tool_handlers": {
+            "requirement": "Tool handlers should be async for database operations",
+            "pattern": "async def tool_name() -> ToolResponse",
+            "database_integration": "Use async database connections for non-blocking operations",
+            "error_handling": "Graceful fallback when database operations fail"
+          },
+          "service_layer_abstraction": {
+            "separation": "Service layer provides clean separation of concerns",
+            "pattern": "MCP handlers delegate to service classes for business logic",
+            "testability": "Service layer can be unit tested independently of MCP framework",
+            "maintainability": "Clear boundaries between presentation and business logic"
+          },
+          "response_model_reuse": {
+            "consistency": "Response models can reuse existing structures for consistency",
+            "pattern": "Leverage Pydantic models across MCP and internal APIs",
+            "validation": "Single source of truth for data validation rules",
+            "documentation": "Self-documenting API with shared type definitions"
+          }
         }
       }
     }
@@ -1171,7 +1251,8 @@
           "type_flex": "Accept str/bytes input",
           "errors": "Specific actionable messages",
           "defaults": "None handling",
-          "perf": "Precompiled patterns"
+          "perf": "Precompiled patterns",
+          "phase_5": "p20 - Compile regex patterns at module initialization"
         },
         "integration": "Preprocessing + validation single step"
       },
@@ -1317,7 +1398,12 @@
         "pyproject": "Modern Python packaging",
         "semver": "Strict version management"
       },
-      "operational_docs": {"perf": "Sub-500ms targets"}
+      "operational_docs": {"perf": "Sub-500ms targets"},
+      "phase_5_patterns": {
+        "database": "p21 - Use partial indexes for sparse columns",
+        "memory": "p22 - Implement streaming architecture for constant memory usage", 
+        "architecture": "p23 - Service layer abstraction provides clean separation"
+      }
     },
     "known_issues": {
       "pkg_dist": {"pypi_readme": "Markdown rendering limitations"}
@@ -2227,7 +2313,17 @@
       "Configure ONNX runtime environment variables for memory-efficient embedding generation",
       "Use TYPE_CHECKING imports to enable dependency injection without circular import issues",
       "Apply adaptive batch processing with dynamic sizing based on real-time memory pressure monitoring",
-      "Implement memory threshold-based batch size reduction to prevent OOM conditions during ingestion"
+      "Implement memory threshold-based batch size reduction to prevent OOM conditions during ingestion",
+      "Compile regex patterns at module initialization level for 10x performance improvement over dynamic compilation",
+      "Use partial database indexes with WHERE clauses to reduce index size by 90% for sparse columns",
+      "Implement streaming architecture with generator-based processing to maintain O(1) memory usage regardless of data size", 
+      "Apply session-based caching for compiled patterns to eliminate repeated pattern matching overhead",
+      "Use JSON serialization in SQLite TEXT columns with separate primitive field indexes for flexible schema evolution",
+      "Implement async tool handlers for MCP database operations to maintain non-blocking server responsiveness",
+      "Apply service layer abstraction patterns to provide clean separation between MCP presentation and business logic",
+      "Document Result<T, E> error types and unsafe block safety requirements in extracted Rust documentation",
+      "Parse #[cfg(feature = \"...\")] attributes to extract and document conditional compilation feature requirements",
+      "Implement graceful degradation on extraction failures to preserve overall system stability during documentation processing"
     ],
     "production": [
       "Distributed rate limiting with Redis for multi-worker",
@@ -2256,10 +2352,10 @@
     }
   },
   "stats": {
-    "original_tokens": 56800,
-    "compressed_tokens_estimate": 21500,
-    "compression_ratio": "62.1%",
-    "token_reduction": 35300,
+    "original_tokens": 58200,
+    "compressed_tokens_estimate": 22100,
+    "compression_ratio": "62.0%", 
+    "token_reduction": 36100,
     "preservation": {
       "technical_details": "100%",
       "library_versions": "100%", 
