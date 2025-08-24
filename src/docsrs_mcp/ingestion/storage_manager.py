@@ -5,8 +5,10 @@ This module handles:
 - Database storage with transaction optimization
 - Cleanup operations for re-ingestion
 - Memory-efficient batch processing
+- Code intelligence data storage (Phase 5)
 """
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -193,6 +195,25 @@ async def _store_batch(
     # Prepare batch data
     batch_data = []
     for chunk, embedding_bytes in zip(chunk_buffer, embedding_buffer, strict=False):
+        # Convert intelligence data to JSON strings for storage (Phase 5)
+        safety_info = chunk.get("safety_info")
+        if safety_info and isinstance(safety_info, dict):
+            safety_info_json = json.dumps(safety_info)
+        else:
+            safety_info_json = None
+
+        error_types = chunk.get("error_types")
+        if error_types and isinstance(error_types, list):
+            error_types_json = json.dumps(error_types)
+        else:
+            error_types_json = None
+
+        feature_requirements = chunk.get("feature_requirements")
+        if feature_requirements and isinstance(feature_requirements, list):
+            feature_requirements_json = json.dumps(feature_requirements)
+        else:
+            feature_requirements_json = None
+
         # Map to actual database columns
         batch_data.append(
             (
@@ -208,6 +229,10 @@ async def _store_batch(
                 chunk.get("deprecated", False),
                 chunk.get("generic_params"),
                 chunk.get("trait_bounds"),
+                safety_info_json,  # Phase 5: safety information
+                error_types_json,  # Phase 5: error types
+                feature_requirements_json,  # Phase 5: feature requirements
+                chunk.get("is_safe", True),  # Phase 5: safety flag
             )
         )
 
@@ -217,8 +242,9 @@ async def _store_batch(
         """
         INSERT OR REPLACE INTO embeddings
         (item_path, header, content, embedding, item_type, signature, 
-         parent_id, examples, visibility, deprecated, generic_params, trait_bounds)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         parent_id, examples, visibility, deprecated, generic_params, trait_bounds,
+         safety_info, error_types, feature_requirements, is_safe)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         batch_data,
     )

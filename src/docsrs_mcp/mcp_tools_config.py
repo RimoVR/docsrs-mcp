@@ -96,6 +96,19 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "description": "List of crates for cross-crate search (max 5)",
                     "maxItems": 5,
                 },
+                "safety_filter": {
+                    "type": "string",
+                    "description": "Filter by safety: 'safe', 'unsafe', or 'all' (default: all)",
+                    "enum": ["safe", "unsafe", "all"],
+                },
+                "has_errors": {
+                    "type": "boolean",
+                    "description": "Filter items that return error types (Result<T, E>)",
+                },
+                "feature_filter": {
+                    "type": "string",
+                    "description": "Filter by required feature flag (e.g., 'async', 'std')",
+                },
             },
             "required": ["crate_name", "query"],
         },
@@ -337,6 +350,72 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Optional list of focus areas",
+                },
+            },
+            "required": ["crate_name"],
+        },
+    },
+    {
+        "name": "get_code_intelligence",
+        "description": "Get comprehensive code intelligence for a specific item including safety info, error types, and feature requirements",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "crate_name": {
+                    "type": "string",
+                    "description": "Name of the Rust crate",
+                },
+                "item_path": {
+                    "type": "string",
+                    "description": "Full path to the item (e.g., 'tokio::spawn')",
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Specific version or 'latest'",
+                },
+            },
+            "required": ["crate_name", "item_path"],
+        },
+    },
+    {
+        "name": "get_error_types",
+        "description": "List all error types in a crate or matching a pattern",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "crate_name": {
+                    "type": "string",
+                    "description": "Name of the Rust crate",
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Optional pattern to filter error types",
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Specific version or 'latest'",
+                },
+            },
+            "required": ["crate_name"],
+        },
+    },
+    {
+        "name": "get_unsafe_items",
+        "description": "List all unsafe items in a crate with optional safety documentation",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "crate_name": {
+                    "type": "string",
+                    "description": "Name of the Rust crate",
+                },
+                "include_reasons": {
+                    "type": "boolean",
+                    "description": "Include detailed unsafe reasons and safety documentation",
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Specific version or 'latest'",
                 },
             },
             "required": ["crate_name"],

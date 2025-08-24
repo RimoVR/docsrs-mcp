@@ -5,6 +5,7 @@ This module handles:
 - Module hierarchy building
 - Item extraction with type classification
 - Path normalization for stable IDs
+- Code intelligence extraction (Phase 5)
 """
 
 import asyncio
@@ -15,6 +16,12 @@ from typing import Any
 import ijson
 
 from ..memory_utils import trigger_gc_if_needed
+from .intelligence_extractor import (
+    extract_error_types,
+    extract_feature_requirements,
+    extract_safety_info,
+    safe_extract,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,34 @@ async def parse_rustdoc_items_streaming(
 
                 # If we completed an item in the index, yield it
                 if in_index and current_item:
+                    # Extract code intelligence for Phase 5
+                    # Use safe_extract to handle failures gracefully
+                    if current_item:
+                        # Extract signature from item (if available)
+                        signature = current_item.get("signature", "")
+                        attrs = current_item.get("attrs", [])
+                        docs = current_item.get("docs", "")
+                        item_type = current_item.get("type", "")
+
+                        # Extract intelligence data
+                        if signature or attrs:
+                            # Extract error types from signatures
+                            current_item["error_types"] = safe_extract(
+                                extract_error_types, signature, item_type, default=[]
+                            )
+
+                            # Extract safety information
+                            safety_info = safe_extract(
+                                extract_safety_info, attrs, signature, docs, default={}
+                            )
+                            current_item["safety_info"] = safety_info
+                            current_item["is_safe"] = safety_info.get("is_safe", True)
+
+                            # Extract feature requirements
+                            current_item["feature_requirements"] = safe_extract(
+                                extract_feature_requirements, attrs, default=[]
+                            )
+
                     yield current_item
                     current_item = {}
                     items_processed += 1
