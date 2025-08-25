@@ -4211,13 +4211,15 @@
         },
         {
           "error": "SearchCache.get() method signature mismatch - expects 9 parameters but called with 11",
+          "status": "RESOLVED",
           "rootCause": "Method signature drift where parameters were added to calling code but the method definition wasn't updated to match, specifically stability_filter parameter was added but not reflected in method signature",
-          "solution": "Remove stability_filter parameter from the method call or update SearchCache.get() method signature to accept the additional parameters",
+          "solution": "Added stability_filter parameter to all SearchCache methods: _make_key(), get(), set(), and get_adaptive_ttl(). Fix maintains backward compatibility - methods work with and without the stability_filter parameter",
           "context": "MCP server debugging - search functionality failing due to parameter count mismatch",
           "lesson": "Method signature changes must be synchronized across all call sites to prevent parameter count mismatches",
           "pattern": "Use IDE refactoring tools or grep to find all call sites when changing method signatures",
           "dateEncountered": "2025-08-24",
-          "relatedFiles": ["src/docsrs_mcp/search.py", "src/docsrs_mcp/cache.py"],
+          "dateResolved": "2025-08-25",
+          "relatedFiles": ["src/docsrs_mcp/search.py", "src/docsrs_mcp/cache.py (lines 34-272)"],
           "codeExample": "# Fix method signature:\ndef get(self, query, k, item_type, crate_name, version, include_examples, threshold, use_knn, stability_filter):\n# Or remove extra parameter:\nresult = cache.get(query, k, item_type, crate_name, version, include_examples, threshold, use_knn)",
           "debuggingTechnique": "Count parameters in method definition vs call sites, use static analysis tools to catch signature mismatches"
         },

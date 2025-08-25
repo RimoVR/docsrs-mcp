@@ -42,6 +42,7 @@ class SearchCache:
         min_doc_length: int | None = None,
         visibility: str | None = None,
         deprecated: bool | None = None,
+        stability_filter: str | None = None,
     ) -> str:
         """Generate a cache key from search parameters including diversity settings."""
         # Use a subset of the embedding for efficiency
@@ -56,6 +57,7 @@ class SearchCache:
             str(min_doc_length) if min_doc_length else "none",
             str(visibility) if visibility else "none",
             str(deprecated) if deprecated is not None else "none",
+            str(stability_filter) if stability_filter else "none",
             # Include diversity parameters in cache key
             f"lambda_{RANKING_DIVERSITY_LAMBDA:.2f}",
             f"weight_{RANKING_DIVERSITY_WEIGHT:.2f}",
@@ -73,6 +75,7 @@ class SearchCache:
         min_doc_length: int | None = None,
         visibility: str | None = None,
         deprecated: bool | None = None,
+        stability_filter: str | None = None,
     ) -> int:
         """
         Calculate adaptive TTL based on query complexity and popularity.
@@ -108,6 +111,8 @@ class SearchCache:
             complexity += 1
         if deprecated is not None:
             complexity += 1
+        if stability_filter:
+            complexity += 1
 
         # Determine base TTL based on complexity
         if complexity <= 2:
@@ -128,6 +133,7 @@ class SearchCache:
             min_doc_length,
             visibility,
             deprecated,
+            stability_filter,
         )
 
         hit_count = self._hit_count.get(key, 0)
@@ -151,6 +157,7 @@ class SearchCache:
         min_doc_length: int | None = None,
         visibility: str | None = None,
         deprecated: bool | None = None,
+        stability_filter: str | None = None,
     ) -> list[tuple[float, str, str, str]] | None:
         """
         Retrieve cached results if available and not expired.
@@ -168,6 +175,7 @@ class SearchCache:
             min_doc_length,
             visibility,
             deprecated,
+            stability_filter,
         )
 
         if key in self._cache:
@@ -213,6 +221,7 @@ class SearchCache:
         min_doc_length: int | None = None,
         visibility: str | None = None,
         deprecated: bool | None = None,
+        stability_filter: str | None = None,
     ) -> None:
         """
         Store search results in cache.
@@ -239,6 +248,7 @@ class SearchCache:
             min_doc_length,
             visibility,
             deprecated,
+            stability_filter,
         )
 
         # Remove least recently used if at capacity
@@ -259,6 +269,7 @@ class SearchCache:
             min_doc_length,
             visibility,
             deprecated,
+            stability_filter,
         )
 
         # Store with timestamp and adaptive TTL

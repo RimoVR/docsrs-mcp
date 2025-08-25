@@ -4216,6 +4216,8 @@ The following fixes address interface consistency, data integrity, and type safe
 
 **Issue**: Interface inconsistency between SearchCache and PopularCratesManager for statistics access.
 
+**Update (2025-08-25)**: SearchCache class now properly handles the stability_filter parameter with correct key generation and TTL calculation, resolving critical parameter mismatch bug.
+
 **Solution**: Added `get_cache_stats()` wrapper method to SearchCache for uniform interface:
 ```python
 def get_cache_stats(self) -> CacheStatistics:
@@ -4988,6 +4990,7 @@ The system integrates stability filtering directly into vector search operations
 
 **Features**:
 - **stability_filter parameter**: Integrated into vector search with native SQL filtering
+- **Cache Layer Integration (2025-08-25)**: Parameter is now fully integrated into the cache layer with proper key generation and TTL calculation
 - **Performance Optimization**: Uses indexed stability fields for fast filtering
 - **Backward Compatibility**: Optional parameter with no impact on existing queries
 - **Multi-level Support**: Supports filtering by single or multiple stability levels
