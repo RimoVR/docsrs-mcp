@@ -294,11 +294,16 @@ class CrateService:
                 }
 
             # If not found, try fuzzy suggestions
-            suggestions = await get_fuzzy_suggestions_with_fallback(db_path, item_path)
+            suggestions = await get_fuzzy_suggestions_with_fallback(
+                query=item_path,
+                db_path=str(db_path),
+                crate_name=crate_name,
+                version=version or "latest",
+            )
 
             if suggestions:
                 suggestion_text = "\n".join(
-                    [f"- `{s.path}` ({s.type})" for s in suggestions[:5]]
+                    [f"- `{s}` (item)" for s in suggestions[:5]]
                 )
                 error_message = (
                     f"Item '{item_path}' not found. Did you mean one of these?\n\n"

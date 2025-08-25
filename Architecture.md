@@ -163,7 +163,7 @@ graph LR
             CLI[cli.py<br/>Entry point<br/>--mode flag (defaults to mcp)<br/>MCP/REST selection]
             CONFIG[config.py<br/>Settings]
             ERRORS[errors.py<br/>Custom exceptions]
-            FUZZY[fuzzy_resolver.py<br/>Enhanced composite scoring system<br/>Path component bonuses<br/>Adaptive thresholds<br/>Unicode normalization<br/>Database re-export lookup<br/>Static PATH_ALIASES fallback<br/>5-minute TTL cache]
+            FUZZY[fuzzy_resolver.py<br/>Enhanced composite scoring system<br/>Path component bonuses<br/>Adaptive thresholds<br/>Unicode normalization<br/>Database re-export lookup<br/>Static PATH_ALIASES fallback<br/>5-minute TTL cache<br/>Keyword-only parameter safety]
         end
     end
     
@@ -4085,12 +4085,21 @@ graph TD
 - Create validation error aggregation with detailed error context
 - Add parameter sanitization and normalization steps
 
-#### 3. Standard Library Support - Incomplete Path Resolution Architecture
+#### 3. Standard Library Support - Parameter Mismatch Resolution (RESOLVED)
 
 **Location**: Path resolution system in `fuzzy_resolver.py` and standard library handling
 
-**Architectural Issue**:
-The standard library support system has incomplete path resolution architecture, failing to handle edge cases in std library path normalization and resolution patterns.
+**Architectural Issue** (RESOLVED):
+The standard library support system had a critical parameter mismatch issue in get_fuzzy_suggestions_with_fallback() causing 100% failure rate for documentation fallback. This issue has been resolved with keyword-only parameter enforcement and proper parameter passing.
+
+**Resolution Implemented**:
+- Fixed parameter calling patterns in crate_service.py to match function signature
+- Added keyword-only parameter safety (* separator) to prevent future parameter ordering errors
+- Enhanced parameter validation in fuzzy_resolver.py functions
+- Fixed return type handling for proper list[str] responses
+
+**Remaining Architectural Considerations**:
+The system still has some incomplete path resolution architecture for edge cases in std library path normalization and resolution patterns.
 
 ```mermaid
 graph TD
@@ -6236,6 +6245,33 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 
 ### Recent Architectural Decisions
 
+**Fuzzy Resolution Parameter Safety Enhancement (2025-08-25)**
+- **Issue Fixed**: Critical parameter mismatch in get_fuzzy_suggestions_with_fallback() causing 100% failure rate for documentation fallback
+- **Root Cause**: Inconsistent function calling patterns between endpoints.py (correct) and crate_service.py (incorrect)
+- **Solution Implemented**: 
+  1. Fixed parameter passing in crate_service.py line 297-302 to include all required parameters (query, db_path, crate_name, version)
+  2. Added keyword-only parameter enforcement (* separator) in fuzzy_resolver.py functions to prevent future positional argument errors
+  3. Fixed return type handling - functions return list[str], not objects with .path and .type attributes
+- **Enhanced Parameter Safety Pattern**:
+  ```python
+  async def get_fuzzy_suggestions_with_fallback(
+      *,  # Force keyword-only arguments to prevent parameter ordering errors
+      query: str,
+      db_path: str,
+      crate_name: str,
+      version: str,
+  ) -> list[str]:
+  ```
+- **Benefits**:
+  - Prevents accidental positional parameter mismatches at the language level
+  - Makes parameter ordering errors impossible at runtime
+  - Compatible with existing correct usage in endpoints.py
+  - Ensures all callers must use named parameters for clarity
+- **Implementation Details**:
+  - Location: fuzzy_resolver.py lines 389-397 and 500-506
+  - Pattern applied to both get_fuzzy_suggestions and get_fuzzy_suggestions_with_fallback
+  - Maintains existing function behavior while enforcing parameter safety
+
 **String-Only Parameter Strategy for MCP Compatibility (2025-08-13)**
 - **Decision**: Moved from `anyOf` patterns to string-only parameters in MCP manifest for maximum client compatibility
 - **Rationale**: Claude Code doesn't support `anyOf` patterns, requiring simpler schema approach
@@ -6290,6 +6326,7 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 - **Critical Architecture Pattern**: `{"type": "string", "examples": [...]}` for all parameters requiring type coercion
 - **Schema Consistency**: Uniform string approach across integers, floats, and booleans enables universal MCP client compatibility
 - **String-First Validation Flow**: JSON Schema validation → Pydantic field validators → type coercion ensures compatibility
+- **Keyword-Only Parameter Safety**: Functions use `*` separator to enforce named parameters and prevent positional argument mismatches
 
 **MVP Focus: Crate Descriptions Only (Enhanced with Standard Library Support)**
 - Basic ingestion pipeline processes crate metadata from crates.io API

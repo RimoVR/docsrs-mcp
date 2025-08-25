@@ -4367,6 +4367,18 @@
           "relatedFiles": ["src/docsrs_mcp/versions.py", "src/docsrs_mcp/engine.py"],
           "codeExample": "# Fix method call:\nresult = engine.compare_versions(v1, v2)\n# Instead of:\nresult = engine.compute_diff(v1, v2)",
           "debuggingTechnique": "Use IDE 'Go to Definition' to verify method names exist in target classes"
+        },
+        {
+          "error": "get_fuzzy_suggestions_with_fallback() missing 2 required positional arguments: 'crate_name' and 'version'",
+          "rootCause": "Inconsistent calling patterns between files - crate_service.py called with only 2 positional parameters (db_path, item_path) instead of required 4 parameters (query, db_path, crate_name, version). Parameter order was also incorrect.",
+          "solution": "Fixed crate_service.py line 297 to use keyword arguments with all required parameters: await get_fuzzy_suggestions_with_fallback(query=item_path, db_path=str(db_path), crate_name=crate_name, version=version or \"latest\"). Added keyword-only enforcement in fuzzy_resolver.py with *, as first parameter to prevent future positional parameter ordering errors.",
+          "context": "100% failure rate when users requested non-existent documentation paths - no helpful suggestions provided to users due to function parameter mismatch",
+          "lesson": "Always use keyword-only parameters for functions with multiple string parameters to prevent parameter order mistakes. Ensure consistent calling patterns across all files.",
+          "pattern": "Use keyword-only parameter enforcement: async def function_name(*, param1: str, param2: str) -> ReturnType",
+          "dateEncountered": "2025-08-25",
+          "relatedFiles": ["src/docsrs_mcp/crate_service.py", "src/docsrs_mcp/fuzzy_resolver.py", "src/docsrs_mcp/endpoints.py"],
+          "codeExample": "# Fixed call in crate_service.py:\nawait get_fuzzy_suggestions_with_fallback(\n    query=item_path,\n    db_path=str(db_path),\n    crate_name=crate_name,\n    version=version or \"latest\"\n)\n\n# Keyword-only enforcement in fuzzy_resolver.py:\nasync def get_fuzzy_suggestions_with_fallback(\n    *,  # Force keyword-only arguments\n    query: str,\n    db_path: str,\n    crate_name: str,\n    version: str\n) -> list[str]:",
+          "debuggingTechnique": "Test error paths not just success paths. Use direct import tests to verify keyword-only enforcement works. Check parameter order consistency across all calling files."
         }
       ]
     }

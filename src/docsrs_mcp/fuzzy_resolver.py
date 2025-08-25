@@ -387,6 +387,7 @@ async def resolve_path_alias(
 
 
 async def get_fuzzy_suggestions(
+    *,  # Force keyword-only arguments to prevent parameter ordering errors
     query: str,
     db_path: str,
     crate_name: str,
@@ -498,6 +499,7 @@ async def get_fuzzy_suggestions(
 
 
 async def get_fuzzy_suggestions_with_fallback(
+    *,  # Force keyword-only arguments to prevent parameter ordering errors
     query: str,
     db_path: str,
     crate_name: str,
