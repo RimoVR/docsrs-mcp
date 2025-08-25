@@ -137,6 +137,37 @@ class TestProgressiveDetailLevels:
                 assert len(result["related_items"]) == 1
 
     @pytest.mark.asyncio
+    async def test_item_not_found_error_response(self, workflow_service, mock_db_path):
+        """Test error response structure when item is not found (Bug #8 fix)."""
+        with patch("docsrs_mcp.services.workflow_service.ingest_crate") as mock_ingest:
+            mock_ingest.return_value = mock_db_path
+
+            with patch("aiosqlite.connect") as mock_connect:
+                mock_cursor = AsyncMock()
+                # Simulate item not found
+                mock_cursor.fetchone.return_value = None
+
+                mock_db = AsyncMock()
+                mock_db.execute.return_value = mock_cursor
+                mock_connect.return_value.__aenter__.return_value = mock_db
+
+                result = await workflow_service.get_documentation_with_detail_level(
+                    "test_crate", "nonexistent::item", DetailLevel.SUMMARY
+                )
+
+                # Verify error response structure includes all required fields for ProgressiveDetailResponse
+                assert "error" in result
+                assert "item_path" in result  # Bug #8 fix - this field must be present
+                assert "detail_level" in result
+                assert "available_levels" in result
+                
+                # Verify specific values
+                assert result["item_path"] == "nonexistent::item"
+                assert result["error"] == "Item nonexistent::item not found"
+                assert result["detail_level"] == DetailLevel.SUMMARY
+                assert result["available_levels"] == DetailLevel.ALL_LEVELS
+
+    @pytest.mark.asyncio
     async def test_caching(self, workflow_service, mock_db_path):
         """Test that results are cached properly."""
         with patch("docsrs_mcp.services.workflow_service.ingest_crate") as mock_ingest:

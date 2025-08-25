@@ -20,6 +20,26 @@
           "additionalBugFixed": "VersionDiffResponse field name bug: Changed 'items' to 'changes' in crate_service.py return dict to match VersionDiffResponse model schema"
         },
         {
+          "error": "get_documentation_detail ProgressiveDetailResponse validation error - 1 validation error for ProgressiveDetailResponse item_path Field required",
+          "rootCause": "WorkflowService.get_documentation_with_detail_level() returns error response missing required 'item_path' field. When item is not found, the service returns error dict without the item_path field that ProgressiveDetailResponse model requires.",
+          "solution": "Added missing 'item_path' field to error response dictionary in workflow_service.py. The service layer must return ALL required fields defined in response models even in error scenarios when using Pydantic models with required fields.",
+          "context": "MCP tool get_documentation_detail failing with Pydantic validation error when requesting non-existent items",
+          "lesson": "When using 'extra=forbid' in Pydantic models, service layer must return ALL required fields even in error scenarios. Service response field alignment with Pydantic model requirements is critical.",
+          "pattern": "Always ensure service layer error responses include all required fields defined in response models, regardless of success or error conditions",
+          "dateEncountered": "2025-08-25",
+          "relatedFiles": ["src/docsrs_mcp/services/workflow_service.py", "tests/test_workflow_service.py"],
+          "codeExample": "# BEFORE (causing validation error):\nif not row:\n    return {\n        \"error\": f\"Item {item_path} not found\",\n        \"detail_level\": detail_level,\n        \"available_levels\": DetailLevel.ALL_LEVELS,\n    }\n\n# AFTER (Bug #8 fix):\nif not row:\n    return {\n        \"item_path\": item_path,  # Added missing required field\n        \"error\": f\"Item {item_path} not found\", \n        \"detail_level\": detail_level,\n        \"available_levels\": DetailLevel.ALL_LEVELS,\n    }",
+          "debuggingTechnique": "Test error response validation with Pydantic models by requesting non-existent items and verifying all required fields are present",
+          "testingConfirmed": [
+            "Unit test: test_item_not_found_error_response in test_workflow_service.py",
+            "Integration test: MCP client successfully handles non-existent item requests",
+            "Regression test: All existing workflow service tests pass (13/13)",
+            "End-to-End: get_documentation_detail tool works correctly via MCP protocol"
+          ],
+          "preventionStrategy": "Always ensure service layer error responses include all required fields defined in response models. Use unit tests that specifically test error response validation with Pydantic models.",
+          "similarIssuesFixed": "This follows the same pattern as CompareVersionsRequest.categories and list_versions validation fixes - service layer field alignment with Pydantic model requirements"
+        },
+        {
           "error": "compareVersions Schema Reference Error - PointerToNowhere for '/components/schemas/ItemChange'",
           "rootCause": "MCP manifest uses $ref to ChangeCategory enum that doesn't exist in the schema structure. The schema references undefined components.",
           "solution": "Replace $ref with inline enum array definitions in the MCP manifest schema. Define enum values directly instead of referencing external components.",

@@ -2687,6 +2687,9 @@ Three new MCP tools provide external access to WorkflowService capabilities:
 
 **Response Model Integration**:
 - `ProgressiveDetailResponse`: Detail level responses with error handling
+  - **Error Response Validation**: Error responses must include all required model fields (`item_path`) to satisfy Pydantic validation
+  - **Bug Fix (8)**: WorkflowService error responses now include `item_path` field to prevent ValidationError during error cases
+  - **Test Coverage**: Unit test `test_item_not_found_error_response` ensures error responses match model structure
 - `UsagePatternResponse`: Pattern extraction results with metadata
 - `LearningPathResponse`: Structured learning paths with time estimates
 
@@ -5477,6 +5480,7 @@ graph TB
         HELPFUL[Helpful Error Messages<br/>Include examples and guidance]
         CHAINING[Error Chaining<br/>Preserve original context]
         STANDARD[Standardized Responses<br/>Consistent error format]
+        RESP_MODEL[Response Model Alignment<br/>Error responses match model fields<br/>Bug #8 Pattern]
     end
     
     subgraph "Value Handling"
@@ -5490,12 +5494,13 @@ graph TB
     
     HELPFUL --> CHAINING
     CHAINING --> STANDARD
+    STANDARD --> RESP_MODEL
     
     NONE_SAFE --> APP_DEFAULTS
     APP_DEFAULTS --> TYPE_SAFE
     
     SECURITY --> HELPFUL
-    STANDARD --> NONE_SAFE
+    RESP_MODEL --> NONE_SAFE
 ```
 
 ### Validation Module Implementation
@@ -5714,6 +5719,60 @@ def validate_include_unchanged(cls, v: Any) -> bool:
 - **Schema Compatibility**: Works with `anyOf` patterns in MCP manifest for dual boolean/string acceptance
 - **Error Handling**: Invalid string values result in `False` through `bool(v)` fallback (for permissive validation) or explicit ValueError (for strict validation)
 
+### Response Model Field Alignment Pattern
+
+**Critical Architecture Principle**: Service layer responses must include all required fields defined in response models to prevent Pydantic ValidationError during error handling.
+
+**Bug #8 - get_documentation_detail Validation Fix**
+
+**Root Cause**: WorkflowService error responses were missing the required `item_path` field:
+```python
+# ❌ BEFORE: Causes ValidationError - missing required field
+return {"error": "Item not found"}
+
+# ✅ AFTER: Includes all required ProgressiveDetailResponse fields  
+return {
+    "error": "Item not found",
+    "item_path": item_path  # Required by model schema
+}
+```
+
+**Implementation Pattern**:
+```python
+# Service layer must align error responses with model requirements
+class ProgressiveDetailResponse(BaseModel):
+    item_path: str  # Always required - even for error cases
+    error: Optional[str] = None
+    detail_level: Optional[str] = None
+    # ... other optional fields
+
+# Service implementation ensures all required fields present
+async def get_documentation_detail(self, item_path: str) -> dict:
+    try:
+        # ... business logic
+        return {
+            "item_path": item_path,
+            "detail_level": detail_level.value,
+            # ... success response fields
+        }
+    except Exception as e:
+        # Error response MUST include all required model fields
+        return {
+            "error": str(e),
+            "item_path": item_path,  # Critical for validation
+        }
+```
+
+**Testing Strategy**:
+- **Unit Tests**: `test_item_not_found_error_response` verifies error response structure
+- **Integration Tests**: MCP client calls with non-existent items validate end-to-end flow
+- **Validation Tests**: Ensure both success and error cases pass Pydantic model validation
+
+**Architectural Impact**:
+- **Service Layer Responsibility**: Must understand and comply with response model schemas
+- **Error Handling Pattern**: All error responses follow this field alignment requirement
+- **Test Coverage**: Essential for catching service/model misalignment during development
+
 ### MCP Manifest Schema Patterns
 
 The MCP manifest schema uses **string-only parameters** with comprehensive examples and documentation for maximum client compatibility:
@@ -5775,6 +5834,12 @@ The system implements consistent string-only patterns for all type-coerced param
 - `extra='forbid'` on all request models prevents parameter injection
 - Strict type checking after coercion prevents type confusion attacks
 - Centralized validation reduces validation bypass vulnerabilities
+
+**Response Model Field Alignment** (Bug #8 Pattern)
+- Service layer error responses must include all required fields from response models
+- Prevents Pydantic ValidationError during error handling scenarios
+- Example: `ProgressiveDetailResponse` requires `item_path` field in both success and error responses
+- Testing strategy: Unit tests verify error responses match expected model structure
 
 ### Validation Flow Architecture
 

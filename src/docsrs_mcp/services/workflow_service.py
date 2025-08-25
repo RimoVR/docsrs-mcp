@@ -92,6 +92,7 @@ class WorkflowService:
 
             if not row:
                 return {
+                    "item_path": item_path,  # Add missing required field for ProgressiveDetailResponse validation
                     "error": f"Item {item_path} not found",
                     "detail_level": detail_level,
                     "available_levels": DetailLevel.ALL_LEVELS,
