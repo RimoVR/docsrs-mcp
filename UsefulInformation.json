@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-08-24",
+  "lastUpdated": "2025-08-25",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -986,10 +986,45 @@
           "lesson": "Always verify table names match current database schema when writing queries",
           "pattern": "Use consistent table naming conventions throughout the codebase",
           "dateEncountered": "2025-08-24",
+          "status": "RESOLVED",
+          "dateResolved": "2025-08-25",
           "relatedFiles": ["src/docsrs_mcp/services/crate_service.py"],
           "affectedLines": ["261-272"],
           "codeExample": "# Wrong:\nSELECT * FROM items WHERE ...\n# Correct:\nSELECT * FROM embeddings WHERE ...",
-          "debuggingTechnique": "Use PRAGMA table_info() to verify actual table names in database schema"
+          "debuggingTechnique": "Use PRAGMA table_info() to verify actual table names in database schema",
+          "resolution": "Fixed comprehensively in cross-reference service implementation - see cross-reference database schema bug entry for complete solution"
+        },
+        {
+          "error": "Cross-reference database schema bug - 'no such table: items' in cross-reference operations",
+          "rootCause": "Cross-reference service SQL queries were referencing non-existent 'items' table instead of the actual 'embeddings' table. Schema evolution from items to embeddings was incomplete in cross-reference implementation.",
+          "solution": "Updated all SQL queries in cross_reference_service.py to use embeddings table, changed from ID-based JOINs to path-based JOINs using item_path/alias_path/actual_path, and replaced FULL OUTER JOIN with UNION of LEFT JOINs for SQLite compatibility.",
+          "context": "Cross-reference operations (get_dependency_graph, trace_reexports, suggest_migrations) failing with table not found errors",
+          "implementation": [
+            "Updated all SQL queries in cross_reference_service.py to use embeddings table",
+            "Changed from ID-based JOINs to path-based JOINs using item_path, alias_path, actual_path",
+            "Replaced FULL OUTER JOIN with UNION of LEFT JOINs for SQLite compatibility",
+            "Updated test fixtures to match production schema exactly",
+            "Ensured consistent table naming across entire cross-reference implementation"
+          ],
+          "lesson": "Schema migrations must update ALL service implementations consistently, not just primary data access patterns. Cross-reference services can be easily overlooked during schema changes.",
+          "pattern": "Always audit all service layers and specialized implementations when performing database schema changes",
+          "dateEncountered": "2025-08-25",
+          "dateResolved": "2025-08-25",
+          "status": "RESOLVED",
+          "relatedFiles": [
+            "src/docsrs_mcp/services/cross_reference_service.py",
+            "tests/test_cross_reference_service.py"
+          ],
+          "affectedLines": [
+            "cross_reference_service.py:194-240",
+            "cross_reference_service.py:368-430", 
+            "cross_reference_service.py:528-540",
+            "test_cross_reference_service.py:19-116"
+          ],
+          "codeExample": "# Before (incorrect table reference):\nSELECT i.item_path, cr.alias_path \nFROM items i \nFULL OUTER JOIN cross_references cr ON i.id = cr.item_id\n\n# After (correct table and SQLite-compatible joins):\nSELECT e.item_path, cr.alias_path \nFROM embeddings e \nLEFT JOIN cross_references cr ON e.item_path = cr.actual_path\nUNION\nSELECT e.item_path, cr.alias_path \nFROM cross_references cr \nLEFT JOIN embeddings e ON cr.actual_path = e.item_path\nWHERE e.item_path IS NULL",
+          "debuggingTechnique": "Use PRAGMA table_info() to verify table existence and structure, test all cross-reference operations systematically",
+          "testingValidation": "All cross-reference operations now work correctly: get_dependency_graph, trace_reexports, suggest_migrations",
+          "preventionStrategy": "Include cross-reference services in schema migration checklists and maintain comprehensive test coverage for all specialized service implementations"
         },
         {
           "error": "String iteration returns individual characters",

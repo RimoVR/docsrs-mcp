@@ -190,51 +190,56 @@ class CrossReferenceService:
             crate_id = row[0]
 
             # Use recursive CTE for efficient traversal
+            # Modified to use actual schema with embeddings table and path-based relationships
             query = """
             WITH RECURSIVE dependency_tree AS (
                 -- Base case: direct dependencies
                 SELECT
-                    r.source_item_id,
-                    r.target_item_id,
+                    r.alias_path as source_path,
+                    r.actual_path as target_path,
                     r.confidence_score,
                     1 as depth,
-                    r.source_item_id || ',' as path,
-                    i1.name as source_name,
-                    i2.name as target_name,
-                    cm.version as target_version
+                    r.alias_path || ',' as path,
+                    e1.item_path as source_name,
+                    e2.item_path as target_name,
+                    cm2.version as target_version
                 FROM reexports r
-                JOIN items i1 ON r.source_item_id = i1.id
-                JOIN items i2 ON r.target_item_id = i2.id
-                LEFT JOIN crate_metadata cm ON i2.crate_id = cm.id
-                WHERE i1.crate_id = ?
-                  AND r.link_type IN ('dependency', 'crossref')
+                LEFT JOIN embeddings e1 ON r.alias_path = e1.item_path
+                LEFT JOIN embeddings e2 ON r.actual_path = e2.item_path
+                LEFT JOIN crate_metadata cm2 ON 
+                    SUBSTR(e2.item_path, 1, INSTR(e2.item_path || '::', '::') - 1) = cm2.name
+                WHERE r.crate_id = ?
+                  AND r.link_type IN ('dependency', 'crossref', 'reexport')
 
                 UNION ALL
 
                 -- Recursive case with cycle detection
                 SELECT
-                    r.source_item_id,
-                    r.target_item_id,
+                    r.alias_path,
+                    r.actual_path,
                     r.confidence_score,
                     dt.depth + 1,
-                    dt.path || r.source_item_id || ',',
-                    i1.name as source_name,
-                    i2.name as target_name,
-                    cm.version as target_version
+                    dt.path || r.alias_path || ',',
+                    e1.item_path as source_name,
+                    e2.item_path as target_name,
+                    cm2.version as target_version
                 FROM reexports r
-                JOIN dependency_tree dt ON r.source_item_id = dt.target_item_id
-                JOIN items i1 ON r.source_item_id = i1.id
-                JOIN items i2 ON r.target_item_id = i2.id
-                LEFT JOIN crate_metadata cm ON i2.crate_id = cm.id
+                JOIN dependency_tree dt ON r.alias_path = dt.target_path
+                LEFT JOIN embeddings e1 ON r.alias_path = e1.item_path
+                LEFT JOIN embeddings e2 ON r.actual_path = e2.item_path
+                LEFT JOIN crate_metadata cm2 ON 
+                    SUBSTR(e2.item_path, 1, INSTR(e2.item_path || '::', '::') - 1) = cm2.name
                 WHERE dt.depth < ?
-                  AND dt.path NOT LIKE '%' || r.target_item_id || ',%'
+                  AND dt.path NOT LIKE '%' || r.actual_path || ',%'
+                  AND r.crate_id = ?
             )
             SELECT DISTINCT source_name, target_name, target_version, depth
             FROM dependency_tree
+            WHERE source_name IS NOT NULL AND target_name IS NOT NULL
             ORDER BY depth, source_name, target_name;
             """
 
-            cursor = await conn.execute(query, (crate_id, max_depth))
+            cursor = await conn.execute(query, (crate_id, max_depth, crate_id))
             rows = await cursor.fetchall()
 
             # Build graph structure
@@ -358,26 +363,70 @@ class CrossReferenceService:
         suggestions = []
 
         async with aiosqlite.connect(self.db_path) as conn:
-            # Query for changes between versions
+            # Modified query to use embeddings table and UNION approach for SQLite compatibility
+            # SQLite doesn't support FULL OUTER JOIN, so we use UNION of LEFT JOINs
             query = """
-            SELECT DISTINCT
-                old.name as old_path,
-                new.name as new_path,
-                CASE
-                    WHEN new.name IS NULL THEN 'removed'
-                    WHEN old.name IS NULL THEN 'added'
-                    WHEN old.name != new.name THEN 'renamed'
-                    ELSE 'modified'
-                END as change_type,
-                0.8 as confidence
-            FROM items old
-            FULL OUTER JOIN items new ON old.fingerprint = new.fingerprint
-            WHERE old.crate_id IN (
-                SELECT id FROM crate_metadata WHERE name = ? AND version = ?
-            ) OR new.crate_id IN (
-                SELECT id FROM crate_metadata WHERE name = ? AND version = ?
+            WITH old_version_items AS (
+                SELECT DISTINCT e.item_path, e.signature, e.item_type
+                FROM embeddings e
+                JOIN crate_metadata cm ON 
+                    SUBSTR(e.item_path, 1, INSTR(e.item_path || '::', '::') - 1) = cm.name
+                WHERE cm.name = ? AND cm.version = ?
+            ),
+            new_version_items AS (
+                SELECT DISTINCT e.item_path, e.signature, e.item_type
+                FROM embeddings e
+                JOIN crate_metadata cm ON 
+                    SUBSTR(e.item_path, 1, INSTR(e.item_path || '::', '::') - 1) = cm.name
+                WHERE cm.name = ? AND cm.version = ?
             )
-            AND (old.name != new.name OR old.name IS NULL OR new.name IS NULL)
+            SELECT * FROM (
+                -- Items that were removed
+                SELECT 
+                    o.item_path as old_path,
+                    NULL as new_path,
+                    'removed' as change_type,
+                    0.9 as confidence
+                FROM old_version_items o
+                LEFT JOIN new_version_items n ON o.item_path = n.item_path
+                WHERE n.item_path IS NULL
+                
+                UNION ALL
+                
+                -- Items that were added
+                SELECT 
+                    NULL as old_path,
+                    n.item_path as new_path,
+                    'added' as change_type,
+                    0.9 as confidence
+                FROM new_version_items n
+                LEFT JOIN old_version_items o ON n.item_path = o.item_path
+                WHERE o.item_path IS NULL
+                
+                UNION ALL
+                
+                -- Items that may have been renamed (similar signatures)
+                SELECT 
+                    o.item_path as old_path,
+                    n.item_path as new_path,
+                    'renamed' as change_type,
+                    0.7 as confidence
+                FROM old_version_items o
+                CROSS JOIN new_version_items n
+                WHERE o.item_path != n.item_path
+                  AND o.item_type = n.item_type
+                  AND o.signature IS NOT NULL 
+                  AND n.signature IS NOT NULL
+                  AND o.signature = n.signature
+                  AND NOT EXISTS (
+                      SELECT 1 FROM new_version_items n2 
+                      WHERE n2.item_path = o.item_path
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM old_version_items o2 
+                      WHERE o2.item_path = n.item_path
+                  )
+            )
             LIMIT 20;
             """
 
@@ -476,17 +525,17 @@ class CrossReferenceService:
                     break  # Cycle detected
                 visited.add((current_crate, current_path))
 
+                # Modified query to use actual schema with path-based relationships
                 query = """
                 SELECT
-                    r.target_item_id,
-                    i2.name as target_path,
+                    r.actual_path as target_path,
                     cm.name as target_crate,
                     r.link_type
                 FROM reexports r
-                JOIN items i1 ON r.source_item_id = i1.id
-                JOIN items i2 ON r.target_item_id = i2.id
-                JOIN crate_metadata cm ON i2.crate_id = cm.id
-                WHERE i1.name = ? AND cm.name = ? AND r.link_type = 'reexport'
+                JOIN crate_metadata cm ON r.crate_id = cm.id
+                WHERE r.alias_path = ? 
+                  AND cm.name = ? 
+                  AND r.link_type = 'reexport'
                 LIMIT 1;
                 """
 
@@ -499,7 +548,7 @@ class CrossReferenceService:
                     original_crate = current_crate
                     break
 
-                _, target_path, target_crate, _ = row
+                target_path, target_crate, _ = row
                 chain.append(
                     f"{current_crate}::{current_path} -> {target_crate}::{target_path}"
                 )

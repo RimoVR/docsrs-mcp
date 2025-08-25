@@ -22,11 +22,11 @@ def temp_db():
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         db_path = tmp.name
 
-    # Create minimal schema for testing
+    # Create minimal schema for testing that matches production
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    # Create tables
+    # Create tables to match production schema
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS crate_metadata (
             id INTEGER PRIMARY KEY,
@@ -35,25 +35,40 @@ def temp_db():
         )
     """)
 
+    # Create embeddings table instead of items table
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS items (
-            id INTEGER PRIMARY KEY,
-            crate_id INTEGER,
-            name TEXT NOT NULL,
-            fingerprint TEXT,
-            FOREIGN KEY (crate_id) REFERENCES crate_metadata(id)
+        CREATE TABLE IF NOT EXISTS embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_path TEXT NOT NULL,
+            header TEXT NOT NULL,
+            content TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            item_type TEXT,
+            signature TEXT,
+            parent_id TEXT,
+            examples TEXT,
+            visibility TEXT DEFAULT 'public',
+            deprecated BOOLEAN DEFAULT 0,
+            generic_params TEXT DEFAULT NULL,
+            trait_bounds TEXT DEFAULT NULL,
+            UNIQUE(item_path)
         )
     """)
 
+    # Create reexports table with production schema
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS reexports (
-            id INTEGER PRIMARY KEY,
-            source_item_id INTEGER,
-            target_item_id INTEGER,
-            link_type TEXT,
-            confidence_score REAL,
-            FOREIGN KEY (source_item_id) REFERENCES items(id),
-            FOREIGN KEY (target_item_id) REFERENCES items(id)
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            crate_id INTEGER NOT NULL,
+            alias_path TEXT NOT NULL,
+            actual_path TEXT NOT NULL,
+            is_glob BOOLEAN DEFAULT 0,
+            link_text TEXT,
+            link_type TEXT DEFAULT 'reexport',
+            target_item_id TEXT,
+            confidence_score REAL DEFAULT 1.0,
+            FOREIGN KEY (crate_id) REFERENCES crate_metadata(id) ON DELETE CASCADE,
+            UNIQUE(crate_id, alias_path, actual_path, link_type)
         )
     """)
 
@@ -62,23 +77,34 @@ def temp_db():
         "INSERT INTO crate_metadata (id, name, version) VALUES (1, 'test_crate', '1.0.0')"
     )
     cursor.execute(
-        "INSERT INTO items (id, crate_id, name, fingerprint) VALUES (1, 1, 'TestStruct', 'abc123')"
+        "INSERT INTO crate_metadata (id, name, version) VALUES (2, 'test_crate', '2.0.0')"
     )
-    cursor.execute(
-        "INSERT INTO items (id, crate_id, name, fingerprint) VALUES (2, 1, 'test_mod::TestStruct', 'abc123')"
-    )
-    cursor.execute(
-        "INSERT INTO items (id, crate_id, name, fingerprint) VALUES (3, 1, 'OtherStruct', 'def456')"
-    )
-
-    # Add some re-exports
+    
+    # Insert embeddings data (using dummy BLOB for embedding)
+    dummy_embedding = b'\x00' * 1536  # 384 floats * 4 bytes
     cursor.execute("""
-        INSERT INTO reexports (source_item_id, target_item_id, link_type, confidence_score)
-        VALUES (1, 2, 'reexport', 0.9)
+        INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature) 
+        VALUES ('test_crate::TestStruct', 'struct TestStruct', 'Test struct documentation', ?, 'struct', 'pub struct TestStruct')
+    """, (dummy_embedding,))
+    
+    cursor.execute("""
+        INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature) 
+        VALUES ('test_crate::test_mod::TestStruct', 'struct TestStruct', 'Module test struct', ?, 'struct', 'pub struct TestStruct')
+    """, (dummy_embedding,))
+    
+    cursor.execute("""
+        INSERT INTO embeddings (item_path, header, content, embedding, item_type, signature) 
+        VALUES ('test_crate::OtherStruct', 'struct OtherStruct', 'Other struct documentation', ?, 'struct', 'pub struct OtherStruct')
+    """, (dummy_embedding,))
+
+    # Add some re-exports using path-based relationships
+    cursor.execute("""
+        INSERT INTO reexports (crate_id, alias_path, actual_path, link_type, confidence_score)
+        VALUES (1, 'test_crate::TestStruct', 'test_crate::test_mod::TestStruct', 'reexport', 0.9)
     """)
     cursor.execute("""
-        INSERT INTO reexports (source_item_id, target_item_id, link_type, confidence_score)
-        VALUES (1, 3, 'crossref', 0.7)
+        INSERT INTO reexports (crate_id, alias_path, actual_path, link_type, confidence_score)
+        VALUES (1, 'test_crate::TestStruct', 'test_crate::OtherStruct', 'crossref', 0.7)
     """)
 
     conn.commit()

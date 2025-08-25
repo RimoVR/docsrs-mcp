@@ -2405,6 +2405,8 @@ graph TD
 
 The CrossReferenceService provides advanced cross-reference capabilities with robust resilience patterns and performance optimizations. This service implements sophisticated graph algorithms for dependency analysis and migration planning.
 
+**Schema Evolution Completed**: The service has been fully updated to work with the production embeddings table schema, replacing all legacy 'items' table references. All SQL queries now use path-based relationships (item_path, alias_path, actual_path) instead of deprecated ID-based foreign keys, ensuring compatibility with the current database structure.
+
 ### Service Architecture Overview
 
 ```mermaid
@@ -2417,9 +2419,9 @@ graph TD
     
     subgraph "Core Operations"
         RESOLVE[resolve_import()<br/>Import path resolution<br/>Confidence scoring<br/>Alternative suggestions]
-        GRAPH[get_dependency_graph()<br/>Recursive CTE traversal<br/>Cycle detection via DFS<br/>Hierarchy building]
-        MIGRATE[suggest_migrations()<br/>Version diff analysis<br/>Pattern-based suggestions<br/>Breaking change detection]
-        TRACE[trace_reexports()<br/>Re-export chain analysis<br/>Confidence calculation<br/>Path optimization]
+        GRAPH[get_dependency_graph()<br/>Path-based JOIN operations<br/>String extraction from item_path<br/>Cycle detection via DFS<br/>Production schema compatible]
+        MIGRATE[suggest_migrations()<br/>UNION of LEFT JOINs pattern<br/>Embeddings table integration<br/>Breaking change detection<br/>SQLite-compatible operations]
+        TRACE[trace_reexports()<br/>alias_path/actual_path columns<br/>Path-based relationship mapping<br/>Confidence calculation<br/>Schema-aligned queries]
     end
     
     subgraph "Database Integration"
@@ -4232,11 +4234,12 @@ def get_cache_stats(self) -> CacheStatistics:
 
 #### 2. Database Schema Consistency Fix
 
-**Location**: Database query operations across multiple modules
+**Location**: Database query operations across multiple modules, with critical focus on CrossReferenceService
 
-**Issue**: Inconsistent table references using non-existent 'items' table instead of actual 'embeddings' table.
+**Issue**: Inconsistent table references using legacy 'items' table instead of production 'embeddings' table, causing production failures masked by incorrect test fixtures.
 
-**Solution**: Fixed all database queries to reference correct 'embeddings' table consistently:
+**Solution**: Completed comprehensive schema evolution fix across all components:
+
 ```sql
 -- BEFORE (incorrect):
 SELECT * FROM items WHERE crate_name = ?
@@ -4245,10 +4248,27 @@ SELECT * FROM items WHERE crate_name = ?
 SELECT * FROM embeddings WHERE crate_name = ?
 ```
 
+**Cross-Reference Service Specific Fixes**:
+
+- **get_dependency_graph()**: Updated to use embeddings table with path-based JOIN operations and string extraction for crate name matching from item_path column
+- **trace_reexports()**: Fixed to use correct alias_path/actual_path columns from reexports table instead of non-existent source_item_id/target_item_id foreign keys
+- **suggest_migrations()**: Rewritten to use UNION of LEFT JOINs instead of unsupported SQLite FULL OUTER JOIN, properly integrates with embeddings table schema
+
+**Test Schema Alignment**: 
+- Updated test_cross_reference_service.py fixtures to match production schema exactly
+- Eliminated false positive test results that were masking production bugs
+- All test databases now use identical schema to production
+
+**Path-Based Relationship Migration**:
+- Transitioned from legacy ID-based foreign key relationships to path-based relationships
+- Uses item_path, alias_path, actual_path columns for cross-referencing
+- Maintains data integrity while supporting the evolved schema structure
+
 **Impact**:
-- **Query Reliability**: Eliminates SQL errors from invalid table references
-- **Schema Integrity**: Ensures all operations target the correct database schema
-- **Data Consistency**: Maintains referential integrity across the application
+- **Production Reliability**: Eliminates runtime SQL errors from invalid table/column references  
+- **Schema Integrity**: Complete alignment between test and production database schemas
+- **Cross-Reference Accuracy**: All dependency graph and re-export tracing operations now function correctly
+- **Data Consistency**: Path-based relationships maintain referential integrity in the evolved schema
 
 #### 3. Data Type Safety - String Iteration Bug Prevention
 
