@@ -7,6 +7,19 @@
       "description": "Solutions to specific errors encountered during development",
       "entries": [
         {
+          "error": "Categories Parameter Validation Error in compare_versions - 1 validation error for CompareVersionsRequest categories - Input should be a valid list",
+          "rootCause": "CompareVersionsRequest.categories field expected list[ChangeCategory] but received string inputs from MCP clients without proper field validation. MCP clients often send enum values as strings or None values instead of proper lists.",
+          "solution": "Added @field_validator('categories', mode='before') to CompareVersionsRequest model with comprehensive string-to-enum conversion handling None inputs as default all categories, string inputs as comma-separated parsing, List[str] inputs as individual string-to-enum conversion, and List[ChangeCategory] inputs as pass-through for backward compatibility.",
+          "context": "100% failure when calling compare_versions without categories parameter or with string category values from MCP clients",
+          "lesson": "Enum list parameters in MCP models require robust field validators to handle diverse input formats from different MCP clients",
+          "pattern": "Use @field_validator with mode='before' for enum list parameters to support None, string, and list inputs with case-insensitive category mapping",
+          "dateEncountered": "2025-08-25",
+          "relatedFiles": ["src/docsrs_mcp/models/requests.py", "src/docsrs_mcp/mcp_sdk_server.py", "src/docsrs_mcp/crate_service.py"],
+          "codeExample": "@field_validator(\"categories\", mode=\"before\")\n@classmethod\ndef validate_categories(cls, v: Any) -> list[ChangeCategory]:\n    if v is None:\n        return list(ChangeCategory)  # Default all categories\n    if isinstance(v, str):\n        # Handle comma-separated string\n        category_strings = [s.strip() for s in v.split(',')]\n        return [cls._string_to_category(s) for s in category_strings if s]\n    if isinstance(v, list):\n        if not v:\n            return list(ChangeCategory)\n        if all(isinstance(item, ChangeCategory) for item in v):\n            return v  # Already proper enums\n        if all(isinstance(item, str) for item in v):\n            return [cls._string_to_category(s) for s in v]\n    return list(ChangeCategory)\n\n@classmethod\ndef _string_to_category(cls, value: str) -> ChangeCategory:\n    # Case-insensitive with aliases\n    aliases = {'break': 'breaking', 'new': 'added'}\n    normalized = aliases.get(value.lower(), value.lower())\n    for category in ChangeCategory:\n        if category.value.lower() == normalized:\n            return category\n    raise ValueError(f\"Invalid category: {value}\")",
+          "debuggingTechnique": "Test with various input formats: None, 'breaking', 'breaking,added', ['major', 'minor'] to ensure comprehensive input handling",
+          "additionalBugFixed": "VersionDiffResponse field name bug: Changed 'items' to 'changes' in crate_service.py return dict to match VersionDiffResponse model schema"
+        },
+        {
           "error": "compareVersions Schema Reference Error - PointerToNowhere for '/components/schemas/ItemChange'",
           "rootCause": "MCP manifest uses $ref to ChangeCategory enum that doesn't exist in the schema structure. The schema references undefined components.",
           "solution": "Replace $ref with inline enum array definitions in the MCP manifest schema. Define enum values directly instead of referencing external components.",

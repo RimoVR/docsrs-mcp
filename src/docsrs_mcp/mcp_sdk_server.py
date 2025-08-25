@@ -561,16 +561,11 @@ async def compare_versions(
             max_results, default=1000, min_val=1, max_val=5000
         )
 
-        # Parse categories if provided
-        categories_list = None
-        if categories:
-            categories_list = [cat.strip() for cat in categories.split(",")]
-
         result = await crate_service.compare_versions(
             crate_name,
             version_a,
             version_b,
-            categories=categories_list,
+            categories=categories,  # Pass raw string - field validator will handle conversion
             include_unchanged=include_unchanged_bool,
             max_results=max_results_int,
         )

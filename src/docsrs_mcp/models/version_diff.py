@@ -176,6 +176,74 @@ class CompareVersionsRequest(BaseModel):
             v = str(v)
         return validate_version_string(v)
 
+    @field_validator("categories", mode="before")
+    @classmethod
+    def validate_categories(cls, v: Any) -> list[ChangeCategory]:
+        """Validate and convert categories to ChangeCategory enum list.
+        
+        Handles multiple input formats for MCP compatibility:
+        - None: uses default value (all categories)
+        - list[ChangeCategory]: pass through (backward compatibility)
+        - list[str]: convert strings to ChangeCategory enums
+        - str: comma-separated string converted to list
+        """
+        # Handle None (use default)
+        if v is None:
+            return [
+                ChangeCategory.BREAKING,
+                ChangeCategory.DEPRECATED,
+                ChangeCategory.ADDED,
+                ChangeCategory.REMOVED,
+                ChangeCategory.MODIFIED,
+            ]
+
+        # Handle list[ChangeCategory] (backward compatibility)
+        if isinstance(v, list) and v and isinstance(v[0], ChangeCategory):
+            return v
+
+        # Handle string input (comma-separated)
+        if isinstance(v, str):
+            v = [cat.strip() for cat in v.split(",") if cat.strip()]
+
+        # Ensure we have a list
+        if not isinstance(v, list):
+            raise ValueError("Categories must be a list or comma-separated string")
+
+        # Convert strings to ChangeCategory enums
+        valid_categories = []
+        for category in v:
+            if isinstance(category, ChangeCategory):
+                valid_categories.append(category)
+                continue
+
+            # Convert string to enum (case-insensitive)
+            category_str = str(category).lower().strip()
+
+            # Map common variations
+            category_mapping = {
+                "breaking": ChangeCategory.BREAKING,
+                "deprecated": ChangeCategory.DEPRECATED,
+                "added": ChangeCategory.ADDED,
+                "removed": ChangeCategory.REMOVED,
+                "modified": ChangeCategory.MODIFIED,
+                # Common aliases
+                "break": ChangeCategory.BREAKING,
+                "new": ChangeCategory.ADDED,
+                "deleted": ChangeCategory.REMOVED,
+                "changed": ChangeCategory.MODIFIED,
+                "updated": ChangeCategory.MODIFIED,
+            }
+
+            if category_str in category_mapping:
+                valid_categories.append(category_mapping[category_str])
+            else:
+                valid_options = ", ".join([cat.value for cat in ChangeCategory])
+                raise ValueError(
+                    f"Invalid category '{category}'. Valid options: {valid_options}"
+                )
+
+        return valid_categories
+
     @field_validator("include_unchanged", mode="before")
     @classmethod
     def validate_include_unchanged(cls, v: Any) -> bool:

@@ -525,7 +525,7 @@ class CrateService:
         crate_name: str,
         version_a: str,
         version_b: str,
-        categories: list[str] | None = None,
+        categories: str | list[str] | None = None,
         include_unchanged: bool = False,
         max_results: int = 1000,
     ) -> dict:
@@ -568,5 +568,5 @@ class CrateService:
             "version_a": diff_result.version_a,
             "version_b": diff_result.version_b,
             "summary": diff_result.summary,
-            "items": diff_result.items,
+            "changes": diff_result.changes,
         }

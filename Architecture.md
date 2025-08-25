@@ -526,6 +526,7 @@ The models package implements a **modular, function-based split** that maintains
 - `ChangeCategory`, `ItemChange`, `DiffSummary` structures
 - Migration hint generation and severity classification
 - Three-tier ingestion compatibility models
+- **Enhanced Validation**: `CompareVersionsRequest.validate_categories` field validator with comprehensive string-to-enum conversion supporting aliases (break→breaking, new→added) and comma-separated string inputs
 
 **models/__init__.py**
 - **Comprehensive re-exports** for complete backward compatibility
@@ -1972,11 +1973,13 @@ The version diff system provides semantic comparison of documentation changes be
 #### RustBreakingChangeDetector 
 - **Semver Analysis**: Identifies breaking changes according to Rust semver guidelines
 - **Change Categories**: 
-  - `added`: New items introduced
+  - `added`: New items introduced (alias: "new")
   - `removed`: Items that were deleted (potential breaking change)
-  - `modified`: Items with signature or behavior changes
+  - `modified`: Items with signature or behavior changes (aliases: "changed", "updated")
   - `deprecated`: Items marked as deprecated
+  - `breaking`: Breaking changes identified by semver analysis (alias: "break")
 - **Migration Hints**: Generates contextual guidance for handling breaking changes
+- **Category Validation**: Supports flexible input formats including comma-separated strings and case-insensitive aliases for enhanced MCP client compatibility
 
 ### Architecture Diagram
 
@@ -5583,6 +5586,14 @@ RUST_PATH_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z_][a-zA-Z0-9_]
 
 All request models implement comprehensive field validators using the centralized validation utilities:
 
+#### CompareVersionsRequest Validation
+- **categories**: String-to-enum conversion with `@field_validator(mode='before')`
+- **Alias Support**: Maps common aliases (break→breaking, new→added, changed→modified, updated→modified)
+- **Input Flexibility**: Handles None, string, list[str], list[ChangeCategory], and comma-separated string inputs
+- **Case-Insensitive Processing**: Normalizes input with `.lower()` before enum mapping
+- **Comprehensive Error Handling**: Clear validation messages with examples of valid category options
+- **Backward Compatibility**: Maintains existing ChangeCategory enum functionality
+
 #### SearchItemsRequest Validation
 - **query**: Unicode NFKC normalization for search consistency
 - **k**: String-to-integer coercion with bounds (1-20)
@@ -5622,13 +5633,56 @@ def coerce_deprecated_to_bool(cls, v):
         else:
             raise ValueError(f"Invalid boolean value: '{v}'")
     return bool(v)
+
+@field_validator("categories", mode="before")
+@classmethod
+def validate_categories(cls, v):
+    """Convert string/comma-separated inputs to ChangeCategory enums with alias support."""
+    if v is None:
+        return v
+    if isinstance(v, list) and all(isinstance(item, ChangeCategory) for item in v):
+        return v  # Already proper enum list
+    
+    # Alias mapping for common variations
+    alias_map = {
+        'break': ChangeCategory.breaking,
+        'new': ChangeCategory.added,
+        'changed': ChangeCategory.modified,
+        'updated': ChangeCategory.modified,
+        'deleted': ChangeCategory.removed
+    }
+    
+    # Handle string input (comma-separated or single)
+    if isinstance(v, str):
+        categories_str = [cat.strip().lower() for cat in v.split(',')]
+    elif isinstance(v, list):
+        categories_str = [str(cat).strip().lower() for cat in v]
+    else:
+        categories_str = [str(v).strip().lower()]
+    
+    result = []
+    for cat_str in categories_str:
+        if cat_str in alias_map:
+            result.append(alias_map[cat_str])
+        else:
+            try:
+                result.append(ChangeCategory[cat_str])
+            except KeyError:
+                valid_options = list(ChangeCategory.__members__.keys()) + list(alias_map.keys())
+                raise ValueError(f"Invalid category '{cat_str}'. Valid options: {valid_options}")
+    
+    return result
 ```
 
 ### Boolean Field Validation Pattern
 
 **Standard Implementation Pattern**
 
-All boolean fields in MCP request models require `field_validator(mode='before')` to handle string inputs from MCP clients. The system implements a standardized boolean validation pattern that ensures consistent handling across all boolean parameters:
+All boolean fields in MCP request models require `field_validator(mode='before')` to handle string inputs from MCP clients. The system implements standardized validation patterns for different data types:
+
+**Boolean Validation Pattern**: Ensures consistent handling across all boolean parameters
+**Enum Validation Pattern**: Converts string inputs to enum values with alias support (e.g., CompareVersionsRequest.categories)
+**String-to-Type Coercion**: Handles various input formats for universal MCP client compatibility
 
 ```python
 @field_validator("include_unchanged", mode="before")
@@ -6279,6 +6333,20 @@ The docsrs-mcp server implements a dual-mode architecture that allows the same F
 ## Implementation Decisions
 
 ### Recent Architectural Decisions
+
+**CompareVersionsRequest Categories Field Validator Enhancement (2025-08-25)**
+- **Issue Fixed**: Duplicate string-to-enum parsing logic between CompareVersionsRequest model and mcp_sdk_server.py causing maintenance overhead and inconsistent validation
+- **Root Cause**: Manual string parsing in MCP handler duplicated validation logic already needed in the Pydantic model
+- **Solution Implemented**:
+  1. **Added field_validator**: `CompareVersionsRequest.validate_categories()` with `mode='before'` pattern following established codebase conventions
+  2. **Comprehensive Input Handling**: Supports None, string, list[str], list[ChangeCategory], and comma-separated string inputs
+  3. **Alias Mapping**: Case-insensitive conversion with common aliases (break→breaking, new→added, changed→modified, updated→modified, deleted→removed)
+  4. **Error Handling**: Clear validation messages with examples of valid category options
+  5. **Code Deduplication**: Removed manual parsing from mcp_sdk_server.py, delegating all validation to the model
+  6. **Additional Bug Fix**: Corrected 'items' to 'changes' field name in VersionDiffResponse service return
+- **Technical Pattern**: Follows established `@field_validator(mode='before')` pattern used throughout the codebase for MCP parameter validation
+- **Compatibility**: Maintains backward compatibility with existing ChangeCategory enum inputs while enhancing string input flexibility
+- **Integration**: Seamlessly integrates with existing MCP parameter validation best practices
 
 **Fuzzy Resolution Parameter Safety Enhancement (2025-08-25)**
 - **Issue Fixed**: Critical parameter mismatch in get_fuzzy_suggestions_with_fallback() causing 100% failure rate for documentation fallback
