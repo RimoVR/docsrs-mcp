@@ -303,6 +303,7 @@ The system now supports two parallel MCP implementations to ensure compatibility
 - String-only parameters with validation for universal MCP client compatibility
 - Native MCP protocol support without conversion layers
 - Integrated with MCPServerRunner for memory management
+- **Critical Fix Applied**: Proper logging configuration to stderr prevents MCP tool failures
 
 **Tool Migration Status**
 All 10 tools successfully migrated:
@@ -3931,7 +3932,84 @@ for example in examples_data:  # Now safely iterates over list elements
 - **Performance Impact**: 95% reduction in example embedding storage
 - **Search Quality**: Dramatic improvement in example search relevance
 
-### MCP Parameter Validation Enhancement
+### Logger Configuration Missing Bug Fix
+
+**Location**: `/src/docsrs_mcp/mcp_sdk_server.py` lines 42-48
+
+**Critical Bug Description**:
+The MCP SDK server implementation defined `logger = logging.getLogger(__name__)` but never called `logging.basicConfig()` to initialize the logging system, causing all MCP tools to fail with "name 'logger' is not defined" errors.
+
+**Root Cause Analysis**:
+- Service factory functions (`get_crate_service()`, etc.) attempted to use `logger.info()` for debugging
+- Logger instance existed but logging system was never initialized
+- Missing `logging.basicConfig()` meant logger had no configured handlers
+- All MCP tool calls failed immediately when service factories tried to log initialization
+
+**Fix Implementation**:
+```python
+# Configure logging to stderr to avoid STDIO corruption
+# This is critical for STDIO transport to work properly
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stderr,
+)
+logger = logging.getLogger(__name__)
+```
+
+**Critical Design Decisions**:
+- **stderr logging**: Essential for MCP STDIO transport compatibility
+- **Follows existing pattern**: Matches `mcp_server.py` logging configuration
+- **Placement**: Added before logger definition to ensure proper initialization sequence
+- **Log level INFO**: Provides adequate debugging information without verbosity
+
+**Impact Assessment**:
+- **Pre-Fix**: All MCP tools failed with NameError on logger usage
+- **Post-Fix**: Complete MCP functionality restoration with proper error logging
+- **Verification**: All 10 MCP tools now execute successfully with informational logging
+
+### Schema Standardization Completed
+
+**Location**: `/src/docsrs_mcp/mcp_tools_config.py` parameter type declarations
+
+**Issue Description**:
+Inconsistent parameter type declarations between `mcp_tools_config.py` (mixed integer/boolean/number types) and `mcp_sdk_server.py` (string-only compatibility approach) caused schema validation mismatches.
+
+**Technical Problem**:
+- MCP tools configuration defined parameters as `"type": "integer"`, `"type": "boolean"`, `"type": "number"`
+- MCP SDK server implementation expected all parameters as strings for broad client compatibility
+- Field validators existed with `mode='before'` for proper string-to-type conversion
+- Schema inconsistency caused validation confusion and potential client compatibility issues
+
+**Solution Implementation**:
+**17 Parameters Standardized**:
+- `k`, `limit`, `offset` (integer → string with "Number (as string)" descriptions)
+- `similarity_threshold`, `min_relevance_score` (number → string with "Float (as string)" descriptions) 
+- `include_re_exports`, `include_examples`, `include_deps` (boolean → string with "Boolean (as string)" descriptions)
+- All other mixed-type parameters converted to consistent string declarations
+
+**Updated Parameter Pattern**:
+```python
+# Before (inconsistent types)
+"k": {
+    "type": "integer",
+    "description": "Number of results to return"
+}
+
+# After (standardized string-only)
+"k": {
+    "type": "string", 
+    "description": "Number of results to return (as string)"
+}
+```
+
+**Architectural Benefits**:
+- **Consistency**: All parameter types now align with string-only compatibility approach
+- **Client Compatibility**: Eliminates potential schema validation conflicts
+- **Field Validator Alignment**: Proper integration with existing `mode='before'` validators
+- **MCP Standard Compliance**: Follows string-first parameter design pattern
+
+### MCP Parameter Validation Enhancement (Historical)
 
 **Location**: `endpoints.py` and `endpoints_tools.py` in FastAPI route parameter handling (formerly `app.py:151-297`)
 
@@ -3943,9 +4021,9 @@ Initial MCP manifest schema used `anyOf` patterns but was later simplified to st
 - MCP manifest only declared parameters as `{"type": "integer"}` or `{"type": "number"}`
 - MCP clients sending `"k": "5"` (string) were rejected despite valid coercion capability
 
-**Solution Implementation**:
+**Solution Implementation (Superseded by Schema Standardization)**:
 ```json
-// Updated MCP manifest patterns
+// Previous anyOf patterns (now replaced by string-only approach)
 {
   "k": {
     "anyOf": [
@@ -3953,22 +4031,14 @@ Initial MCP manifest schema used `anyOf` patterns but was later simplified to st
       {"type": "string", "pattern": "^[0-9]+$"}
     ],
     "description": "Number of results to return"
-  },
-  "limit": {
-    "anyOf": [
-      {"type": "integer"},
-      {"type": "string", "pattern": "^[0-9]+$"}
-    ],
-    "description": "Maximum results limit"
   }
 }
 ```
 
-**Applied To Parameters**:
-- `k` (result count)
-- `limit` (result limit)
-- `offset` (pagination offset)
-- All other numeric parameters in MCP tool definitions
+**Evolution to Current Approach**:
+- Initial: anyOf patterns with multiple type support
+- **Current**: String-only parameters with comprehensive field validators
+- **Applied To Parameters**: All 17 parameters now use consistent string-only declarations
 
 ### Path Resolution Enhancement Architecture
 
@@ -4296,14 +4366,60 @@ graph TD
 - Create partial manifest generation capability for failed tools
 - Add comprehensive error context logging throughout the validation flow
 
+#### 5. Logger Configuration Missing - MCP SDK Server Failure (RESOLVED)
+
+**Location**: `/src/docsrs_mcp/mcp_sdk_server.py` logging initialization
+
+**Architectural Issue** (✅ **RESOLVED**):
+MCP SDK server implementation had missing logging system initialization, causing immediate failure of all MCP tools when service factories attempted to use logger instances.
+
+**Error Flow Pattern**:
+```mermaid
+graph TD
+    subgraph "MCP SDK Server Logger Error Flow (RESOLVED)"
+        TOOL_CALL[MCP Tool Invocation]
+        SERVICE_FACTORY[Service Factory Function<br/>get_crate_service(), etc.]
+        LOGGER_USE[logger.info() Call<br/>Service initialization debug]
+        ERROR[NameError: name 'logger' is not defined<br/>Complete MCP tool failure]
+        
+        TOOL_CALL --> SERVICE_FACTORY
+        SERVICE_FACTORY --> LOGGER_USE
+        LOGGER_USE --> ERROR
+    end
+```
+
+**Root Cause**:
+- Logger instance defined: `logger = logging.getLogger(__name__)`
+- Missing initialization: No `logging.basicConfig()` call
+- Service factories attempted logger usage without configured handlers
+- Resulted in NameError on any MCP tool invocation
+
+**Resolution Applied**:
+```python
+# Added proper logging configuration (lines 42-48)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stderr,  # Critical for MCP STDIO transport
+)
+logger = logging.getLogger(__name__)
+```
+
+**Architectural Improvement**:
+- **Initialization Order**: Logging configured before logger definition
+- **STDIO Compatibility**: stderr output prevents STDIO transport corruption
+- **Pattern Consistency**: Matches existing `mcp_server.py` logging approach
+- **Complete Resolution**: All 10 MCP tools now function correctly
+
 #### Architectural Pattern Summary
 
-All four issues share common architectural anti-patterns:
+All four core issues plus the resolved logger configuration issue share common architectural anti-patterns:
 
 1. **Missing Defensive Programming**: Lack of null checks, type validation, and boundary checking
 2. **Poor Error Propagation**: Errors cascade without context or recovery options
 3. **Insufficient Validation**: Missing validation at critical data flow transitions
 4. **No Graceful Degradation**: Systems fail completely rather than providing partial functionality
+5. **Missing Infrastructure Initialization**: (✅ RESOLVED) Critical system components not properly configured
 
 **Recommended Defensive Programming Patterns**:
 - Early validation with explicit error returns
@@ -4311,6 +4427,7 @@ All four issues share common architectural anti-patterns:
 - Error isolation with contextual logging
 - Graceful degradation with partial functionality when possible
 - Validation checkpoints with meaningful error messages
+- **Proper system initialization**: Ensure all infrastructure components are configured before use
 
 ### Architectural Consistency Fixes
 

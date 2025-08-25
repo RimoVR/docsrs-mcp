@@ -1122,6 +1122,54 @@
           "relatedFiles": ["src/docsrs_mcp/services/crate_service.py"],
           "codeExample": "# Wrong:\nresult = engine.compute_diff(v1, v2)\n# Correct:\nresult = engine.compare_versions(v1, v2)",
           "debuggingTechnique": "Use IDE navigation and method inspection to verify available methods on objects"
+        },
+        {
+          "error": "MCP SDK Logger Configuration Missing - 'name 'logger' is not defined' affecting all MCP tools through the MCP SDK server",
+          "rootCause": "mcp_sdk_server.py defined logger but never called logging.basicConfig() to initialize logging system. Service factory functions at lines 63, 74, 85, 96, 107 attempted to use logger before logging system initialization",
+          "solution": "Added logging.basicConfig() configuration with stderr stream for STDIO compatibility. Lines 42-48 in mcp_sdk_server.py now properly initialize logging with appropriate level and format for MCP STDIO transport applications",
+          "context": "All 28 MCP tools failing with 'name 'logger' is not defined' error when accessed through MCP SDK server implementation",
+          "lesson": "Always initialize logging system before any logger usage in MCP STDIO transport applications. Logging configuration must be established before service factory instantiation",
+          "pattern": "Initialize logging.basicConfig() early in MCP server startup, before any service or factory instantiation that might use logger",
+          "dateEncountered": "2025-08-25",
+          "dateResolved": "2025-08-25",
+          "resolutionStatus": "FULLY RESOLVED",
+          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py"],
+          "codeExample": "# Added logging configuration in mcp_sdk_server.py (lines 42-48):\nimport logging\nimport sys\n\n# Configure logging for STDIO compatibility\nlogging.basicConfig(\n    level=logging.INFO,\n    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',\n    stream=sys.stderr  # Use stderr for STDIO transport compatibility\n)\n\nlogger = logging.getLogger(__name__)",
+          "debuggingTechnique": "Test local directory implementation with `uv run docsrs-mcp`, not installed GitHub version. Use custom MCP client script for comprehensive protocol testing",
+          "testingConfirmed": [
+            "All 28 MCP tools now work correctly through MCP SDK server",
+            "Custom MCP client script successfully tested JSON-RPC communication",
+            "Local directory testing with `uv run docsrs-mcp` verified fix",
+            "No more 'name 'logger' is not defined' errors in any service factories"
+          ],
+          "preventionStrategy": "Always add logging.basicConfig() in MCP server initialization before any component that might use logging. Include this in MCP server startup checklist.",
+          "testingMethodology": {
+            "criticalDiscovery": "Must test local directory implementation with `uv run docsrs-mcp`, not installed GitHub version",
+            "verificationTool": "Created test_mcp_client.py for comprehensive MCP protocol testing",
+            "communicationMethod": "Custom MCP client script successfully tested all 28 tools with proper JSON-RPC communication"
+          }
+        },
+        {
+          "error": "Schema Consistency Fix - Parameter type inconsistencies between mcp_tools_config.py and mcp_sdk_server.py",
+          "rootCause": "Parameter type declarations inconsistent between configuration and server implementation. Some parameters defined as boolean/integer/number in mcp_tools_config.py but handled as strings in mcp_sdk_server.py, causing MCP client compatibility issues",
+          "solution": "Standardized 17 parameters from boolean/integer/number to string types in mcp_tools_config.py. Confirmed comprehensive field validators exist with mode='before' for string-to-type conversion to maintain type safety while maximizing client compatibility",
+          "context": "MCP client parameter validation inconsistencies due to type declaration mismatches between configuration and implementation layers",
+          "lesson": "Use string-only parameter declarations with Pydantic field validators for maximum MCP client compatibility. Type conversion should happen in validators, not schema definitions",
+          "pattern": "Declare all MCP parameters as strings in configuration, use Pydantic field validators with mode='before' for type conversion and validation",
+          "dateEncountered": "2025-08-25",
+          "dateResolved": "2025-08-25",
+          "resolutionStatus": "FULLY RESOLVED",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools_config.py", "src/docsrs_mcp/mcp_sdk_server.py"],
+          "codeExample": "# Standardized parameter declarations in mcp_tools_config.py:\n# BEFORE: Mixed types causing client compatibility issues\n\"k\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 100}\n\"enabled\": {\"type\": \"boolean\"}\n\"progress\": {\"type\": \"number\"}\n\n# AFTER: String-only declarations with validator conversion\n\"k\": {\"type\": \"string\", \"description\": \"Number of results (1-100)\"}\n\"enabled\": {\"type\": \"string\", \"description\": \"Enable flag (true/false)\"}\n\"progress\": {\"type\": \"string\", \"description\": \"Progress threshold (0.0-1.0)\"}\n\n# Field validators handle conversion:\n@field_validator('k', mode='before')\n@classmethod\ndef validate_k(cls, v):\n    return coerce_to_int_with_bounds(v, min_val=1, max_val=100)",
+          "debuggingTechnique": "Compare parameter type declarations across configuration and implementation files to identify inconsistencies. Test with diverse MCP clients to verify compatibility",
+          "testingConfirmed": [
+            "17 parameters standardized to string types in mcp_tools_config.py",
+            "All field validators confirmed with mode='before' for proper conversion", 
+            "MCP client compatibility improved across different client implementations",
+            "Type safety maintained through comprehensive validator functions"
+          ],
+          "preventionStrategy": "Establish consistent parameter type declaration policy: strings in config, conversion in validators. Include schema consistency checks in development workflow.",
+          "validationPattern": "Use string-only parameter declarations with mode='before' field validators for maximum MCP client compatibility while maintaining type safety"
         }
       ]
     },

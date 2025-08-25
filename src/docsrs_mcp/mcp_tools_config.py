@@ -61,16 +61,16 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "description": "Filter by visibility (public, crate, private)",
                 },
                 "deprecated": {
-                    "type": "boolean",
-                    "description": "Include deprecated items in results",
+                    "type": "string",
+                    "description": "Include deprecated items in results (true/false)",
                 },
                 "has_examples": {
-                    "type": "boolean",
-                    "description": "Only return items with code examples",
+                    "type": "string",
+                    "description": "Only return items with code examples (true/false)",
                 },
                 "min_doc_length": {
-                    "type": "integer",
-                    "description": "Minimum documentation length filter",
+                    "type": "string",
+                    "description": "Minimum documentation length filter (numeric string)",
                 },
                 "search_mode": {
                     "type": "string",
@@ -78,8 +78,8 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "enum": ["vector", "fuzzy", "regex", "hybrid"],
                 },
                 "fuzzy_tolerance": {
-                    "type": "number",
-                    "description": "Fuzzy match threshold (0.0-1.0, default: 0.7)",
+                    "type": "string",
+                    "description": "Fuzzy match threshold (0.0-1.0, default: 0.7, as string)",
                 },
                 "regex_pattern": {
                     "type": "string",
@@ -102,8 +102,8 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "enum": ["safe", "unsafe", "all"],
                 },
                 "has_errors": {
-                    "type": "boolean",
-                    "description": "Filter items that return error types (Result<T, E>)",
+                    "type": "string",
+                    "description": "Filter items that return error types (Result<T, E>) (true/false)",
                 },
                 "feature_filter": {
                     "type": "string",
@@ -154,8 +154,8 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "description": "Specific version or 'latest'",
                 },
                 "k": {
-                    "type": "integer",
-                    "description": "Number of examples to return (1-10)",
+                    "type": "string",
+                    "description": "Number of examples to return (1-10, as string)",
                 },
                 "language": {
                     "type": "string",
@@ -190,16 +190,16 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "force": {
-                    "type": "boolean",
-                    "description": "Force restart even if already running",
+                    "type": "string",
+                    "description": "Force restart even if already running (true/false)",
                 },
                 "concurrency": {
-                    "type": "integer",
-                    "description": "Number of concurrent workers (1-10)",
+                    "type": "string",
+                    "description": "Number of concurrent workers (1-10, as string)",
                 },
                 "count": {
-                    "type": "integer",
-                    "description": "Number of crates to pre-ingest",
+                    "type": "string",
+                    "description": "Number of crates to pre-ingest (as string)",
                 },
             },
             "required": [],
@@ -216,16 +216,16 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "description": "Path to Cargo.toml or Cargo.lock file",
                 },
                 "resolve_versions": {
-                    "type": "boolean",
-                    "description": "Resolve version specifications to exact versions",
+                    "type": "string",
+                    "description": "Resolve version specifications to exact versions (true/false)",
                 },
                 "skip_existing": {
-                    "type": "boolean",
-                    "description": "Skip crates that are already cached",
+                    "type": "string",
+                    "description": "Skip crates that are already cached (true/false)",
                 },
                 "concurrency": {
-                    "type": "integer",
-                    "description": "Number of concurrent ingestion workers",
+                    "type": "string",
+                    "description": "Number of concurrent ingestion workers (as string)",
                 },
             },
             "required": ["file_path"],
@@ -265,12 +265,12 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "description": "Second version to compare",
                 },
                 "include_details": {
-                    "type": "boolean",
-                    "description": "Include detailed change information",
+                    "type": "string",
+                    "description": "Include detailed change information (true/false)",
                 },
                 "breaking_only": {
-                    "type": "boolean",
-                    "description": "Show only breaking changes",
+                    "type": "string",
+                    "description": "Show only breaking changes (true/false)",
                 },
             },
             "required": ["crate_name", "version1", "version2"],
@@ -317,12 +317,12 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "description": "Specific version or 'latest'",
                 },
                 "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of patterns to return",
+                    "type": "string",
+                    "description": "Maximum number of patterns to return (as string)",
                 },
                 "min_frequency": {
-                    "type": "integer",
-                    "description": "Minimum frequency for a pattern to be included",
+                    "type": "string",
+                    "description": "Minimum frequency for a pattern to be included (as string)",
                 },
             },
             "required": ["crate_name"],
@@ -410,8 +410,8 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "description": "Name of the Rust crate",
                 },
                 "include_reasons": {
-                    "type": "boolean",
-                    "description": "Include detailed unsafe reasons and safety documentation",
+                    "type": "string",
+                    "description": "Include detailed unsafe reasons and safety documentation (true/false)",
                 },
                 "version": {
                     "type": "string",

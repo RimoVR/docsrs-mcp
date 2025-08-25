@@ -39,6 +39,14 @@ from .models.workflow import (
     UsagePatternResponse,
 )
 
+# Configure logging to stderr to avoid STDIO corruption
+# This is critical for STDIO transport to work properly
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stderr,
+)
+
 # Services will be imported lazily in factory functions
 
 logger = logging.getLogger(__name__)
