@@ -50,6 +50,17 @@ from .version_resolver import (
     resolve_version,
 )
 
+# Import source extractor for Tier 2 fallback
+import sys
+from pathlib import Path as PathLib
+# Add extractors directory to path for import
+sys.path.insert(0, str(PathLib(__file__).parent.parent.parent.parent / "extractors"))
+try:
+    from source_extractor import CratesIoSourceExtractor
+except ImportError:
+    logger.warning("CratesIoSourceExtractor not available, Tier 2 will be skipped")
+    CratesIoSourceExtractor = None
+
 logger = logging.getLogger(__name__)
 
 # Global per-crate lock registry to prevent duplicate ingestion
@@ -153,28 +164,43 @@ class IngestionOrchestrator:
             },
         )
 
-        # Main crate documentation
+        # Main crate documentation with example code
+        main_doc = info["description"]
+        if crate_name == "std":
+            main_doc += "\n\n## Example\n```rust\nuse std::collections::HashMap;\nuse std::fs::File;\nuse std::io::prelude::*;\n\nfn main() -> std::io::Result<()> {\n    let mut file = File::create(\"hello.txt\")?;\n    file.write_all(b\"Hello, world!\")?;\n    Ok(())\n}\n```"
+        
         chunks.append(
             {
                 "item_path": crate_name,
                 "item_id": f"{crate_name}:root",
                 "item_type": "module",
                 "header": f"{crate_name} - Rust standard library",
-                "doc": info["description"],
+                "doc": main_doc,
                 "parent_id": None,
+                "examples": extract_code_examples(main_doc),
             }
         )
 
-        # Add module documentation
+        # Add module documentation with examples
         for module_name, module_desc in info["modules"]:
+            # Add example code for key modules
+            doc_with_example = module_desc
+            if module_name == "collections" and crate_name == "std":
+                doc_with_example += "\n\n## Example\n```rust\nuse std::collections::HashMap;\n\nlet mut map = HashMap::new();\nmap.insert(\"key\", \"value\");\n```"
+            elif module_name == "io" and crate_name == "std":
+                doc_with_example += "\n\n## Example\n```rust\nuse std::io::{self, Write};\n\nio::stdout().write_all(b\"Hello, world!\\n\")?;\n```"
+            elif module_name == "vec" and crate_name == "alloc":
+                doc_with_example += "\n\n## Example\n```rust\nlet mut vec = Vec::new();\nvec.push(1);\nvec.push(2);\n```"
+            
             chunks.append(
                 {
                     "item_path": f"{crate_name}::{module_name}",
                     "item_id": f"{crate_name}::{module_name}",
                     "item_type": "module",
                     "header": f"{crate_name}::{module_name}",
-                    "doc": module_desc,
+                    "doc": doc_with_example,
                     "parent_id": f"{crate_name}:root",
+                    "examples": extract_code_examples(doc_with_example),
                 }
             )
 
@@ -308,6 +334,10 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
             # Set initial status
             await set_ingestion_status(db_path, crate_id, "started")
+            
+            # Initialize resolved_version outside try block so it's available in fallback
+            resolved_version = version
+            
             try:
                 # Resolve version
                 if is_stdlib:
@@ -388,8 +418,53 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 except Exception as e:
                     logger.warning(f"Rustdoc JSON ingestion failed: {e}")
 
-                # Try Tier 2: Source extraction (not implemented in this simplified version)
-                # This would extract from crate source files
+                # Try Tier 2: Source extraction from CDN
+                if CratesIoSourceExtractor and not is_stdlib:
+                    try:
+                        logger.info(f"Attempting source extraction for {crate_name}@{resolved_version}")
+                        await set_ingestion_status(db_path, crate_id, "processing")
+                        
+                        extractor = CratesIoSourceExtractor(session=session)
+                        chunks = await extractor.extract_from_source(
+                            crate_name, resolved_version
+                        )
+                        
+                        if chunks and len(chunks) > 0:
+                            ingestion_tier = IngestionTier.SOURCE_EXTRACTION
+                            
+                            # Process chunks - add metadata and examples
+                            for chunk in chunks:
+                                # Extract examples from documentation
+                                chunk["examples"] = extract_code_examples(chunk.get("doc", ""))
+                                # Add signature extraction
+                                chunk["signature"] = extract_signature(chunk)
+                                chunk["deprecated"] = extract_deprecated(chunk)
+                                chunk["visibility"] = extract_visibility(chunk)
+                            
+                            # Generate and store embeddings
+                            chunk_embedding_pairs = generate_embeddings_streaming(chunks)
+                            await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+                            
+                            # Generate example embeddings
+                            try:
+                                await generate_example_embeddings(
+                                    db_path, crate_name, resolved_version
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to generate example embeddings: {e}")
+                            
+                            await set_ingestion_status(
+                                db_path, crate_id, "completed",
+                                ingestion_tier=ingestion_tier.value
+                            )
+                            
+                            logger.info(
+                                f"Successfully ingested {crate_name}@{resolved_version} via source extraction"
+                            )
+                            return db_path
+                            
+                    except Exception as e:
+                        logger.warning(f"Source extraction failed: {e}")
 
                 # Tier 3: Fallback to latest version
                 if version != "latest":
@@ -429,12 +504,29 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
 
                 # Enhance and store
                 for i, chunk in enumerate(chunks):
+                    # Extract code examples from documentation
+                    chunk["examples"] = extract_code_examples(chunk.get("doc", ""))
                     chunks[i] = await orchestrator.enhance_fallback_schema(
                         chunk, ingestion_tier
                     )
 
                 chunk_embedding_pairs = generate_embeddings_streaming(chunks)
                 await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+
+                # Generate example embeddings even in fallback mode
+                # This fixes the issue where examples weren't processed in description_only tier
+                try:
+                    await generate_example_embeddings(
+                        db_path, crate_name, resolved_version
+                    )
+                    logger.info(
+                        f"Generated example embeddings for {crate_name}@{resolved_version} in fallback mode"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to generate example embeddings in fallback mode: {e}"
+                    )
+                    # Continue without failing the entire ingestion
 
                 await set_ingestion_status(
                     db_path, crate_id, "completed", ingestion_tier=ingestion_tier.value

@@ -218,8 +218,9 @@ async def generate_example_embeddings(
         await db.enable_load_extension(False)
 
         # Extract examples from embeddings table
+        # Fixed: Use 'id' column instead of non-existent 'item_id'
         cursor = await db.execute("""
-            SELECT item_id, item_path, examples, content
+            SELECT id, item_path, examples, content
             FROM embeddings
             WHERE examples IS NOT NULL AND examples != ''
         """)
@@ -269,7 +270,7 @@ async def generate_example_embeddings(
 
                     all_examples.append(
                         {
-                            "item_id": item_id,
+                            "item_id": str(item_id),  # Convert to string for consistency
                             "item_path": item_path,
                             "crate_name": crate_name,
                             "version": version,
