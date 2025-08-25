@@ -519,6 +519,7 @@ The models package implements a **modular, function-based split** that maintains
 - Response formatting with consistent field naming
 - Integration with FastAPI automatic documentation
 - **Phase 2 Enhancement**: `SearchResult` and `GetItemDocResponse` now include `is_stdlib: bool` and `is_dependency: bool` fields for enhanced filtering and context
+- **Version Response Models**: `VersionInfo` includes `is_latest: bool` field, `ListVersionsResponse` includes `latest: str | None` field for version metadata
 
 **models/version_diff.py (~245 LOC)**
 - Version comparison and change tracking models
@@ -3973,6 +3974,38 @@ PATH_ALIASES = {
 - **User Experience**: Handles typical import path variations automatically
 - **Performance**: O(1) alias lookup before O(n) fuzzy matching
 - **Extensible**: Alias dictionary can be expanded based on usage patterns
+
+### Pydantic Validation Error Fix in list_versions
+
+**Location**: `models/responses.py` - VersionInfo and ListVersionsResponse models
+
+**Issue Description**:
+The list_versions service endpoint was failing with Pydantic validation errors due to field mismatch between service layer responses and response model definitions.
+
+**Root Cause Analysis**:
+- Service layer was returning "is_latest" and "latest" fields in version data
+- Response models (VersionInfo and ListVersionsResponse) didn't declare these fields
+- Pydantic's strict validation rejected the extra fields, causing endpoint failures
+
+**Fix Implementation**:
+```python
+# Fixed VersionInfo model
+class VersionInfo(BaseModel):
+    version: str
+    yanked: bool | None = None
+    is_latest: bool = Field(False, description="Whether this is the latest version of the crate")
+
+# Fixed ListVersionsResponse model  
+class ListVersionsResponse(BaseModel):
+    versions: list[VersionInfo]
+    latest: str | None = Field(None, description="Latest version string")
+```
+
+**Impact Assessment**:
+- **Pre-Fix**: Complete failure of list_versions endpoint due to validation errors
+- **Post-Fix**: Successful version listing with proper latest version metadata
+- **Architectural Benefit**: Ensures service layer and response model field alignment
+- **Data Integrity**: Maintains type safety while supporting version metadata requirements
 
 ### Known Architectural Issues Requiring Defensive Programming
 
@@ -9187,6 +9220,11 @@ class MCPTool(BaseModel):
         json_schema_extra={"maxItems": 3},
     )
 ```
+
+**Service Layer Model Alignment**:
+- **Critical Requirement**: Service layer response data must exactly match response model field definitions
+- **Validation Enforcement**: Pydantic models validate that service layer returns only declared fields to prevent validation errors
+- **Field Consistency**: Any new fields returned by services (like `is_latest`, `latest`) must be added to corresponding response models before implementation
 
 ### Tutorial Content Embedding
 

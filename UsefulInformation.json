@@ -2619,6 +2619,20 @@
             "defaultImplementation": "Default CLI flag changed from 'fastmcp' to 'sdk' for new users"
           },
           "architecturalBenefits": "Official SDK's @server.tool() decorator pattern is cleaner and more maintainable than FastMCP conversion patterns"
+        },
+        {
+          "error": "Extra inputs are not permitted - list_versions Pydantic validation failure",
+          "rootCause": "Service layer returned 'is_latest' field in VersionInfo and 'latest' field in root response, but Pydantic models used strict validation with extra='forbid' and these fields were missing from model definitions",
+          "solution": "Added missing fields to Pydantic response models: 'is_latest: bool = Field(False, description=\"Whether this is the latest version of the crate\")' to VersionInfo model and 'latest: str | None = Field(None, description=\"Latest version string\")' to ListVersionsResponse model",
+          "context": "list_versions API endpoint failing due to mismatch between service layer output and response model definition when using strict Pydantic validation",
+          "problem": "Service layer included additional fields not defined in Pydantic models, causing validation errors when models used ConfigDict(extra='forbid') for security",
+          "prevention": "Always ensure service layer output matches response model fields exactly when using strict validation. Keep service layer and response models in sync during development",
+          "pattern": "When using extra='forbid' in Pydantic models, all service layer output fields must be explicitly defined in the model schema",
+          "dateEncountered": "2025-08-25",
+          "relatedFiles": ["src/docsrs_mcp/models/responses.py", "src/docsrs_mcp/service/version_service.py"],
+          "codeExample": "# Added to VersionInfo model:\nis_latest: bool = Field(False, description=\"Whether this is the latest version of the crate\")\n\n# Added to ListVersionsResponse model:\nlatest: str | None = Field(None, description=\"Latest version string\")\n\n# Root cause - service returned extra fields:\nresponse_data = {\n    'versions': [...],\n    'latest': '1.2.3',  # This field was missing from model\n    # ... other fields\n}\n\n# Each VersionInfo contained:\n{\n    'version': '1.0.0',\n    'is_latest': False,  # This field was missing from model\n    # ... other fields\n}",
+          "debuggingTechnique": "Check service layer output fields against Pydantic model definitions when using strict validation to identify missing fields",
+          "impact": "Fixed list_versions endpoint validation errors and ensured proper response structure for version listing functionality"
         }
       ]
     },

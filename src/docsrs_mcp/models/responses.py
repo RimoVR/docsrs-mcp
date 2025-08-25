@@ -118,12 +118,15 @@ class VersionInfo(BaseModel):
     """
     Crate version information.
 
-    Represents a single version of a crate with its yanked status.
+    Represents a single version of a crate with its yanked status and latest indicator.
     """
 
     version: str = Field(..., description="Version string (e.g., '1.0.0')")
     yanked: bool = Field(
         False, description="Whether this version has been yanked from crates.io"
+    )
+    is_latest: bool = Field(
+        False, description="Whether this is the latest version of the crate"
     )
 
     model_config = strict_config
@@ -303,6 +306,7 @@ class ListVersionsResponse(BaseModel):
 
     crate_name: str = Field(..., description="Name of the crate")
     versions: list[VersionInfo] = Field(..., description="List of cached versions")
+    latest: str | None = Field(None, description="Latest version string")
 
     model_config = strict_config
 
