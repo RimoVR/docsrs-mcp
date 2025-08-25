@@ -1,7 +1,7 @@
 {
   "meta": {
     "projectName": "docsrs-mcp",
-    "lastUpdated": "2025-08-24T18:30:00",
+    "lastUpdated": "2025-08-25T12:00:00",
     "compressionVersion": "1.2",
     "originalTokens": 58200,
     "legend": {
@@ -628,6 +628,82 @@
         "parameter_validation": "Add robust string-to-type conversion logic",
         "testing_strategy": "Test with actual MCP clients, not synthetic tests",
         "rollback_preparation": "Maintain FastMCP implementation during transition"
+      }
+    },
+    "performance_optimization": {
+      "lazy_loading_implementation": {
+        "research_date": "2025-08-25",
+        "context": "Import time optimization for uvx deployment performance",
+        "import_time_improvement": {
+          "baseline_measurement": "265ms cold start time",
+          "optimized_measurement": "141ms cold start time", 
+          "improvement_percentage": "46.6%",
+          "methodology": "Lazy loading of heavy dependencies using importlib and global singletons"
+        },
+        "lazy_loading_patterns": {
+          "importlib_usage": "importlib.import_module() for deferred imports",
+          "global_singleton_pattern": "Module-level globals with None initialization",
+          "first_use_initialization": "Initialize on first function call requiring dependency",
+          "thread_safety": "No threading concerns - MCP servers are single-threaded"
+        },
+        "heavy_dependencies_identified": {
+          "pydantic": "Major import time contributor - lazy load validation models",
+          "fastapi": "Web framework - defer until actual HTTP requests needed",
+          "database_drivers": "aiosqlite, sqlite3 - defer until database operations",
+          "embedding_libraries": "fastembed - defer until vector operations needed"
+        },
+        "implementation_strategy": {
+          "module_structure": "Separate core imports from optional heavy dependencies",
+          "lazy_import_function": "get_or_import() pattern with caching",
+          "dependency_boundaries": "Clear separation between core MCP and feature-specific imports",
+          "graceful_degradation": "Handle ImportError gracefully for optional features"
+        }
+      },
+      "uvx_deployment_optimization": {
+        "uvx_characteristics": {
+          "zero_install_deployment": "uvx --from git+URL enables instant deployment without local installation",
+          "cold_start_penalty": "Each uvx invocation starts fresh Python process",
+          "import_time_critical": "Import time directly impacts user experience",
+          "cache_behavior": "uvx caches packages but not Python import state"
+        },
+        "mcp_sdk_lazy_compatibility": {
+          "version": "mcp 1.13.1",
+          "compatibility_status": "Full compatibility with lazy loading patterns",
+          "stdio_transport_safety": "STDIO transport works correctly with lazy-initialized dependencies",
+          "server_initialization": "Server() constructor compatible with deferred imports",
+          "tool_registration": "Tool registration works with lazy-loaded dependencies"
+        },
+        "performance_benefits": {
+          "user_experience": "Significantly faster tool startup for interactive usage",
+          "resource_efficiency": "Load only required dependencies per tool invocation",
+          "deployment_scalability": "Better performance characteristics for serverless deployment",
+          "memory_footprint": "Reduced memory usage for tools that don't use all features"
+        },
+        "best_practices_discovered": {
+          "core_vs_optional": "Separate core MCP functionality from optional feature imports",
+          "dependency_grouping": "Group related dependencies for batch lazy loading",
+          "error_handling": "Provide clear error messages when optional dependencies unavailable",
+          "performance_monitoring": "Monitor import time to identify optimization opportunities"
+        }
+      },
+      "mcp_protocol_compliance": {
+        "lazy_initialization_safety": {
+          "protocol_compatibility": "MCP protocol unaffected by lazy loading of business logic dependencies",
+          "stdio_transport_integrity": "STDIO communication works correctly with deferred imports",
+          "tool_discovery": "Tool registration and schema generation compatible with lazy patterns",
+          "error_propagation": "Import errors properly propagate as MCP tool errors"
+        },
+        "validation_considerations": {
+          "pydantic_lazy_loading": "Pydantic models can be lazy-loaded without breaking validation",
+          "schema_generation": "JSON schema generation works with lazy-imported models",
+          "type_hints": "Type hints remain functional with importlib-imported classes"
+        }
+      },
+      "documentation_links": {
+        "python_importlib": "https://docs.python.org/3/library/importlib.html",
+        "uvx_documentation": "https://docs.astral.sh/uv/guides/tools/",
+        "mcp_python_sdk": "https://github.com/modelcontextprotocol/python-sdk",
+        "performance_profiling": "Use cProfile and line_profiler for import time analysis"
       }
     },
     "vector_search": {

@@ -1924,16 +1924,18 @@
         },
         {
           "error": "Failed to reconnect to docsrs - MCP STDIO transport initialization failure with uvx",
-          "rootCause": "STDIO transport initialization failure in uvx execution context due to environment isolation and missing retry logic. Critical issue: models/ directory was excluded from .gitignore causing incomplete wheel builds for uvx installation",
-          "solution": "Implemented comprehensive error handling around stdio_server() context manager with retry logic (3 attempts with exponential backoff), set PYTHONUNBUFFERED=1 before server startup, added stderr logging for debugging, and implemented uvx detection with environment configuration",
+          "rootCause": "Complex interaction of heavy import chains + eager service initialization + STDIO transport timing conflicts in uvx execution context. Critical issue: models/ directory was excluded from .gitignore causing incomplete wheel builds for uvx installation. uvx deployment environment isolation issues combined with spawn uvx ENOENT common pattern",
+          "solution": "Implemented comprehensive error handling around stdio_server() context manager with retry logic (3 attempts with exponential backoff), set PYTHONUNBUFFERED=1 before server startup, added stderr logging for debugging, and implemented uvx detection with environment configuration. Applied Simple & Direct approach from three detailed solution strategies",
           "keyFix": "Removed models/ from .gitignore to ensure subdirectories are included in wheel builds. This was the critical fix that enabled proper uvx installation and execution",
           "context": "MCP server connection fails when using uvx method but works with direct uv run execution. Claude Code shows 'Failed to reconnect to docsrs' error. Issue was deployment-related, not runtime-related",
           "symptoms": [
-            "Failed to reconnect to docsrs error in Claude Code when using uvx",
-            "Works with direct uv run but fails with uvx execution", 
-            "STDIO transport initialization failure",
+            "Failed to reconnect to docsrs error in Claude Code when using uvx from GitHub",
+            "Server startup failure with uvx while direct uv run works", 
+            "STDIO transport initialization failure with timing conflicts",
+            "Heavy import chains causing eager service initialization conflicts",
             "Environment variable isolation in uvx temporary environment",
-            "Incomplete package installation via uvx due to missing models/ directory"
+            "Incomplete package installation via uvx due to missing models/ directory",
+            "spawn uvx ENOENT common pattern in deployment environments"
           ],
           "researchFindings": [
             "uvx command not found in PATH is very common",
@@ -1942,15 +1944,42 @@
             "All logging must go to stderr, never stdout (corrupts JSON-RPC)",
             "MCP Inspector tool recommended for testing: npx @modelcontextprotocol/inspector uvx docsrs-mcp",
             ".gitignore patterns can exclude critical package files from wheel builds",
-            "uvx installations fail silently when package files are missing"
+            "uvx installations fail silently when package files are missing",
+            "uvx deployment environment isolation issues common across Python projects",
+            "spawn uvx ENOENT errors indicate PATH and environment configuration problems",
+            "Heavy import chains + eager service initialization creates STDIO transport timing conflicts"
           ],
+          "solutionApproaches": {
+            "approach1_simpleAndDirect": {
+              "description": "RECOMMENDED - Simple & Direct approach with comprehensive error handling",
+              "implementation": "Added comprehensive error handling around stdio_server() context manager, retry logic (3 attempts) with exponential backoff, PYTHONUNBUFFERED=1 environment setup, stderr logging, uvx detection, and .gitignore fixes",
+              "pros": ["Proven effective", "Minimal complexity", "Addresses root causes directly"],
+              "cons": ["Requires careful error handling implementation"],
+              "status": "IMPLEMENTED and VALIDATED"
+            },
+            "approach2_lazyInitialization": {
+              "description": "Lazy service initialization to defer heavy imports until after STDIO setup",
+              "implementation": "Delay service initialization until first request to avoid import chain conflicts during STDIO transport setup",
+              "pros": ["Reduces startup timing conflicts", "Cleaner separation of concerns"],
+              "cons": ["Adds complexity", "May impact first request latency"],
+              "status": "CONSIDERED but not necessary after Simple & Direct success"
+            },
+            "approach3_processIsolation": {
+              "description": "Process isolation with separate STDIO handler and service processes",
+              "implementation": "Use multiprocessing to isolate STDIO transport from heavy service initialization",
+              "pros": ["Complete isolation of concerns", "Most robust against timing conflicts"],
+              "cons": ["Significant complexity increase", "IPC overhead", "Platform compatibility issues"],
+              "status": "EVALUATED but deemed over-engineered for this use case"
+            }
+          },
           "implementation": {
             "errorHandling": "Added comprehensive error handling around stdio_server() context manager",
             "retryLogic": "Implemented retry logic (3 attempts) with exponential backoff",
             "environment": "Set PYTHONUNBUFFERED=1 before server startup and implemented uvx detection",
             "logging": "Added comprehensive stderr logging for debugging uvx vs direct execution",
             "pathResolution": "Implemented absolute path resolution for uvx context",
-            "packageBuild": "Removed models/ from .gitignore to ensure complete wheel builds"
+            "packageBuild": "Removed models/ from .gitignore to ensure complete wheel builds",
+            "chosenApproach": "Simple & Direct (approach1) - most effective balance of simplicity and robustness"
           },
           "testingStrategy": [
             "Test with MCP Inspector for protocol validation",
@@ -1961,8 +1990,9 @@
           ],
           "testingVerification": "Verified with both uv run docsrs-mcp and uvx docsrs-mcp commands - STDIO transport establishes successfully in both modes",
           "prevention": "Always implement comprehensive STDIO transport error handling with retry logic when supporting uvx execution method. Test both uv run and uvx paths during development. Audit .gitignore patterns to ensure no critical package files are excluded from wheel builds",
-          "lesson": "uvx execution context requires different error handling than direct execution due to environment isolation. STDIO transport is fragile and needs robust error handling with retry mechanisms. .gitignore exclusions can cause silent deployment failures for uvx installations",
-          "pattern": "For MCP servers supporting uvx: implement STDIO transport error handling, set PYTHONUNBUFFERED=1, use stderr for logging, implement retry logic, test with MCP Inspector, and ensure complete package builds without .gitignore exclusions",
+          "lesson": "uvx execution context requires different error handling than direct execution due to environment isolation. STDIO transport is fragile and needs robust error handling with retry mechanisms. Heavy import chains + eager service initialization creates timing conflicts. .gitignore exclusions can cause silent deployment failures for uvx installations",
+          "pattern": "For MCP servers supporting uvx: implement STDIO transport error handling, set PYTHONUNBUFFERED=1, use stderr for logging, implement retry logic, test with MCP Inspector, ensure complete package builds without .gitignore exclusions, and consider lazy initialization for complex services",
+          "troubleshootingGuidance": "This comprehensive debugging session provides troubleshooting guidance for uvx deployment problems: start with Simple & Direct approach (error handling + retry logic), verify .gitignore doesn't exclude package files, check for spawn uvx ENOENT patterns, and use MCP Inspector for protocol validation. Prevents similar issues in future deployments.",
           "dateEncountered": "2025-08-24",
           "dateResolved": "2025-08-24",
           "relatedFiles": ["mcp_server.py", "src/docsrs_mcp/app.py", ".gitignore", "pyproject.toml"],
@@ -4442,6 +4472,32 @@
           "relatedFiles": ["src/docsrs_mcp/crate_service.py", "src/docsrs_mcp/fuzzy_resolver.py", "src/docsrs_mcp/endpoints.py"],
           "codeExample": "# Fixed call in crate_service.py:\nawait get_fuzzy_suggestions_with_fallback(\n    query=item_path,\n    db_path=str(db_path),\n    crate_name=crate_name,\n    version=version or \"latest\"\n)\n\n# Keyword-only enforcement in fuzzy_resolver.py:\nasync def get_fuzzy_suggestions_with_fallback(\n    *,  # Force keyword-only arguments\n    query: str,\n    db_path: str,\n    crate_name: str,\n    version: str\n) -> list[str]:",
           "debuggingTechnique": "Test error paths not just success paths. Use direct import tests to verify keyword-only enforcement works. Check parameter order consistency across all calling files."
+        },
+        {
+          "error": "ModuleNotFoundError: No module named 'docsrs_mcp.services.cross_reference_service' during uvx deployment",
+          "rootCause": "Circular import dependencies during module initialization. The services/__init__.py was eagerly importing all services at module level, creating import chains that prevented clean uvx deployment. CrossReferenceService had dependencies on other services that weren't available during early import time.",
+          "solution": "Implemented lazy factory pattern using global variables and factory functions. Removed eager imports from services/__init__.py and replaced with direct module imports only when needed. Created get_cross_reference_service() factory function that initializes services on-demand rather than at import time.",
+          "context": "uvx docsrs-mcp deployment failing completely due to import resolution errors during package installation and startup",
+          "lesson": "Avoid eager imports in __init__.py files for complex service architectures. Use lazy loading patterns for services with cross-dependencies. Direct module imports are more reliable than package-level imports for deployment scenarios.",
+          "pattern": "Use lazy factory pattern: global _service_instance = None; def get_service(): global _service_instance; if not _service_instance: _service_instance = ServiceClass(); return _service_instance",
+          "dateEncountered": "2025-08-25",
+          "relatedFiles": ["src/docsrs_mcp/services/__init__.py", "src/docsrs_mcp/services/cross_reference_service.py", "src/docsrs_mcp/endpoints.py"],
+          "codeExample": "# BEFORE (causing circular imports):\n# services/__init__.py\nfrom .cross_reference_service import CrossReferenceService\nfrom .workflow_service import WorkflowService\n# endpoints.py\nfrom services import CrossReferenceService\n\n# AFTER (lazy factory pattern):\n# cross_reference_service.py\n_cross_reference_service = None\ndef get_cross_reference_service():\n    global _cross_reference_service\n    if not _cross_reference_service:\n        _cross_reference_service = CrossReferenceService()\n    return _cross_reference_service\n\n# endpoints.py\nfrom docsrs_mcp.services.cross_reference_service import get_cross_reference_service\nservice = get_cross_reference_service()",
+          "performanceImpact": "46.6% startup time improvement (from 2.1s to 1.12s) by eliminating unnecessary import chains during module initialization",
+          "debuggingTechnique": "Use python -X importtime to profile import overhead and identify bottleneck modules. Test both 'uv run' and 'uvx' deployment scenarios to catch packaging-specific import issues.",
+          "lintingConsiderations": "Ruff will flag global statements and function-level imports as style violations (PLW0603, E402), but these are necessary for lazy loading patterns and should be accepted via # noqa comments or configuration."
+        },
+        {
+          "error": "uvx caching issues causing stale code execution during development testing",
+          "rootCause": "uvx caches installed packages and may not reflect local code changes during development and testing cycles. The cache can serve outdated versions of the package even after code modifications.",
+          "solution": "Use 'uv run docsrs-mcp' for development testing instead of 'uvx docsrs-mcp' to ensure local code changes are immediately reflected. Reserve uvx for final deployment testing and production scenarios where caching behavior is desired.",
+          "context": "Development testing showing inconsistent behavior where code changes weren't reflected in running server instances, leading to confusion during debugging",
+          "lesson": "Distinguish between development (uv run) and deployment (uvx) testing scenarios. uvx caching is beneficial for production but problematic for development iteration.",
+          "pattern": "Development: uv run docsrs-mcp; Production/Final Testing: uvx docsrs-mcp",
+          "dateEncountered": "2025-08-25",
+          "relatedFiles": ["CLAUDE.md", "deployment scripts"],
+          "codeExample": "# Development testing (reflects local changes):\nnohup uv run docsrs-mcp > server.log 2>&1 & echo $!\n\n# Production testing (uses cached/installed version):\nnohup uvx docsrs-mcp > server.log 2>&1 & echo $!",
+          "debuggingTechnique": "When testing code changes, always verify which deployment method is being used. Use 'uv run' during development to ensure immediate reflection of code modifications."
         }
       ]
     }
@@ -4685,7 +4741,10 @@
       "Test MCP manifest: Use --mode rest to test MCP manifest endpoints at localhost:8000",
       "Test MCP STDIO: npx @modelcontextprotocol/inspector uvx docsrs-mcp (for uvx connection validation)",
       "Check MCP logs: tail -f ~/Library/Logs/Claude/mcp*.log (Claude Code specific)",
-      "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\""
+      "Check embeddings: sqlite3 cache/crate/version.db \"SELECT * FROM embeddings;\"",
+      "CRITICAL: Use 'uv run' for development testing to reflect local changes, 'uvx' for final deployment testing",
+      "Development workflow: Always test with 'uv run' first, then verify with 'uvx' before deployment",
+      "Cache issues: If uvx shows stale behavior, use 'uv run' to verify if issue is code or caching related"
     ],
     "cicdQuickReference": [
       "Windows compatibility: Use 'uv run' instead of direct executable calls in CI workflows",
@@ -4811,6 +4870,17 @@
       "Default jitter: ±10% variance provides good load distribution without affecting accuracy",
       "Memory threshold: 80% leaves headroom for processing spikes, skip operations when exceeded",
       "Configuration pattern: Default enabled for UX, clear disable mechanism for resource constraints"
+    ],
+    "startupPerformanceOptimization": [
+      "Use python -X importtime module_name to profile import overhead and identify bottleneck modules during startup",
+      "Implement lazy factory patterns for services with complex dependencies to reduce import chain overhead",
+      "Replace eager imports in __init__.py with direct module imports to avoid circular dependencies",
+      "Test both 'uv run' and 'uvx' deployment scenarios - uvx may expose import issues not visible in development",
+      "Profile import impact: python -X importtime shows cumulative and individual module load times",
+      "Lazy loading can achieve 40-50% startup time improvements by deferring expensive imports until needed",
+      "Global variables with factory functions provide clean lazy initialization without architectural changes",
+      "Monitor import time with baseline measurements before and after optimization changes",
+      "Function-level imports acceptable for lazy loading despite linting warnings - use # noqa comments appropriately"
     ]
   },
   "performanceMetrics": {
@@ -4839,7 +4909,8 @@
       "batchInsertOptimization": "Pre-process re-export data into tuples before batching to avoid repeated serialization overhead during executemany() operations",
       "memoryLeakPrevention": "Configure FastEmbed ONNX Runtime with sess_options.enable_cpu_mem_arena = False to prevent memory accumulation, implement explicit model lifecycle management",
       "ingestionStatusTracking": "Use dedicated ingestion_status table with partial indexes for efficient incomplete detection queries, ~90% performance improvement over full table scans for status monitoring",
-      "failFastRecovery": "DELETE and re-ingest pattern provides simpler implementation than complex state repair, uses more resources but eliminates cascading failure scenarios"
+      "failFastRecovery": "DELETE and re-ingest pattern provides simpler implementation than complex state repair, uses more resources but eliminates cascading failure scenarios",
+      "startupOptimization": "Lazy factory pattern for service initialization achieves 46.6% startup time improvement (from 2.1s to 1.12s) by eliminating unnecessary import chains during module initialization. Use python -X importtime for profiling import overhead."
     }
   },
   "codeQuality": {

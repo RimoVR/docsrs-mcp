@@ -38,24 +38,74 @@ from .models.workflow import (
     ProgressiveDetailResponse,
     UsagePatternResponse,
 )
-from .services import (
-    CrateService,
-    CrossReferenceService,
-    IngestionService,
-    TypeNavigationService,
-)
-from .services.workflow_service import WorkflowService
+
+# Services will be imported lazily in factory functions
 
 logger = logging.getLogger(__name__)
 
 # Initialize the MCP server
 server = Server("docsrs-mcp")
 
-# Initialize service layer
-crate_service = CrateService()
-ingestion_service = IngestionService()
-type_navigation_service = TypeNavigationService()
-workflow_service = WorkflowService()
+# Global service instances (singleton pattern for lazy loading)
+_crate_service = None
+_ingestion_service = None
+_type_navigation_service = None
+_workflow_service = None
+_cross_reference_service = None
+
+
+def get_crate_service():
+    """Get or create the CrateService instance with lazy loading."""
+    global _crate_service
+    if _crate_service is None:
+        from .services.crate_service import CrateService
+
+        logger.info("Lazy loaded CrateService")
+        _crate_service = CrateService()
+    return _crate_service
+
+
+def get_ingestion_service():
+    """Get or create the IngestionService instance with lazy loading."""
+    global _ingestion_service
+    if _ingestion_service is None:
+        from .services.ingestion_service import IngestionService
+
+        logger.info("Lazy loaded IngestionService")
+        _ingestion_service = IngestionService()
+    return _ingestion_service
+
+
+def get_type_navigation_service():
+    """Get or create the TypeNavigationService instance with lazy loading."""
+    global _type_navigation_service
+    if _type_navigation_service is None:
+        from .services.type_navigation_service import TypeNavigationService
+
+        logger.info("Lazy loaded TypeNavigationService")
+        _type_navigation_service = TypeNavigationService()
+    return _type_navigation_service
+
+
+def get_workflow_service():
+    """Get or create the WorkflowService instance with lazy loading."""
+    global _workflow_service
+    if _workflow_service is None:
+        from .services.workflow_service import WorkflowService
+
+        logger.info("Lazy loaded WorkflowService")
+        _workflow_service = WorkflowService()
+    return _workflow_service
+
+
+def get_cross_reference_service(db_path: str):
+    """Get or create the CrossReferenceService instance with lazy loading."""
+    # CrossReferenceService takes db_path parameter, so we can't use global singleton
+    # Import lazily and create new instance each time
+    from .services.cross_reference_service import CrossReferenceService
+
+    logger.info("Lazy loaded CrossReferenceService")
+    return CrossReferenceService(db_path)
 
 
 # Parameter validation utilities
@@ -112,7 +162,7 @@ async def get_crate_summary(crate_name: str, version: str = "latest") -> dict:
         Crate metadata and module structure
     """
     try:
-        result = await crate_service.get_crate_summary(
+        result = await get_crate_service().get_crate_summary(
             crate_name, version if version != "latest" else None
         )
         return GetCrateSummaryResponse(**result).model_dump()
@@ -166,7 +216,7 @@ async def search_items(
             else None
         )
 
-        results = await crate_service.search_items(
+        results = await get_crate_service().search_items(
             crate_name,
             query,
             version=version if version != "latest" else None,
@@ -203,7 +253,7 @@ async def get_item_doc(
         Complete item documentation in markdown format
     """
     try:
-        result = await crate_service.get_item_doc(
+        result = await get_crate_service().get_item_doc(
             crate_name, item_path, version if version != "latest" else None
         )
         return GetItemDocResponse(**result).model_dump()
@@ -226,7 +276,7 @@ async def get_module_tree(crate_name: str, version: str = "latest") -> dict:
         Module hierarchy tree structure
     """
     try:
-        result = await crate_service.get_module_tree(
+        result = await get_crate_service().get_module_tree(
             crate_name, version if version != "latest" else None
         )
         return GetModuleTreeResponse(**result).model_dump()
@@ -260,7 +310,7 @@ async def search_examples(
     try:
         k_int = validate_int_parameter(k, default=5, min_val=1, max_val=20)
 
-        result = await crate_service.search_examples(
+        result = await get_crate_service().search_examples(
             crate_name,
             query,
             version=version if version != "latest" else None,
@@ -287,7 +337,7 @@ async def list_versions(crate_name: str) -> dict:
         Available crate versions
     """
     try:
-        result = await crate_service.list_versions(crate_name)
+        result = await get_crate_service().list_versions(crate_name)
         return ListVersionsResponse(**result).model_dump()
     except Exception as e:
         logger.error(f"Error in list_versions: {e}")
@@ -317,7 +367,7 @@ async def start_pre_ingestion(
         )
         force_bool = validate_bool_parameter(force, default=False)
 
-        result = await ingestion_service.start_pre_ingestion(
+        result = await get_ingestion_service().start_pre_ingestion(
             count=count_int, concurrency=concurrency_int, force=force_bool
         )
         return StartPreIngestionResponse(**result).model_dump()
@@ -344,7 +394,7 @@ async def control_pre_ingestion(action: str) -> dict:
                 f"Invalid action: {action}. Must be one of: pause, resume, stop"
             )
 
-        result = await ingestion_service.control_pre_ingestion(action)
+        result = await get_ingestion_service().control_pre_ingestion(action)
         return PreIngestionControlResponse(**result).model_dump()
     except Exception as e:
         logger.error(f"Error in control_pre_ingestion: {e}")
@@ -378,7 +428,7 @@ async def ingest_cargo_file(
         skip_existing_bool = validate_bool_parameter(skip_existing, default=True)
         resolve_versions_bool = validate_bool_parameter(resolve_versions, default=False)
 
-        result = await ingestion_service.ingest_cargo_file(
+        result = await get_ingestion_service().ingest_cargo_file(
             file_path,
             concurrency=concurrency_int,
             skip_existing=skip_existing_bool,
@@ -407,7 +457,7 @@ async def get_trait_implementors(
         List of implementing types with details
     """
     try:
-        result = await type_navigation_service.get_trait_implementors(
+        result = await get_type_navigation_service().get_trait_implementors(
             crate_name, trait_path, version if version != "latest" else None
         )
         return TraitImplementationResponse(**result).model_dump()
@@ -433,7 +483,7 @@ async def get_type_traits(
         List of implemented traits with details
     """
     try:
-        result = await type_navigation_service.get_type_traits(
+        result = await get_type_navigation_service().get_type_traits(
             crate_name, type_path, version if version != "latest" else None
         )
         return TypeTraitsResponse(**result).model_dump()
@@ -461,7 +511,7 @@ async def resolve_method(
         Method resolution with candidates and disambiguation hints
     """
     try:
-        result = await type_navigation_service.resolve_method(
+        result = await get_type_navigation_service().resolve_method(
             crate_name, type_path, method_name, version if version != "latest" else None
         )
         return MethodSignatureResponse(**result).model_dump()
@@ -491,7 +541,7 @@ async def get_associated_items(
         Associated items grouped by kind
     """
     try:
-        result = await type_navigation_service.get_associated_items(
+        result = await get_type_navigation_service().get_associated_items(
             crate_name,
             container_path,
             item_kind,
@@ -520,7 +570,7 @@ async def get_generic_constraints(
         Generic constraints grouped by kind
     """
     try:
-        result = await type_navigation_service.get_generic_constraints(
+        result = await get_type_navigation_service().get_generic_constraints(
             crate_name, item_path, version if version != "latest" else None
         )
         return GenericConstraintResponse(**result).model_dump()
@@ -561,7 +611,7 @@ async def compare_versions(
             max_results, default=1000, min_val=1, max_val=5000
         )
 
-        result = await crate_service.compare_versions(
+        result = await get_crate_service().compare_versions(
             crate_name,
             version_a,
             version_b,
@@ -600,7 +650,7 @@ async def get_documentation_detail(
         Documentation with appropriate detail level
     """
     try:
-        result = await workflow_service.get_documentation_with_detail_level(
+        result = await get_workflow_service().get_documentation_with_detail_level(
             crate_name,
             item_path,
             detail_level,
@@ -638,7 +688,7 @@ async def extract_usage_patterns(
             min_frequency, default=2, min_val=1, max_val=100
         )
 
-        patterns = await workflow_service.extract_usage_patterns(
+        patterns = await get_workflow_service().extract_usage_patterns(
             crate_name,
             version if version != "latest" else None,
             limit=limit_int,
@@ -689,7 +739,7 @@ async def generate_learning_path(
         from_ver = from_version if from_version else None
         to_ver = to_version if to_version != "latest" else None
 
-        result = await workflow_service.generate_learning_path(
+        result = await get_workflow_service().generate_learning_path(
             crate_name,
             from_version=from_ver,
             to_version=to_ver,
@@ -728,7 +778,7 @@ async def resolve_import_handler(
         db_path = await ingest_crate(crate_name)
 
         # Initialize service if needed
-        cross_ref_service = CrossReferenceService(db_path)
+        cross_ref_service = get_cross_reference_service(db_path)
 
         include_alts = validate_bool_parameter(include_alternatives, default=False)
 
@@ -767,7 +817,7 @@ async def get_dependency_graph_handler(
         db_path = await ingest_crate(crate_name)
 
         # Initialize service if needed
-        cross_ref_service = CrossReferenceService(db_path)
+        cross_ref_service = get_cross_reference_service(db_path)
 
         max_depth_int = validate_int_parameter(
             max_depth, default=3, min_val=1, max_val=10
@@ -810,7 +860,7 @@ async def suggest_migrations_handler(
         db_path_to = await ingest_crate(crate_name, to_version)
 
         # Use the newer version's database
-        cross_ref_service = CrossReferenceService(db_path_to)
+        cross_ref_service = get_cross_reference_service(db_path_to)
 
         suggestions = await cross_ref_service.suggest_migrations(
             crate_name, from_version, to_version
@@ -851,7 +901,7 @@ async def trace_reexports_handler(
         db_path = await ingest_crate(crate_name)
 
         # Initialize service if needed
-        cross_ref_service = CrossReferenceService(db_path)
+        cross_ref_service = get_cross_reference_service(db_path)
 
         result = await cross_ref_service.trace_reexports(crate_name, item_path)
         return ReexportTrace(**result).model_dump()
@@ -877,7 +927,7 @@ async def get_code_intelligence(
     """
     try:
         # Use type_navigation_service for intelligence data
-        result = await type_navigation_service.get_item_intelligence(
+        result = await get_type_navigation_service().get_item_intelligence(
             crate_name, item_path, version
         )
         return result
@@ -901,7 +951,7 @@ async def get_error_types(
     """
     try:
         # Use type_navigation_service for error catalog
-        result = await type_navigation_service.get_error_catalog(
+        result = await get_type_navigation_service().get_error_catalog(
             crate_name, pattern, version
         )
         return result
@@ -928,7 +978,7 @@ async def get_unsafe_items(
         include_reasons_bool = include_reasons.lower() == "true"
 
         # Use type_navigation_service for safety search
-        result = await type_navigation_service.search_by_safety(
+        result = await get_type_navigation_service().search_by_safety(
             crate_name,
             is_safe=False,
             include_reasons=include_reasons_bool,
