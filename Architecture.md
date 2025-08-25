@@ -84,7 +84,7 @@ graph TB
 graph LR
     subgraph "docsrs_mcp Package"
         subgraph "Service Layer"
-            CRATE_SVC[crate_service.py<br/>CrateService class<br/>Search, documentation, versions<br/>Transport-agnostic business logic]
+            CRATE_SVC[crate_service.py<br/>CrateService class<br/>Search, documentation, versions<br/>Transport-agnostic business logic<br/>_build_module_tree() transformation method]
             INGEST_SVC[ingestion_service.py<br/>IngestionService class<br/>Pipeline management<br/>Pre-ingestion control<br/>Cargo file processing]
             TYPE_NAV_SVC[type_navigation_service.py<br/>TypeNavigationService class<br/>Code intelligence operations<br/>get_item_intelligence(), search_by_safety()<br/>get_error_catalog() methods]
             MCP_RUNNER[mcp_runner.py<br/>MCPServerRunner class<br/>Memory leak mitigation<br/>1000 calls/1GB restart<br/>Process health monitoring]
@@ -232,7 +232,7 @@ The docsrs-mcp server implements a service layer pattern that decouples business
 
 #### Core Services
 
-- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration.
+- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration. **Critical Fix Applied**: Implements `_build_module_tree()` helper method that transforms flat database results into hierarchical ModuleTreeNode structures, resolving Pydantic validation errors by properly fulfilling service layer data transformation responsibility.
 - **IngestionService**: Manages the complete ingestion pipeline, pre-ingestion workflows, and cargo file processing
 - **CrossReferenceService**: **Phase 6 Enhancement**: Provides advanced cross-reference operations including import resolution, dependency graph analysis, migration suggestions, and re-export tracing. Implements circuit breaker pattern for resilience, LRU cache with 5-minute TTL for performance, and DFS algorithms for cycle detection in dependency graphs.
 - **Transport Layer Decoupling**: Business logic is independent of whether accessed via MCP or REST
@@ -644,7 +644,7 @@ graph TB
         end
         
         subgraph "Service Layer (Business Logic)"
-            CRATE_SVC[CrateService<br/>Search, docs, versions]
+            CRATE_SVC[CrateService<br/>Search, docs, versions<br/>Module tree transformation]
             INGEST_SVC[IngestionService<br/>Pipeline management<br/>Pre-ingestion control]
         end
         
@@ -1143,6 +1143,7 @@ sequenceDiagram
         Worker->>DB: Store re-export mappings to reexports table
         Worker->>DB: Store cross-references to reexports table (link_type='crossref')
         Worker->>DB: Store module hierarchy with parent_id, depth, item_count
+        Note over Worker: Module Storage Strategy<br/>Database stores flat adjacency list<br/>with parent_id relationships<br/>Service layer handles tree transformation
         Worker->>Worker: Parse code examples from docs
         Note over Worker: BUG FIX: Type validation prevents<br/>character fragmentation in examples_data<br/>(ingest.py:761-769)
         Worker->>Worker: Stream items progressively (generator-based)
@@ -1175,6 +1176,7 @@ sequenceDiagram
         API->>API: Add suggestions to first SearchResult only
     end
     
+    Note over API: Service Layer Data Transformation<br/>For module tree requests:<br/>1. Database returns flat list[dict] with parent_id<br/>2. CrateService._build_module_tree() transforms to hierarchy<br/>3. Handles edge cases: empty crates, multiple roots<br/>4. Returns structured ModuleTreeNode tree
     API-->>Client: JSON response with ranking scores + see-also suggestions
 ```
 
@@ -6437,6 +6439,18 @@ The module hierarchy extraction system processes rustdoc JSON paths section to b
 - **Tree Traversal**: Efficient database queries for parent-child navigation
 - **ModuleTreeNode**: Nested data structure with children collections for client consumption
 - **Filtering Support**: Supports crate, version, and path-based filtering
+
+**Service Layer Data Transformation (Critical Fix Applied)**
+- **Problem Resolved**: Service layer was returning raw flat `list[dict]` from database without transformation to hierarchical structure
+- **Root Cause**: MCP SDK endpoint expected hierarchical `ModuleTreeNode` structure, causing Pydantic validation error: "Input should be a valid dictionary or instance of ModuleTreeNode"
+- **Solution Implemented**: Added `_build_module_tree()` helper method to CrateService class that transforms flat database results into proper hierarchical structure
+- **Data Flow Correction**:
+  1. **Database Layer**: Returns flat `list[dict]` with `parent_id` relationships (unchanged)
+  2. **Service Layer**: Transforms flat list to hierarchical `ModuleTreeNode` tree using `_build_module_tree()`
+  3. **Endpoint Layer**: Passes through structured data to client (validation now passes)
+  4. **Client**: Receives properly formatted hierarchical tree structure
+- **Edge Case Handling**: Manages empty crates, single root modules, and multiple root modules with synthetic root node creation
+- **Architectural Integrity**: Service layer now properly fulfills its data transformation responsibility, maintaining clean separation of concerns
 
 **Storage Architecture**
 - **Adjacency List Model**: modules.parent_id references modules.id for tree relationships

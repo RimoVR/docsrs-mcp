@@ -17,6 +17,7 @@ from ..ingest import get_embedding_model, ingest_crate
 from ..models import (
     CodeExample,
     CrateModule,
+    ModuleTreeNode,
     SearchResult,
 )
 from ..version_diff import get_diff_engine
@@ -318,6 +319,87 @@ class CrateService:
 
             raise ValueError(error_message)
 
+    def _build_module_tree(
+        self, flat_modules: list[dict], crate_name: str
+    ) -> ModuleTreeNode:
+        """Build a hierarchical tree structure from flat module list.
+
+        Args:
+            flat_modules: List of module dictionaries with parent_id relationships
+            crate_name: Name of the crate (used for root node if empty)
+
+        Returns:
+            Root ModuleTreeNode with nested children
+        """
+        if not flat_modules:
+            # Return empty root node for empty crate
+            return ModuleTreeNode(
+                name=crate_name,
+                path=crate_name,
+                depth=0,
+                item_count=0,
+                children=[],
+            )
+
+        # Build parent-child mapping
+        children_map: dict[int | None, list[dict]] = {}
+        modules_by_id: dict[int, dict] = {}
+        root_modules = []
+
+        for module in flat_modules:
+            module_id = module.get("id")
+            parent_id = module.get("parent_id")
+            
+            if module_id is not None:
+                modules_by_id[module_id] = module
+            
+            if parent_id is None:
+                root_modules.append(module)
+            else:
+                children_map.setdefault(parent_id, []).append(module)
+
+        def build_node(module: dict) -> ModuleTreeNode:
+            """Recursively build tree node from module dict."""
+            module_id = module.get("id")
+            children_list = children_map.get(module_id, [])
+            
+            return ModuleTreeNode(
+                name=module.get("name", ""),
+                path=module.get("path", ""),
+                depth=module.get("depth", 0),
+                item_count=module.get("item_count", 0),
+                children=[build_node(child) for child in children_list],
+            )
+
+        # Handle edge cases
+        if len(root_modules) == 1:
+            # Single root - use it directly
+            return build_node(root_modules[0])
+        elif len(root_modules) > 1:
+            # Multiple roots - create synthetic root
+            return ModuleTreeNode(
+                name=crate_name,
+                path=crate_name,
+                depth=0,
+                item_count=sum(m.get("item_count", 0) for m in root_modules),
+                children=[build_node(root) for root in root_modules],
+            )
+        else:
+            # No root modules found - shouldn't happen but handle gracefully
+            # Try to find the module with the smallest depth
+            if flat_modules:
+                min_depth_module = min(flat_modules, key=lambda m: m.get("depth", 0))
+                return build_node(min_depth_module)
+            
+            # Fallback to empty root
+            return ModuleTreeNode(
+                name=crate_name,
+                path=crate_name,
+                depth=0,
+                item_count=0,
+                children=[],
+            )
+
     async def get_module_tree(
         self, crate_name: str, version: str | None = None
     ) -> dict:
@@ -333,8 +415,11 @@ class CrateService:
         # Ingest crate if not already done
         db_path = await ingest_crate(crate_name, version)
 
-        # Get module tree from database
-        tree = await get_module_tree_from_db(db_path)
+        # Get flat module list from database
+        flat_modules = await get_module_tree_from_db(db_path)
+        
+        # Build hierarchical tree structure
+        tree = self._build_module_tree(flat_modules, crate_name)
 
         return {
             "crate_name": crate_name,

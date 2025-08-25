@@ -3611,6 +3611,22 @@
             "developmentUse": "Use during active development for quick feedback",
             "pattern": "Integrate into development workflow for faster iteration"
           }
+        },
+        {
+          "error": "Module Tree Data Structure Mismatch - Input should be a valid dictionary or instance of ModuleTreeNode",
+          "rootCause": "Three-layer data transformation failure: 1) Database Layer: Returns flat list[dict] (correct design for SQL queries), 2) Service Layer: Was passing flat list unchanged (BUG - missing transformation), 3) Model Layer: Expected hierarchical ModuleTreeNode structure (correct expectation)",
+          "solution": "Added tree building transformation in service layer (CrateService.get_module_tree). Created `_build_module_tree` helper method that transforms flat list[dict] to hierarchical ModuleTreeNode. Handles edge cases: empty crates, single/multiple roots. Service layer now properly fulfills transformation responsibility.",
+          "context": "MCP server module tree endpoint failing with validation error when returning flat list instead of hierarchical tree structure",
+          "lesson": "Establish proper layer responsibilities: Database (raw data queries), Service (business logic + data transformation), Model (structure validation), Endpoint (protocol handling)",
+          "pattern": "Service layer must transform database results to match model expectations - never pass raw database formats to validation layer",
+          "dateEncountered": "2025-08-25",
+          "status": "RESOLVED",
+          "dateResolved": "2025-08-25",
+          "relatedFiles": ["src/docsrs_mcp/services/crate_service.py"],
+          "affectedMethods": ["get_module_tree (lines 403-428)", "_build_module_tree (lines 322-401)"],
+          "codeExample": "def _build_module_tree(self, modules: List[Dict[str, Any]]) -> ModuleTreeNode:\n    \"\"\"Transform flat module list to hierarchical tree structure\"\"\"\n    if not modules:\n        return ModuleTreeNode(name=\"empty\", path=\"\", children=[])\n    \n    # Build tree from flat list\n    tree_builder = TreeBuilder()\n    for module in modules:\n        tree_builder.add_module(module)\n    \n    return tree_builder.build_tree()\n\n# Usage in service method:\nmodules = await self.database.get_module_list(crate_name, version)\ntree = self._build_module_tree(modules)  # Transform before return\nreturn GetModuleTreeResponse(tree=tree)",
+          "debuggingTechnique": "Test with 'uv run docsrs-mcp' in development mode and verify endpoint returns hierarchical ModuleTreeNode structure, not flat list",
+          "architecturalImprovement": "This fix establishes proper separation of concerns where each layer has clear responsibilities and data flows correctly through the transformation pipeline"
         }
       ]
     },
