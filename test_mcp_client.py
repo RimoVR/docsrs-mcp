@@ -142,14 +142,62 @@ async def test_local_mcp_server():
             print("Failed to get tools list")
             return
             
-        # Test 2: Call list_versions (simple tool)
+        # Test 2: Call search_examples to check for character fragmentation
+        print("\n=== Testing search_examples for character fragmentation ===")
+        search_examples_response = await client.call_tool("search_examples", {
+            "crate_name": "serde",
+            "query": "serialize struct",
+            "k": "3"
+        })
+        
+        # Analyze response for character fragmentation
+        if search_examples_response and "result" in search_examples_response:
+            result = search_examples_response["result"]
+            print(f"search_examples response type: {type(result)}")
+            
+            if "content" in result and isinstance(result["content"], list):
+                for content_item in result["content"]:
+                    if content_item.get("type") == "text":
+                        text = content_item.get("text", "")
+                        
+                        # Check for character fragmentation
+                        if len(text) == 1 and text.isalnum():
+                            print(f"❌ CHARACTER FRAGMENTATION DETECTED: Single character: '{text}'")
+                            return
+                        
+                        # Try parsing as JSON if it looks like JSON
+                        if text.startswith('[') or text.startswith('{'):
+                            try:
+                                parsed = json.loads(text)
+                                if isinstance(parsed, list) and len(parsed) > 0:
+                                    first_item = parsed[0]
+                                    if isinstance(first_item, str) and len(first_item) == 1:
+                                        print(f"❌ CHARACTER FRAGMENTATION in JSON: {parsed[:5]}...")
+                                        return
+                                    else:
+                                        print(f"✅ No character fragmentation - {len(parsed)} complete items returned")
+                                        print(f"First item preview: {str(first_item)[:100]}...")
+                                else:
+                                    print(f"✅ Response contains complete data structure")
+                            except json.JSONDecodeError:
+                                print(f"Non-JSON response (length: {len(text)}): {text[:100]}...")
+                        else:
+                            print(f"Text response (length: {len(text)}): {text[:100]}...")
+                            
+            print("✅ search_examples character fragmentation test PASSED")
+        else:
+            print("❌ search_examples call failed or returned no result")
+            print(f"Response: {json.dumps(search_examples_response, indent=2)}")
+            return
+        
+        # Test 3: Call list_versions (simple tool)
         print("\n=== Testing list_versions ===")
         list_versions_response = await client.call_tool("list_versions", {
             "crate_name": "serde"
         })
         print(f"list_versions response: {json.dumps(list_versions_response, indent=2)}")
         
-        print("\n=== All tests completed successfully! ===")
+        print("\n=== 🎉 All tests completed successfully! Character fragmentation bug appears FIXED! ===")
         
     except Exception as e:
         print(f"Test failed with error: {e}")

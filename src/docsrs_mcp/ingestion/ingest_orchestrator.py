@@ -53,6 +53,10 @@ from .version_resolver import (
 # Import source extractor for Tier 2 fallback
 import sys
 from pathlib import Path as PathLib
+
+# Initialize logger before any usage
+logger = logging.getLogger(__name__)
+
 # Add extractors directory to path for import
 sys.path.insert(0, str(PathLib(__file__).parent.parent.parent.parent / "extractors"))
 try:
@@ -60,8 +64,6 @@ try:
 except ImportError:
     logger.warning("CratesIoSourceExtractor not available, Tier 2 will be skipped")
     CratesIoSourceExtractor = None
-
-logger = logging.getLogger(__name__)
 
 # Global per-crate lock registry to prevent duplicate ingestion
 _crate_locks: dict[str, asyncio.Lock] = {}
