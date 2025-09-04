@@ -1185,6 +1185,42 @@
           ],
           "preventionStrategy": "Establish consistent parameter type declaration policy: strings in config, conversion in validators. Include schema consistency checks in development workflow.",
           "validationPattern": "Use string-only parameter declarations with mode='before' field validators for maximum MCP client compatibility while maintaining type safety"
+        },
+        {
+          "error": "Missing MCP Resources Implementation - Claude Code client requires MCP resources endpoints",
+          "rootCause": "MCP SDK server had no @server.list_resources() or @server.read_resource() decorators. Resources were defined in MCP_RESOURCES_CONFIG but handlers were missing. Client expected standard MCP resource handlers for discovering available data.",
+          "solution": "Implemented proper MCP resources handlers with correct import paths and field names. Added @server.list_resources() and @server.read_resource() decorators to expose resources via MCP protocol.",
+          "context": "Claude Code client compatibility blocked by missing resource endpoints despite resources being configured",
+          "implementation": [
+            "Import ReadResourceContents from mcp.server.lowlevel.helper_types (not TextResourceContents from types)",
+            "Use proper field names: content and mime_type (not text and mimeType)",
+            "Handle both string and object crate types in popular crates list",
+            "get_popular_crates_status() is NOT async - don't await it",
+            "Use snake_case field names throughout (mime_type not mimeType)"
+          ],
+          "lesson": "MCP resources require explicit handler implementation even when resources are defined in configuration. Import paths and field naming must match MCP SDK requirements exactly.",
+          "pattern": "Always implement both @server.list_resources() and @server.read_resource() handlers when defining MCP resources",
+          "dateEncountered": "2025-09-04",
+          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py", "src/docsrs_mcp/mcp_resources_config.py"],
+          "codeExample": "@server.list_resources()\nasync def handle_list_resources() -> list[Resource]:\n    return [\n        Resource(uri=AnyUrl(uri), name=name, description=desc, mimeType=mime)\n        for uri, name, desc, mime in MCP_RESOURCES_CONFIG\n    ]\n\n@server.read_resource()\nasync def handle_read_resource(uri: AnyUrl) -> list[ReadResourceContents]:\n    if str(uri) == \"cache://status\":\n        status = get_popular_crates_status()  # NOT async\n        content = json.dumps(status, indent=2)\n        return [ReadResourceContents(uri=uri, content=content, mime_type=\"application/json\")]\n    elif str(uri) == \"cache://popular\":\n        popular_crates = await get_popular_crates_list()\n        # Handle both string and object types with hasattr check\n        formatted_crates = []\n        for crate in popular_crates:\n            if hasattr(crate, 'name'):\n                formatted_crates.append({'name': crate.name, 'downloads': crate.downloads})\n            else:\n                formatted_crates.append({'name': str(crate), 'downloads': 'unknown'})\n        content = json.dumps(formatted_crates, indent=2)\n        return [ReadResourceContents(uri=uri, content=content, mime_type=\"application/json\")]\n    else:\n        raise ValueError(f\"Unknown resource URI: {uri}\")",
+          "resourceUrisImplemented": [
+            "cache://status - Cache and ingestion statistics",
+            "cache://popular - List of popular crates with metadata"
+          ],
+          "testingVerification": [
+            "JSON-RPC protocol test with resources/list method returns configured resources",
+            "JSON-RPC protocol test with resources/read method returns valid JSON content",
+            "MIME types correctly set to application/json for structured data",
+            "Full Claude Code client compatibility restored"
+          ],
+          "commonPitfalls": [
+            "get_popular_crates_status() is synchronous - don't await it",
+            "PopularCrate objects need hasattr() checking for attribute access",
+            "Use snake_case field names (mime_type not mimeType)",
+            "Import ReadResourceContents from correct module path"
+          ],
+          "impact": "Full Claude Code client compatibility restored. Resources now discoverable via standard MCP protocol. Foundation for adding more resources in future.",
+          "debuggingTechnique": "Test with JSON-RPC protocol directly using resources/list and resources/read methods to verify proper MCP resource implementation"
         }
       ]
     },

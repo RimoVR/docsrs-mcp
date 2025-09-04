@@ -95,7 +95,7 @@ graph LR
         end
         
         subgraph "MCP Implementations"
-            OFFICIAL_SVR[mcp_sdk_server.py<br/>Official MCP SDK 1.13.1 - Default<br/>Native @server.tool() decorators<br/>Standard protocol support<br/>All 10 tools migrated]
+            OFFICIAL_SVR[mcp_sdk_server.py<br/>Official MCP SDK 1.13.1 - Default<br/>Native @server.tool() decorators<br/>Complete MCP resources support<br/>All 10 tools + resource handlers]
             FASTMCP_SVR[fastmcp_server.py<br/>FastMCP 2.11.1 - Deprecated<br/>Schema override support<br/>Legacy compatibility layer]
         end
         
@@ -158,7 +158,7 @@ graph LR
         end
         
         subgraph "Server Layer"
-            MCP_SERVER[mcp_sdk_server.py<br/>Official Python MCP SDK 1.13.1 (Default)<br/>Native @server.tool() decorators<br/>STDIO transport<br/>stderr logging<br/>All 10 tools migrated]
+            MCP_SERVER[mcp_sdk_server.py<br/>Official Python MCP SDK 1.13.1 (Default)<br/>Native @server.tool() decorators<br/>Complete MCP resources support<br/>STDIO transport<br/>stderr logging<br/>All 10 tools + resource handlers]
         end
         
         subgraph "Utilities"
@@ -302,6 +302,7 @@ The system now supports two parallel MCP implementations to ensure compatibility
 **mcp_sdk_server.py (Default Implementation)**
 - Contains all 10 MCP tools with @server.tool() decorators
 - Implements complete `handle_list_tools()` with proper JSON schemas
+- **Complete MCP Resources Support**: Implements @server.list_resources() and @server.read_resource() handlers for cache status and popular crates access
 - String-only parameters with validation for universal MCP client compatibility
 - Native MCP protocol support without conversion layers
 - Integrated with MCPServerRunner for memory management
@@ -319,6 +320,45 @@ All 10 tools successfully migrated:
 8. `get_popular_crates` - Popular crates listing
 9. `get_ingestion_stats` - Pipeline status monitoring
 10. `get_version_info` - Version-specific information
+
+### MCP Resources Implementation
+
+The MCP SDK server provides complete resource endpoint support as defined in the MCP protocol:
+
+#### Resource Handler Implementation
+
+**@server.list_resources() Handler**:
+- Returns available resources from MCP_RESOURCES_CONFIG
+- Exposes `cache://status` and `cache://popular` resource URIs
+- Uses native Resource type from mcp.types for protocol compliance
+
+**@server.read_resource() Handler**:
+- **cache://status**: Returns comprehensive cache status via `get_popular_crates_status()`
+  - Provides cache_stats, ingestion_stats, and scheduler_stats
+  - Synchronous call pattern (not async) for immediate status retrieval
+- **cache://popular**: Returns popular crates list via `PopularCratesManager.get_popular_crates()`
+  - Returns PopularCrate objects with name, version, downloads, and description fields
+  - Leverages existing popular crates management infrastructure
+
+#### Technical Implementation Details
+
+**Key Imports Added**:
+```python
+from mcp.server.lowlevel.helper_types import ReadResourceContents
+from mcp.types import Resource
+from pydantic import AnyUrl
+```
+
+**Resource Content Format**:
+- Uses `ReadResourceContents` with separate content and mime_type fields
+- Returns JSON content with "application/json" mime type
+- Proper error handling for unknown resource URIs with informative error messages
+
+**Integration Benefits**:
+- Full MCP protocol compatibility verified with test clients
+- Seamless integration with existing PopularCratesManager infrastructure
+- No performance impact on tool operations - resources provide read-only access
+- Enables external MCP clients to monitor cache status and discover available crates
 
 ### Memory Leak Mitigation
 
@@ -676,7 +716,7 @@ graph TB
         CLI[CLI Entry Point<br/>--mode & --mcp-implementation flags]
         
         subgraph "MCP Implementations"
-            OFFICIAL_SDK[Official MCP SDK 1.13.1<br/>Default - Native @server.tool()<br/>All 10 tools migrated]
+            OFFICIAL_SDK[Official MCP SDK 1.13.1<br/>Default - Native @server.tool()<br/>Complete MCP resources support<br/>All 10 tools + resource handlers]
             FASTMCP[FastMCP 2.11.1<br/>Deprecated - Schema overrides<br/>Legacy support only]
             MCP_RUNNER[MCPServerRunner<br/>Memory leak mitigation<br/>1000 calls/1GB restart]
             PARAM_VAL[Parameter Validation<br/>String-first handling<br/>Type conversion utilities]
@@ -744,8 +784,11 @@ graph TB
 **1. Created mcp_tools_config.py (255 lines)**
 - Extracted all MCP tool definitions and schemas as configuration data
 - Contains `MCP_TOOLS_CONFIG` list with tool schemas  
-- Contains `MCP_RESOURCES_CONFIG` list with resource definitions
+- Contains `MCP_RESOURCES_CONFIG` list with resource definitions:
+  - `cache://status` - Cache status and statistics resource
+  - `cache://popular` - Popular crates list resource
 - Reduced `get_mcp_manifest` from 273 lines to ~30 lines of configuration access logic
+- **Full MCP Resources Protocol**: Resource definitions are now fully implemented via handler endpoints in mcp_sdk_server.py
 
 **2. Rebalanced Endpoint Modules**
 - Moved `search_items` and `search_examples` from `endpoints.py` to `endpoints_tools.py`
@@ -788,7 +831,7 @@ MCP_TOOLS_CONFIG = [
 def get_mcp_manifest():
     return {
         "tools": MCP_TOOLS_CONFIG,
-        "resources": MCP_RESOURCES_CONFIG
+        "resources": MCP_RESOURCES_CONFIG  # Now fully supported by MCP SDK server
     }
 ```
 
@@ -849,6 +892,7 @@ These remaining files exceed the target due to inherent complexity rather than o
    - ✅ Official SDK is now the default implementation
    - ✅ FastMCP deprecated but maintained for backward compatibility
    - ✅ Complete schemas with handle_list_tools() for all tools
+   - ✅ Full MCP resources protocol support with @server.list_resources() and @server.read_resource() handlers
 
 ### Compatibility Guarantees
 

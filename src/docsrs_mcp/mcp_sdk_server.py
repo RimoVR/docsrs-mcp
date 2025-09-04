@@ -9,8 +9,11 @@ import sys
 
 from mcp import types
 from mcp.server import Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
+from mcp.types import Resource
+from pydantic import AnyUrl
 
 from .models import (
     AssociatedItemResponse,
@@ -1800,6 +1803,107 @@ async def handle_call_tool(
     except Exception as e:
         logger.error(f"Error calling tool {name}: {e}")
         return [types.TextContent(type="text", text=f"Error: {str(e)}")]
+
+
+@server.list_resources()
+async def handle_list_resources() -> list[Resource]:
+    """List available resources."""
+    try:
+        # Import config here to avoid circular imports
+        from .mcp_tools_config import MCP_RESOURCES_CONFIG
+        
+        resources = []
+        for resource_config in MCP_RESOURCES_CONFIG:
+            resources.append(
+                Resource(
+                    uri=resource_config["uri"],
+                    name=resource_config["name"],
+                    description=resource_config["description"],
+                )
+            )
+        
+        logger.info(f"Listed {len(resources)} resources")
+        return resources
+    except Exception as e:
+        logger.error(f"Error listing resources: {e}")
+        return []
+
+
+@server.read_resource()
+async def handle_read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
+    """Read a specific resource by URI."""
+    try:
+        uri_str = str(uri)
+        logger.info(f"Reading resource: {uri_str}")
+        
+        if uri_str == "cache://status":
+            # Get cache status (not async)
+            from .popular_crates import get_popular_crates_status
+            
+            status = get_popular_crates_status()
+            content = json.dumps(status, indent=2)
+            
+            return [
+                ReadResourceContents(
+                    content=content,
+                    mime_type="application/json",
+                )
+            ]
+            
+        elif uri_str == "cache://popular":
+            # Get popular crates list
+            from .popular_crates import PopularCratesManager
+            
+            manager = PopularCratesManager()
+            crates = await manager.get_popular_crates()
+            
+            # Convert to dict for JSON serialization
+            # Handle both PopularCrate objects and strings
+            crates_data = []
+            for crate in crates:
+                if isinstance(crate, str):
+                    # Simple string crate name
+                    crates_data.append({
+                        "name": crate,
+                        "version": "latest",
+                        "downloads": 0,
+                        "description": "",
+                    })
+                else:
+                    # PopularCrate object
+                    crates_data.append({
+                        "name": crate.name,
+                        "version": crate.version if hasattr(crate, 'version') else "latest",
+                        "downloads": crate.downloads if hasattr(crate, 'downloads') else 0,
+                        "description": crate.description if hasattr(crate, 'description') else "",
+                    })
+            
+            content = json.dumps({"crates": crates_data, "count": len(crates_data)}, indent=2)
+            
+            return [
+                ReadResourceContents(
+                    content=content,
+                    mime_type="application/json",
+                )
+            ]
+        
+        else:
+            logger.warning(f"Unknown resource URI: {uri_str}")
+            return [
+                ReadResourceContents(
+                    content=f"Resource not found: {uri_str}",
+                    mime_type="text/plain",
+                )
+            ]
+            
+    except Exception as e:
+        logger.error(f"Error reading resource {uri}: {e}")
+        return [
+            ReadResourceContents(
+                content=f"Error reading resource: {str(e)}",
+                mime_type="text/plain",
+            )
+        ]
 
 
 def setup_uvx_environment():
