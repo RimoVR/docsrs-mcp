@@ -334,6 +334,36 @@ async def generate_example_embeddings(
                 )
 
             await db.commit()
+        
+        # Sync to vec_example_embeddings virtual table
+        logger.info("Syncing example embeddings to vector index...")
+        
+        # Populate the vector table from example_embeddings
+        cursor = await db.execute("""
+            SELECT id, embedding FROM example_embeddings
+        """)
+        
+        vec_data = []
+        async for row in cursor:
+            rowid, embedding_blob = row
+            vec_data.append((rowid, embedding_blob))
+            
+            # Process in batches for efficiency
+            if len(vec_data) >= 100:
+                await db.executemany(
+                    "INSERT INTO vec_example_embeddings(rowid, example_embedding) VALUES (?, ?)",
+                    vec_data
+                )
+                vec_data = []
+        
+        # Insert remaining data
+        if vec_data:
+            await db.executemany(
+                "INSERT INTO vec_example_embeddings(rowid, example_embedding) VALUES (?, ?)",
+                vec_data
+            )
+        
+        await db.commit()
 
         logger.info(
             f"Successfully generated embeddings for {len(all_examples)} examples"

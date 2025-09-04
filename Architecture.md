@@ -2,7 +2,9 @@
 
 ## System Overview
 
-The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a service layer architecture with dual MCP implementation support, with Official Python MCP SDK 1.13.1 as the default implementation and legacy FastMCP 2.11.1 support (deprecated) through a --mcp-implementation CLI flag. The system includes comprehensive memory leak mitigation with automatic server restarts, string-first parameter handling for broad client compatibility, and transport-agnostic business services (CrateService and IngestionService) that decouple core functionality from MCP/REST layers. The architecture maintains a comprehensive asynchronous ingestion pipeline with enhanced rustdoc JSON processing, SQLite-based vector storage with intelligent caching, and dedicated code example extraction systems.
+The docsrs-mcp server provides both REST API and Model Context Protocol (MCP) endpoints for querying Rust crate documentation using vector search. It features a service layer architecture with dual MCP implementation support, with Official Python MCP SDK 1.13.1 as the default implementation and legacy FastMCP 2.11.1 support (deprecated) through a --mcp-implementation CLI flag. The system includes comprehensive memory leak mitigation with automatic server restarts, string-first parameter handling for broad client compatibility, and transport-agnostic business services (CrateService and IngestionService) that decouple core functionality from MCP/REST layers. 
+
+**Recent Architecture Enhancements**: The architecture maintains a comprehensively enhanced asynchronous ingestion pipeline with a completely rewritten rustdoc JSON parser that properly handles the actual rustdoc structure, robust storage manager with NULL constraint protection, fixed code example extraction with character fragmentation protection and vector sync capabilities, and corrected service layer dictionary handling for seamless code example search functionality. These fixes ensure reliable ingestion of Rust crate documentation with proper code example extraction and searchability through dual vector search systems for both documentation and code examples.
 
 ## High-Level Architecture
 
@@ -84,7 +86,7 @@ graph TB
 graph LR
     subgraph "docsrs_mcp Package"
         subgraph "Service Layer"
-            CRATE_SVC[crate_service.py<br/>CrateService class<br/>Search, documentation, versions<br/>Transport-agnostic business logic<br/>_build_module_tree() transformation method]
+            CRATE_SVC[crate_service.py<br/>CrateService class<br/>FIXED: search_examples method dictionary handling<br/>Proper mapping to CodeExample model requirements<br/>Search, documentation, versions<br/>Transport-agnostic business logic<br/>_build_module_tree() transformation method]
             INGEST_SVC[ingestion_service.py<br/>IngestionService class<br/>Pipeline management<br/>Pre-ingestion control<br/>Cargo file processing]
             TYPE_NAV_SVC[type_navigation_service.py<br/>TypeNavigationService class<br/>Code intelligence operations<br/>get_item_intelligence(), search_by_safety()<br/>get_error_catalog() methods]
             MCP_RUNNER[mcp_runner.py<br/>MCPServerRunner class<br/>Memory leak mitigation<br/>1000 calls/1GB restart<br/>Process health monitoring]
@@ -124,11 +126,11 @@ graph LR
                 EMBED_MGR[embedding_manager.py<br/>ONNX model lifecycle (~170 LOC)<br/>Lazy loading pattern<br/>Memory-aware batch processing<br/>Warmup during startup]
                 VER_RESOLVER[version_resolver.py<br/>Version resolution (~445 LOC)<br/>Rustdoc downloading<br/>Compression support (zst, gzip, json)<br/>docs.rs redirects]
                 CACHE_MGR[cache_manager.py<br/>LRU cache eviction (~270 LOC)<br/>Priority scoring for popular crates<br/>2GB size limit enforcement<br/>File mtime-based eviction]
-                RUSTDOC_PARSER[rustdoc_parser.py<br/>Streaming JSON parsing (~305 LOC)<br/>ijson-based memory efficiency<br/>Module hierarchy extraction<br/>Path validation with fallback]
+                RUSTDOC_PARSER[rustdoc_parser.py<br/>Enhanced JSON parsing (~305 LOC)<br/>Complete rewrite for actual rustdoc structure<br/>Extracts from "index" and "paths" sections<br/>Direct code example extraction integration<br/>Generic parameters and trait bounds parsing<br/>Module hierarchy extraction<br/>Path validation with fallback]
                 SIG_EXTRACTOR[signature_extractor.py<br/>Metadata extraction (~365 LOC)<br/>Complete item extraction<br/>Macro extraction patterns<br/>Enhanced schema validation]
                 INTELLIGENCE_EXTRACTOR[intelligence_extractor.py<br/>Code Intelligence Extraction<br/>Error types, safety info, feature requirements<br/>Pre-compiled regex patterns<br/>Session-based caching mechanism]
-                CODE_EXAMPLES[code_examples.py<br/>Code example extraction (~343 LOC)<br/>Language detection via pygments<br/>30% confidence threshold<br/>JSON structure with metadata]
-                STORAGE_MGR[storage_manager.py<br/>Batch embedding storage (~296 LOC)<br/>Transaction management<br/>Streaming batch inserts<br/>Memory-aware chunking]
+                CODE_EXAMPLES[code_examples.py<br/>Code example extraction (~343 LOC)<br/>FIXED: Character fragmentation bug at lines 234-242<br/>FIXED: Vector sync step for vec_example_embeddings<br/>Language detection via pygments<br/>30% confidence threshold<br/>Batch processing for embeddings sync<br/>JSON structure with metadata]
+                STORAGE_MGR[storage_manager.py<br/>Batch embedding storage (~296 LOC)<br/>FIXED: NULL constraint protection for content field<br/>Enhanced robustness with explicit NULL checks<br/>Transaction management<br/>Streaming batch inserts<br/>Memory-aware chunking]
             end
             
             ING[ingest.py<br/>Backward compatibility layer<br/>Re-exports from modular components<br/>Maintains existing API surface]
@@ -232,7 +234,7 @@ The docsrs-mcp server implements a service layer pattern that decouples business
 
 #### Core Services
 
-- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration. **Critical Fix Applied**: Implements `_build_module_tree()` helper method that transforms flat database results into hierarchical ModuleTreeNode structures, resolving Pydantic validation errors by properly fulfilling service layer data transformation responsibility.
+- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration. **Critical Fix Applied**: Implements `_build_module_tree()` helper method that transforms flat database results into hierarchical ModuleTreeNode structures, resolving Pydantic validation errors by properly fulfilling service layer data transformation responsibility. **Service Layer Fix**: Fixed search_examples method to properly handle dictionary results from search_example_embeddings, correctly mapping fields to CodeExample model requirements.
 - **IngestionService**: Manages the complete ingestion pipeline, pre-ingestion workflows, and cargo file processing
 - **CrossReferenceService**: **Phase 6 Enhancement**: Provides advanced cross-reference operations including import resolution, dependency graph analysis, migration suggestions, and re-export tracing. Implements circuit breaker pattern for resilience, LRU cache with 5-minute TTL for performance, and DFS algorithms for cycle detection in dependency graphs.
 - **Transport Layer Decoupling**: Business logic is independent of whether accessed via MCP or REST
@@ -4703,8 +4705,12 @@ The ingestion pipeline has been refactored from a monolithic 3609-line `ingest.p
 - File mtime-based eviction strategies
 - Cache health monitoring and cleanup operations
 
-**rustdoc_parser.py (~305 LOC)**
-- Streaming JSON parsing using ijson for memory efficiency
+**rustdoc_parser.py (~305 LOC)** - MAJOR OVERHAUL COMPLETED
+- **FIXED**: Complete rewrite of parse_rustdoc_items_streaming function for actual rustdoc JSON structure
+- **CHANGED**: Replaced ijson streaming parser with regular json.loads for better compatibility
+- **ENHANCED**: Direct extraction from "index" and "paths" sections of rustdoc JSON
+- **ADDED**: Integrated code example extraction using extract_code_examples during parsing
+- **ADDED**: Extraction of generic parameters and trait bounds from inner structure
 - Module hierarchy extraction with parent-child relationships
 - Path validation with fallback generation for robustness
 - Progressive item streaming using generator-based architecture
@@ -4715,16 +4721,20 @@ The ingestion pipeline has been refactored from a monolithic 3609-line `ingest.p
 - Schema validation with tier-aware different MIN_ITEMS_THRESHOLD values
 - Cross-reference extraction from links fields
 
-**code_examples.py (~343 LOC)** - ENHANCED WITH BUG FIXES
+**code_examples.py (~343 LOC)** - ENHANCED WITH CRITICAL FIXES
 - Code example extraction with structured JSON metadata
 - Language detection via pygments with 30% confidence threshold
 - SHA256-based deduplication using 16-character prefix
-- **FIXED**: Character fragmentation bug in `generate_example_embeddings()` - prevented string iteration that caused character-by-character storage
+- **FIXED**: Character fragmentation bug at lines 234-242 where examples were treated as individual characters
 - **FIXED**: SQL column name mismatch - using 'id' instead of 'item_id' for database alignment
+- **ADDED**: Critical sync step in generate_example_embeddings to populate vec_example_embeddings virtual table
+- **ENHANCED**: Batch processing for efficiency when syncing to vector table
 - Example processing integrated into description_only fallback tier (Tier 4) for comprehensive coverage
 - Regression testing coverage for both stdlib and normal crates
 
-**storage_manager.py (~296 LOC)**
+**storage_manager.py (~296 LOC)** - ROBUSTNESS ENHANCED
+- **FIXED**: Added NULL constraint protection for content field in _store_batch function
+- **ENHANCED**: Explicit NULL checks and fallbacks to ensure content is never None
 - Batch embedding storage with transaction management
 - Streaming batch inserts with memory-aware chunking (size=999)
 - Enhanced transaction management with retry logic
@@ -4746,6 +4756,21 @@ The main `ingest.py` file now serves as a compatibility layer:
 - **Code Clarity**: LOC per module stays under 500 for better comprehension
 - **Parallel Development**: Multiple developers can work on different modules simultaneously
 
+#### Recent Architectural Fixes and Enhancements
+
+**Critical Issues Resolved**:
+- **Rustdoc Parser Overhaul**: Complete rewrite to handle actual rustdoc JSON structure with proper extraction from "index" and "paths" sections
+- **Character Fragmentation Bug**: Fixed critical bug in code_examples.py where examples were treated as individual characters instead of whole code blocks
+- **Storage Robustness**: Added NULL constraint protection in storage_manager.py to prevent database integrity issues
+- **Vector Search Sync**: Added missing vector table sync step for example embeddings to enable semantic search
+- **Service Layer Fix**: Corrected dictionary handling in CrateService.search_examples method for proper model mapping
+
+**Architecture Impact**:
+- Robust ingestion pipeline handles actual rustdoc JSON format correctly
+- Code example extraction and search functionality fully operational
+- Database integrity maintained through comprehensive NULL handling
+- Dual vector search capability for both documentation and code examples
+
 #### Module Dependencies and Data Flow
 
 The modular architecture follows a clear dependency graph with the orchestrator coordinating all operations:
@@ -4757,16 +4782,17 @@ ingest_orchestrator.py (Main Controller)
 └── embedding_manager.py → storage_manager.py
 ```
 
-**Ingestion Flow Through Modules**:
+**Enhanced Ingestion Flow Through Modules** (Updated with Recent Fixes):
 1. **Orchestrator** receives ingestion request and determines tier strategy
 2. **Version Resolver** downloads rustdoc JSON, consulting **Cache Manager** for existing files
-3. **Rustdoc Parser** streams JSON content using ijson for memory efficiency
-4. **Signature Extractor** processes each item, extracting metadata and cross-references
+3. **Rustdoc Parser** (FIXED) processes actual rustdoc JSON structure from "index" and "paths" sections, extracting code examples directly during parsing
+4. **Signature Extractor** processes each item, extracting metadata, cross-references, and generic parameters
 5. **Intelligence Extractor** analyzes signatures and docs for error types, safety info, and features
-6. **Code Examples** extractor processes documentation for example code blocks (including description_only fallback tier)
-7. **Embedding Manager** generates vectors for processed items in adaptive batches
-8. **Storage Manager** handles transactional database operations with streaming inserts
-9. **Orchestrator** coordinates error handling and tier fallback across all modules
+6. **Code Examples** extractor (FIXED) processes documentation with character fragmentation protection and proper vector sync
+7. **Embedding Manager** generates vectors for both items and examples in adaptive batches
+8. **Storage Manager** (FIXED) handles transactional database operations with NULL constraint protection and streaming inserts
+9. **Vector Sync Step** (NEW) populates vec_example_embeddings virtual table for efficient similarity search
+10. **Orchestrator** coordinates error handling and tier fallback across all modules
 
 ### Ingestion Layer Details
 

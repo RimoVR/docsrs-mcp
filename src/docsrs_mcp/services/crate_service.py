@@ -459,9 +459,16 @@ class CrateService:
             db_path, query_embedding, k=k, language_filter=language
         )
 
-        # Format results
+        # Format results - results is a list of dictionaries
         examples = []
-        for score, code, source_item, language, context in results:
+        for result in results:
+            # Extract fields from dictionary
+            code = result.get("code", "")
+            score = result.get("score", 0.0)
+            item_path = result.get("item_path", "")
+            language = result.get("language", "unknown")
+            context = result.get("context", "")
+            
             # Join code list into a single string if it's a list
             if isinstance(code, list):
                 code = "".join(code)
@@ -469,10 +476,11 @@ class CrateService:
             examples.append(
                 CodeExample(
                     code=code,
-                    score=score,
-                    source_item=source_item,
                     language=language,
+                    detected=True,  # We always detect language from the database
+                    item_path=item_path,  # Use the correct field name
                     context=context,
+                    score=score,
                 )
             )
 

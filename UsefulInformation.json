@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-09-03",
+  "lastUpdated": "2025-09-04",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -2759,6 +2759,26 @@
           "codeExample": "# Added to VersionInfo model:\nis_latest: bool = Field(False, description=\"Whether this is the latest version of the crate\")\n\n# Added to ListVersionsResponse model:\nlatest: str | None = Field(None, description=\"Latest version string\")\n\n# Root cause - service returned extra fields:\nresponse_data = {\n    'versions': [...],\n    'latest': '1.2.3',  # This field was missing from model\n    # ... other fields\n}\n\n# Each VersionInfo contained:\n{\n    'version': '1.0.0',\n    'is_latest': False,  # This field was missing from model\n    # ... other fields\n}",
           "debuggingTechnique": "Check service layer output fields against Pydantic model definitions when using strict validation to identify missing fields",
           "impact": "Fixed list_versions endpoint validation errors and ensured proper response structure for version listing functionality"
+        },
+        {
+          "error": "search_examples Character Fragmentation Bug - Empty results despite successful ingestion with multiple cascading failures",
+          "rootCause": "Critical character fragmentation bug in code_examples.py:234-242 where string examples_data was iterated over individual characters instead of being treated as complete code blocks. This caused code examples to be stored as single characters rather than complete code blocks. Additional issues: Rustdoc parser wasn't correctly handling JSON structure, NULL constraint failures prevented data storage, and vector table sync was missing.",
+          "solution": "Fixed character fragmentation with type checking: if isinstance(examples_data, str): examples_data = [examples_data]. Rewrote rustdoc parser to use json.loads instead of ijson for proper JSON handling. Added NULL constraint protection in storage_manager.py with content fallbacks. Added vector table sync to vec_example_embeddings. Updated service layer to handle dictionary results correctly.",
+          "context": "search_examples feature returning empty results even after successful ingestion due to multiple cascading issues in ingestion, parsing, and storage layers",
+          "lesson": "Always validate data types before iteration - strings can be mistaken for iterables. Virtual tables in SQLite (vec0) require manual sync after data insertion. NULL constraints need explicit handling with fallbacks.",
+          "pattern": "Use isinstance() checks before iteration to prevent character fragmentation. Always sync virtual tables after embedding insertion. Provide fallback values for required database fields.",
+          "dateEncountered": "2025-09-04",
+          "relatedFiles": ["src/docsrs_mcp/ingestion/code_examples.py", "src/docsrs_mcp/ingestion/rustdoc_parser.py", "src/docsrs_mcp/storage/storage_manager.py", "src/docsrs_mcp/services/crate_service.py"],
+          "codeExample": "# CRITICAL BUG FIX: Handle string input - wrap in list to prevent character iteration\nif isinstance(examples_data, str):\n    examples_data = [examples_data]\n\n# NULL constraint protection:\ncontent = chunk.get(\"doc\", \"\")\nif content is None:\n    content = \"\"\n\n# Vector table sync:\nawait db.executemany(\n    \"INSERT INTO vec_example_embeddings(rowid, example_embedding) VALUES (?, ?)\",\n    vec_data\n)",
+          "debuggingTechnique": "Test with MCP client: uv run python test_mcp_string_k.py. Manual ingestion: asyncio.run(ingest_crate('serde', 'latest')). Check for character-level storage vs complete code blocks in search results.",
+          "testingConfirmed": [
+            "Fixed character fragmentation - no more single characters as code examples",
+            "Search_examples now returns proper code blocks with 5 examples for 'serialize struct'",
+            "Vector search working correctly with 42 synced entries",
+            "NULL constraint failures resolved with proper fallbacks"
+          ],
+          "preventionStrategy": "Always use isinstance() checks before iterating over data that could be string or list. Implement comprehensive integration tests that verify end-to-end functionality including data storage format.",
+          "additionalBugFixed": "Rustdoc JSON parser rewritten to correctly extract from 'index' and 'paths' sections, service layer updated to handle dictionary results from embedding search"
         }
       ]
     },

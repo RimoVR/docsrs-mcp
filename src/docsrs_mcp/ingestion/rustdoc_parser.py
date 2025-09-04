@@ -31,8 +31,8 @@ async def parse_rustdoc_items_streaming(
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Parse rustdoc JSON and yield items in streaming fashion.
 
-    This function uses ijson for memory-efficient streaming parsing.
-    Yields items one at a time to avoid loading entire JSON into memory.
+    This function parses the rustdoc JSON and yields properly structured items
+    with all required fields for storage.
 
     Args:
         json_content: Raw JSON string from rustdoc
@@ -40,94 +40,187 @@ async def parse_rustdoc_items_streaming(
     Yields:
         Dict containing parsed item data
     """
-    # Convert string to bytes for ijson
-    json_bytes = json_content.encode("utf-8")
-
-    # Use ijson for streaming parsing (656x speedup over json.loads)
-    parser = ijson.parse(json_bytes, use_float=True)
-
-    current_item = {}
-    current_path = []
-    in_index = False
-    items_processed = 0
-
+    import json
+    
     try:
-        for prefix, event, value in parser:
-            # Track where we are in the JSON structure
-            if event == "start_map":
-                current_path.append("map")
-            elif event == "end_map":
-                if current_path:
-                    current_path.pop()
-
-                # If we completed an item in the index, yield it
-                if in_index and current_item:
-                    # Extract code intelligence for Phase 5
-                    # Use safe_extract to handle failures gracefully
-                    if current_item:
-                        # Extract signature from item (if available)
-                        signature = current_item.get("signature", "")
-                        attrs = current_item.get("attrs", [])
-                        docs = current_item.get("docs", "")
-                        item_type = current_item.get("type", "")
-
-                        # Extract intelligence data
-                        if signature or attrs:
-                            # Extract error types from signatures
-                            current_item["error_types"] = safe_extract(
-                                extract_error_types, signature, item_type, default=[]
-                            )
-
-                            # Extract safety information
-                            safety_info = safe_extract(
-                                extract_safety_info, attrs, signature, docs, default={}
-                            )
-                            current_item["safety_info"] = safety_info
-                            current_item["is_safe"] = safety_info.get("is_safe", True)
-
-                            # Extract feature requirements
-                            current_item["feature_requirements"] = safe_extract(
-                                extract_feature_requirements, attrs, default=[]
-                            )
-
-                    yield current_item
-                    current_item = {}
-                    items_processed += 1
-
-                    # Trigger GC periodically for memory management
-                    if items_processed % 1000 == 0:
-                        trigger_gc_if_needed()
-                        await asyncio.sleep(0)  # Allow other tasks
-
-            elif event == "map_key":
-                if current_path:
-                    current_path[-1] = value
-
-                # Check if we're in the index section
-                if len(current_path) == 1 and value == "index":
-                    in_index = True
-                elif len(current_path) == 1 and value != "index":
-                    in_index = False
-
-            elif event == "start_array":
-                current_path.append("array")
-            elif event == "end_array":
-                if current_path:
-                    current_path.pop()
-
-            # Collect item data
-            if in_index and len(current_path) >= 2:
-                field_name = current_path[-1] if current_path else None
-                if field_name and field_name != "map" and field_name != "array":
-                    current_item[field_name] = value
-
+        # Parse the JSON content (3MB is manageable)
+        data = json.loads(json_content)
+        
+        # Get the main sections
+        index = data.get("index", {})
+        paths = data.get("paths", {})
+        
+        # Build module hierarchy from paths
+        modules = build_module_hierarchy(paths)
+        
+        # Process items from the index
+        items_processed = 0
+        
+        for item_id, item_data in index.items():
+            try:
+                # Get path information
+                path_info = paths.get(item_id, {})
+                path_list = path_info.get("path", [])
+                item_kind = path_info.get("kind", "unknown")
+                
+                # Get item details
+                name = item_data.get("name")
+                docs = item_data.get("docs")
+                # Ensure docs is always a string (never None)
+                if docs is None:
+                    docs = ""
+                visibility = item_data.get("visibility", "public")
+                attrs = item_data.get("attrs", [])
+                deprecation = item_data.get("deprecation")
+                inner = item_data.get("inner", {})
+                
+                # Skip items without name or docs (we need content to embed)
+                if not name and not docs:
+                    continue
+                
+                # Build item path - handle cases where name might be None
+                if name:
+                    if path_list:
+                        item_path = "::".join(path_list + [name])
+                    else:
+                        item_path = name
+                else:
+                    # Use path as item_path if no name
+                    if path_list:
+                        item_path = "::".join(path_list)
+                    else:
+                        item_path = f"item_{item_id}"  # Fallback
+                
+                # Determine item type from inner or kind
+                if isinstance(inner, dict):
+                    inner_kind = inner.get("kind")
+                    if inner_kind:
+                        item_type = normalize_item_type(inner_kind)
+                    else:
+                        item_type = normalize_item_type(item_kind)
+                else:
+                    item_type = normalize_item_type(item_kind)
+                
+                # Use name as header, or derive from path
+                if name:
+                    header = name
+                elif path_list:
+                    header = path_list[-1] if path_list else "unknown"
+                else:
+                    header = item_type  # Last fallback
+                
+                # Create the item structure with required fields
+                item = {
+                    "item_id": item_id,
+                    "item_path": item_path,  # Required field
+                    "item_type": item_type,
+                    "name": name,
+                    "header": header,  # Required field
+                    "doc": docs,
+                    "visibility": visibility,
+                    "deprecated": deprecation is not None,
+                    "attrs": attrs,
+                }
+                
+                # Extract signature if available
+                signature = ""
+                if isinstance(inner, dict):
+                    # Try to extract signature from inner structure
+                    if inner.get("decl"):
+                        # Function or method declaration
+                        decl = inner["decl"]
+                        if isinstance(decl, dict):
+                            # Build signature from decl structure
+                            inputs = decl.get("inputs", [])
+                            output = decl.get("output", None)
+                            signature = f"fn {name}({inputs}) -> {output}"
+                        else:
+                            signature = str(decl)
+                    elif inner.get("type"):
+                        # Type alias
+                        signature = str(inner["type"])
+                
+                item["signature"] = signature
+                
+                # Extract parent ID from path
+                if len(path_list) > 0:
+                    parent_path = "::".join(path_list)
+                    item["parent_id"] = parent_path
+                else:
+                    item["parent_id"] = None
+                
+                # Extract code intelligence
+                # Extract error types from signatures
+                item["error_types"] = safe_extract(
+                    extract_error_types, signature, item_type, default=[]
+                )
+                
+                # Extract safety information
+                safety_info = safe_extract(
+                    extract_safety_info, attrs, signature, docs, default={}
+                )
+                item["safety_info"] = safety_info
+                item["is_safe"] = safety_info.get("is_safe", True)
+                
+                # Extract feature requirements
+                item["feature_requirements"] = safe_extract(
+                    extract_feature_requirements, attrs, default=[]
+                )
+                
+                # Extract code examples from documentation
+                from .code_examples import extract_code_examples
+                item["examples"] = extract_code_examples(docs)
+                
+                # Extract generic parameters and trait bounds from inner structure
+                generic_params = None
+                trait_bounds = None
+                
+                if isinstance(inner, dict):
+                    # Look for generics in the inner structure
+                    generics = inner.get("generics")
+                    if isinstance(generics, dict):
+                        # Extract generic parameters
+                        params = generics.get("params", [])
+                        if params:
+                            generic_params = json.dumps(params)
+                        
+                        # Extract where predicates (trait bounds)
+                        where_predicates = generics.get("where_predicates", [])
+                        if where_predicates:
+                            trait_bounds = json.dumps(where_predicates)
+                    
+                    # For traits, also check bounds field
+                    if item_type == "trait" and inner.get("bounds"):
+                        trait_bounds = json.dumps(inner["bounds"])
+                
+                item["generic_params"] = generic_params
+                item["trait_bounds"] = trait_bounds
+                
+                yield item
+                items_processed += 1
+                
+                # Allow other tasks periodically
+                if items_processed % 100 == 0:
+                    trigger_gc_if_needed()
+                    await asyncio.sleep(0)
+                    
+            except Exception as e:
+                logger.warning(f"Error processing item {item_id}: {e}")
+                continue
+        
+        # Yield module hierarchy as special marker at the end
+        yield {"_modules": modules}
+        
+        logger.info(f"Successfully parsed {items_processed} items from rustdoc JSON")
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse rustdoc JSON: {e}")
+        # Yield empty modules on error
+        yield {"_modules": {}}
     except Exception as e:
-        logger.warning(f"Error parsing rustdoc JSON: {e}")
-
-    # Yield module hierarchy as special marker at the end
-    # This is handled separately in the main ingestion
-    modules = build_module_hierarchy({})  # Will be populated from paths
-    yield {"_modules": modules}
+        logger.error(f"Error parsing rustdoc JSON: {e}")
+        # Yield empty modules on error
+        yield {"_modules": {}}
 
 
 async def parse_rustdoc_items(json_content: str) -> list[dict[str, Any]]:

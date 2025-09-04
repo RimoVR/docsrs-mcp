@@ -192,9 +192,36 @@ async def _store_batch(
     if not chunk_buffer:
         return
 
+    # Import validation function
+    from ..validation import validate_item_path_with_fallback
+
     # Prepare batch data
     batch_data = []
     for chunk, embedding_bytes in zip(chunk_buffer, embedding_buffer, strict=False):
+        # Validate and fix item_path
+        item_path = chunk.get("item_path")
+        item_id = chunk.get("item_id")
+        item_type = chunk.get("item_type")
+        
+        # Ensure we have a valid item_path
+        validated_path, used_fallback = validate_item_path_with_fallback(
+            item_path, item_id, item_type
+        )
+        
+        if used_fallback:
+            logger.debug(f"Generated fallback path: {validated_path} for item_id: {item_id}")
+        
+        # Ensure we have a header (fallback to item_path or item_type)
+        header = chunk.get("header")
+        if not header:
+            if item_path:
+                # Use the last segment of the item_path as header
+                header = item_path.split("::")[-1] if "::" in item_path else item_path
+            elif item_type:
+                header = f"{item_type} item"
+            else:
+                header = "Unknown item"
+        
         # Convert intelligence data to JSON strings for storage (Phase 5)
         safety_info = chunk.get("safety_info")
         if safety_info and isinstance(safety_info, dict):
@@ -215,11 +242,16 @@ async def _store_batch(
             feature_requirements_json = None
 
         # Map to actual database columns
+        # Ensure content is never None
+        content = chunk.get("doc", "")
+        if content is None:
+            content = ""
+        
         batch_data.append(
             (
-                chunk.get("item_path"),
-                chunk.get("header", ""),
-                chunk.get("doc", ""),  # content column
+                validated_path,  # Use validated path instead of raw item_path
+                header,  # Use header with fallback
+                content,  # content column (never None)
                 embedding_bytes,
                 chunk.get("item_type"),
                 chunk.get("signature"),
