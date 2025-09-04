@@ -1233,6 +1233,71 @@
           ],
           "impact": "Full Claude Code client compatibility restored. Resources now discoverable via standard MCP protocol. Foundation for adding more resources in future.",
           "debuggingTechnique": "Test with JSON-RPC protocol directly using resources/list and resources/read methods to verify proper MCP resource implementation"
+        },
+        {
+          "error": "Dependency Graph Analysis Returning Empty Dependencies",
+          "rootCause": "Dependencies were never stored in the database during ingestion pipeline. The ingestion process was parsing dependencies from Cargo.toml files but not persisting them to the database, causing dependency analysis tools to return empty results.",
+          "solution": "Added store_crate_dependencies function in storage.py to persist dependencies from parsed Cargo.toml files. Modified ingestion_orchestrator.py to download and parse Cargo.toml files, then store dependencies in reexports table with link_type='dependency' for proper relational tracking.",
+          "context": "Dependency graph analysis and migration suggestions were failing due to missing dependency data in database",
+          "lesson": "Ingestion pipelines must validate that all extracted data is properly persisted to database. Silent data loss during ingestion leads to downstream tool failures.",
+          "pattern": "Always verify database storage of parsed data with explicit validation queries during ingestion testing",
+          "dateEncountered": "2025-09-04",
+          "relatedFiles": ["src/docsrs_mcp/storage.py", "src/docsrs_mcp/ingestion_orchestrator.py"],
+          "codeExample": "def store_crate_dependencies(self, crate_name: str, version: str, dependencies: List[str]):\n    \"\"\"Store crate dependencies in the database\"\"\"\n    for dep_name in dependencies:\n        self.cursor.execute(\n            \"INSERT OR IGNORE INTO reexports (crate_name, version, item_path, target_path, link_type) VALUES (?, ?, ?, ?, ?)\",\n            (crate_name, version, f\"{crate_name}::{dep_name}\", dep_name, \"dependency\")\n        )",
+          "testingConfirmed": ["Dependencies now properly stored during ingestion", "Dependency analysis tools return populated results", "Migration suggestions work with actual dependency data"],
+          "preventionStrategy": "Add explicit validation steps in ingestion pipeline to verify all parsed data types are stored correctly in database"
+        },
+        {
+          "error": "Migration Suggestions Query Failing with Complex JOIN",
+          "rootCause": "Complex JOIN condition attempting to extract crate name from item_path string using SQL string functions. The query was trying to parse 'crate::item' format from item_path column which is fragile and failed with complex path structures.",
+          "solution": "Simplified query to use crate_metadata table directly instead of string parsing. Replaced string extraction with direct crate_metadata.id matching for more reliable and performant queries.",
+          "context": "Migration suggestion queries were failing due to overly complex JOIN conditions that attempted SQL string parsing",
+          "lesson": "Avoid complex string parsing in SQL queries when relational data is available through proper foreign keys. Direct table joins are more reliable and performant than string manipulation.",
+          "pattern": "Use proper relational database design with foreign keys instead of embedding identifiers in strings that require parsing",
+          "dateEncountered": "2025-09-04", 
+          "relatedFiles": ["src/docsrs_mcp/migration_service.py"],
+          "codeExample": "# BEFORE (failing string parsing):\nSELECT DISTINCT SUBSTR(item_path, 1, INSTR(item_path, '::') - 1) as crate_name\nFROM documentation d\nJOIN crate_metadata cm ON SUBSTR(d.item_path, 1, INSTR(d.item_path, '::') - 1) = cm.name\n\n# AFTER (direct table joins):\nSELECT DISTINCT cm.name as crate_name\nFROM documentation d\nJOIN crate_metadata cm ON d.crate_name = cm.name",
+          "testingConfirmed": ["Migration suggestions queries now execute successfully", "Query performance improved with direct table joins", "No more SQL string parsing errors"],
+          "preventionStrategy": "Design database schema to avoid embedding parseable identifiers in string fields. Use proper foreign key relationships for reliable queries."
+        },
+        {
+          "error": "MCP SDK Mode Lacks Health Monitoring",
+          "rootCause": "Health monitoring endpoints existed only for REST mode, not for stdio-based MCP servers. MCP SDK mode had no mechanism to check subsystem health or ingestion status, making debugging and monitoring difficult.",
+          "solution": "Added server_health and get_ingestion_status tools to mcp_sdk_server.py. Implemented comprehensive subsystem monitoring for database connectivity, memory usage, and pre-ingestion worker status through native MCP tool interface.",
+          "context": "Debugging MCP server issues was difficult without health monitoring capabilities in SDK mode",
+          "lesson": "All server modes should have equivalent monitoring capabilities regardless of communication protocol. Health monitoring is essential for both development and production debugging.",
+          "pattern": "Implement health monitoring tools as native MCP tools for stdio-based servers to maintain consistent monitoring capabilities across all deployment modes",
+          "dateEncountered": "2025-09-04",
+          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py"],
+          "codeExample": "@server.call_tool()\nasync def server_health(arguments: dict) -> list[types.TextContent]:\n    \"\"\"Get comprehensive server health status\"\"\"\n    try:\n        # Database health check\n        db_status = await check_database_health()\n        # Memory monitoring\n        memory_info = get_memory_usage()\n        # Worker status\n        worker_status = get_worker_health()\n        \n        return [types.TextContent(type=\"text\", text=json.dumps({\n            \"database\": db_status,\n            \"memory\": memory_info,\n            \"workers\": worker_status\n        }, indent=2))]",
+          "testingConfirmed": ["Health monitoring tools work in MCP SDK mode", "Comprehensive subsystem status available", "Debugging capabilities equivalent to REST mode"],
+          "preventionStrategy": "Always implement equivalent monitoring capabilities across all server communication modes"
+        },
+        {
+          "error": "Duplicate Tool Names (camelCase vs snake_case)",
+          "rootCause": "Historical migration left both camelCase and snake_case versions of tool names in the codebase. Tools like getDocumentationDetail, extractUsagePatterns, and generateLearningPath existed alongside their snake_case equivalents, causing client confusion and potential conflicts.",
+          "solution": "Removed camelCase duplicates: getDocumentationDetail, extractUsagePatterns, generateLearningPath. Standardized all tool names to follow Python snake_case conventions consistently across the MCP server implementation.",
+          "context": "MCP tool registration had duplicate entries with different naming conventions from incomplete refactoring",
+          "lesson": "API naming conventions must be consistent and complete. Partial migrations leave confusing duplicate interfaces that reduce user experience quality.",
+          "pattern": "When standardizing naming conventions, audit all tool definitions to ensure complete migration with no legacy duplicates remaining",
+          "dateEncountered": "2025-09-04",
+          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py", "src/docsrs_mcp/mcp_tools.py"],
+          "codeExample": "# REMOVED (duplicate camelCase versions):\n# @server.call_tool()\n# async def getDocumentationDetail(arguments: dict):\n# @server.call_tool() \n# async def extractUsagePatterns(arguments: dict):\n# @server.call_tool()\n# async def generateLearningPath(arguments: dict):\n\n# KEPT (standardized snake_case versions):\n@server.call_tool()\nasync def get_documentation_detail(arguments: dict):\n@server.call_tool()\nasync def extract_usage_patterns(arguments: dict):\n@server.call_tool()\nasync def generate_learning_path(arguments: dict):",
+          "testingConfirmed": ["No duplicate tool names in MCP tool list", "All tools follow snake_case convention", "Client tool discovery shows clean, consistent naming"],
+          "preventionStrategy": "Use automated linting to detect naming convention violations and ensure complete migration when standardizing APIs"
+        },
+        {
+          "error": "Cross-Reference Service TODO for Import Alternatives",
+          "rootCause": "The resolve_import method in cross-reference service had incomplete implementation marked with TODO comments. When users requested import alternatives, the service returned placeholder responses instead of actual alternative suggestions.",
+          "solution": "Implemented database query to find similar item paths with confidence scoring. Added fuzzy matching algorithm to identify alternative import paths and return them with type classification and confidence scores for user evaluation.",
+          "context": "Import resolution service was returning TODO placeholders instead of actual alternative import suggestions",
+          "lesson": "TODO markers in user-facing functionality create poor user experience. All user-accessible features should have complete implementations, even if they start with basic algorithms.",
+          "pattern": "Replace TODO implementations with functional algorithms before exposing features to users. Mark incomplete features as experimental rather than leaving TODO stubs.",
+          "dateEncountered": "2025-09-04",
+          "relatedFiles": ["src/docsrs_mcp/services/cross_reference_service.py"],
+          "codeExample": "async def resolve_import(self, item_path: str, context: str = None) -> Dict[str, Any]:\n    \"\"\"Find alternative import paths for the given item\"\"\"\n    # Query similar item paths from database\n    similar_items = await self.database.find_similar_paths(item_path, limit=10)\n    \n    alternatives = []\n    for item in similar_items:\n        # Calculate confidence score using fuzzy matching\n        confidence = fuzz.ratio(item_path, item['path']) / 100.0\n        alternatives.append({\n            'path': item['path'],\n            'crate': item['crate_name'],\n            'type': item['item_type'],\n            'confidence': confidence\n        })\n    \n    return {\n        'original_path': item_path,\n        'alternatives': sorted(alternatives, key=lambda x: x['confidence'], reverse=True)\n    }",
+          "testingConfirmed": ["Import alternatives now return actual suggestions", "Confidence scoring helps users evaluate options", "Fuzzy matching finds relevant alternative paths"],
+          "preventionStrategy": "Audit all TODO markers in user-facing code and implement basic functionality before feature release"
         }
       ]
     },

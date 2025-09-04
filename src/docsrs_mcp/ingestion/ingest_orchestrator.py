@@ -15,6 +15,7 @@ from typing import Any
 
 import aiohttp
 
+from ..cargo import parse_cargo_toml
 from ..database import (
     get_db_path,
     init_database,
@@ -22,6 +23,7 @@ from ..database import (
     migrate_add_ingestion_tracking,
     set_ingestion_status,
     store_crate_metadata,
+    store_crate_dependencies,
     store_modules,
 )
 from ..models import IngestionTier
@@ -333,6 +335,66 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
             crate_id = await store_crate_metadata(
                 db_path, crate_name, version, description
             )
+
+            # Fetch and store crate dependencies from Cargo.toml
+            if not is_stdlib:
+                try:
+                    # Download Cargo.toml for this crate
+                    cargo_url = f"https://docs.rs/crate/{crate_name}/{version if version != 'latest' else ''}/download"
+                    
+                    async with session.get(cargo_url) as response:
+                        if response.status == 200:
+                            import tempfile
+                            import tarfile
+                            import io
+                            
+                            # Download crate source
+                            crate_data = await response.read()
+                            
+                            # Extract Cargo.toml from the tarball
+                            with tarfile.open(fileobj=io.BytesIO(crate_data), mode='r:gz') as tar:
+                                # Find Cargo.toml in the archive
+                                cargo_toml_member = None
+                                for member in tar.getmembers():
+                                    if member.name.endswith('/Cargo.toml') and member.name.count('/') == 1:
+                                        cargo_toml_member = member
+                                        break
+                                
+                                if cargo_toml_member:
+                                    # Extract and parse Cargo.toml
+                                    cargo_toml_file = tar.extractfile(cargo_toml_member)
+                                    if cargo_toml_file:
+                                        # Write to temp file and parse
+                                        with tempfile.NamedTemporaryFile(mode='wb', suffix='.toml', delete=False) as tmp:
+                                            tmp.write(cargo_toml_file.read())
+                                            tmp_path = Path(tmp.name)
+                                        
+                                        try:
+                                            # Parse dependencies
+                                            cargo_data = parse_cargo_toml(tmp_path)
+                                            dependencies = []
+                                            
+                                            # Extract crate names and versions
+                                            for crate_spec in cargo_data.get("crates", []):
+                                                if "@" in crate_spec:
+                                                    name, ver = crate_spec.split("@", 1)
+                                                    dependencies.append({"name": name, "version": ver})
+                                                else:
+                                                    dependencies.append({"name": crate_spec, "version": "latest"})
+                                            
+                                            # Store dependencies
+                                            if dependencies:
+                                                await store_crate_dependencies(
+                                                    db_path, crate_id, crate_name, dependencies
+                                                )
+                                                logger.info(f"Stored {len(dependencies)} dependencies for {crate_name}")
+                                        finally:
+                                            # Clean up temp file
+                                            tmp_path.unlink(missing_ok=True)
+                            
+                except Exception as e:
+                    logger.warning(f"Could not fetch or parse Cargo.toml for {crate_name}: {e}")
+                    # Continue without failing ingestion
 
             # Set initial status
             await set_ingestion_status(db_path, crate_id, "started")

@@ -67,6 +67,7 @@ from .search import (
 # Re-export from storage module
 from .storage import (
     store_crate_metadata,
+    store_crate_dependencies,
     store_modules,
     store_reexports,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "migrate_reexports_for_crossrefs",
     # Storage module
     "store_crate_metadata",
+    "store_crate_dependencies",
     "store_modules",
     "store_reexports",
     # Search module

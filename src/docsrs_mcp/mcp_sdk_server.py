@@ -1000,6 +1000,159 @@ async def get_unsafe_items(
         raise
 
 
+# Health Monitoring Tools
+async def server_health(include_subsystems: str = "true", include_metrics: str = "false") -> dict:
+    """Get comprehensive server health status including subsystems.
+    
+    Args:
+        include_subsystems: Include detailed subsystem status ('true'/'false')
+        include_metrics: Include performance metrics ('true'/'false')
+    
+    Returns:
+        Dictionary with health status and optional subsystem details
+    """
+    from datetime import datetime
+    import time
+    from pathlib import Path
+    
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "docsrs-mcp",
+        "version": "0.1.0",
+        "mode": "mcp_sdk",
+    }
+    
+    if include_subsystems.lower() == "true":
+        subsystems = {}
+        
+        # Database health - check cache directory
+        try:
+            from .config import CACHE_DIR
+            cache_count = len(list(CACHE_DIR.glob("*/*.db")))
+            subsystems["database"] = {
+                "status": "healthy",
+                "cache_count": cache_count,
+                "cache_dir": str(CACHE_DIR),
+            }
+        except Exception as e:
+            subsystems["database"] = {"status": "unhealthy", "error": str(e)}
+        
+        # Memory usage
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            subsystems["memory"] = {
+                "status": "healthy",
+                "rss_mb": memory_info.rss / 1024 / 1024,
+                "vms_mb": memory_info.vms / 1024 / 1024,
+            }
+        except ImportError:
+            subsystems["memory"] = {"status": "unavailable", "note": "psutil not installed"}
+        except Exception as e:
+            subsystems["memory"] = {"status": "unhealthy", "error": str(e)}
+        
+        # Pre-ingestion worker status
+        try:
+            from .popular_crates import get_popular_crates_status, _pre_ingestion_worker, WorkerState
+            
+            popular_status = get_popular_crates_status()
+            if popular_status:
+                subsystems["pre_ingestion"] = popular_status
+                
+                if _pre_ingestion_worker:
+                    worker_state = _pre_ingestion_worker._state
+                    if worker_state == WorkerState.RUNNING:
+                        subsystems["pre_ingestion"]["status"] = "active"
+                    elif worker_state == WorkerState.PAUSED:
+                        subsystems["pre_ingestion"]["status"] = "paused"
+                    else:
+                        subsystems["pre_ingestion"]["status"] = "stopped"
+        except Exception as e:
+            subsystems["pre_ingestion"] = {"status": "unavailable", "error": str(e)}
+        
+        health_status["subsystems"] = subsystems
+    
+    if include_metrics.lower() == "true":
+        metrics = {}
+        
+        # Basic performance metrics
+        try:
+            import time
+            start = time.time()
+            # Simple database query to measure responsiveness
+            from .config import CACHE_DIR
+            test_db = CACHE_DIR / "test" / "test.db"
+            if test_db.exists():
+                metrics["db_response_ms"] = (time.time() - start) * 1000
+            else:
+                metrics["db_response_ms"] = None
+        except Exception:
+            metrics["db_response_ms"] = None
+        
+        health_status["metrics"] = metrics
+    
+    return health_status
+
+
+async def get_ingestion_status(include_progress: str = "true") -> dict:
+    """Get detailed pre-ingestion progress and statistics.
+    
+    Args:
+        include_progress: Include detailed progress breakdown ('true'/'false')
+    
+    Returns:
+        Dictionary with ingestion status and progress details
+    """
+    from .popular_crates import _pre_ingestion_worker, WorkerState, get_popular_crates_status
+    
+    status = {
+        "worker_running": False,
+        "status": "not_initialized",
+    }
+    
+    # Get popular crates status
+    popular_status = get_popular_crates_status()
+    if popular_status:
+        status.update(popular_status)
+    
+    # Check worker state
+    if _pre_ingestion_worker:
+        worker_state = _pre_ingestion_worker._state
+        status["worker_running"] = worker_state == WorkerState.RUNNING
+        
+        if worker_state == WorkerState.RUNNING:
+            status["status"] = "active"
+        elif worker_state == WorkerState.PAUSED:
+            status["status"] = "paused"
+        elif worker_state == WorkerState.STOPPED:
+            status["status"] = "stopped"
+        else:
+            status["status"] = "idle"
+        
+        if include_progress.lower() == "true" and hasattr(_pre_ingestion_worker, 'crate_progress'):
+            # Include detailed progress information
+            progress = _pre_ingestion_worker.crate_progress
+            status["progress"] = {
+                "total": progress.get("total", 0),
+                "completed": progress.get("completed", 0),
+                "failed": progress.get("failed", 0),
+                "skipped": progress.get("skipped", 0),
+                "current": progress.get("current"),
+                "percent": progress.get("percent", 0),
+            }
+            
+            # Calculate ETA if possible
+            if progress.get("completed", 0) > 0 and progress.get("total", 0) > 0:
+                elapsed_per_crate = _pre_ingestion_worker._total_elapsed_time / progress["completed"]
+                remaining = progress["total"] - progress["completed"]
+                eta_seconds = elapsed_per_crate * remaining
+                status["progress"]["eta_seconds"] = eta_seconds
+    
+    return status
+
+
 # Server initialization
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
@@ -1570,91 +1723,6 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["crate_name", "item_path"],
             },
         ),
-        types.Tool(
-            name="getDocumentationDetail",
-            description="Get documentation with progressive detail levels (summary/detailed/expert)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "crate_name": {
-                        "type": "string",
-                        "description": "Name of the Rust crate",
-                    },
-                    "item_path": {
-                        "type": "string",
-                        "description": "Path to the item (e.g., 'serde::Serialize')",
-                    },
-                    "detail_level": {
-                        "type": "string",
-                        "default": "summary",
-                        "description": "Level of detail: summary, detailed, or expert",
-                    },
-                    "version": {
-                        "type": "string",
-                        "default": "latest",
-                        "description": "Specific version or 'latest'",
-                    },
-                },
-                "required": ["crate_name", "item_path"],
-            },
-        ),
-        types.Tool(
-            name="extractUsagePatterns",
-            description="Extract common usage patterns from documentation and examples",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "crate_name": {
-                        "type": "string",
-                        "description": "Name of the Rust crate",
-                    },
-                    "version": {
-                        "type": "string",
-                        "default": "latest",
-                        "description": "Specific version or 'latest'",
-                    },
-                    "limit": {
-                        "type": "string",
-                        "default": "10",
-                        "description": "Maximum number of patterns to return",
-                    },
-                    "min_frequency": {
-                        "type": "string",
-                        "default": "2",
-                        "description": "Minimum frequency for a pattern to be included",
-                    },
-                },
-                "required": ["crate_name"],
-            },
-        ),
-        types.Tool(
-            name="generateLearningPath",
-            description="Generate learning path for API migration or onboarding",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "crate_name": {
-                        "type": "string",
-                        "description": "Name of the Rust crate",
-                    },
-                    "from_version": {
-                        "type": "string",
-                        "description": "Starting version (omit for new users)",
-                    },
-                    "to_version": {
-                        "type": "string",
-                        "default": "latest",
-                        "description": "Target version",
-                    },
-                    "focus_areas": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional list of focus areas",
-                    },
-                },
-                "required": ["crate_name"],
-            },
-        ),
         # Phase 5: Code Intelligence Tools
         types.Tool(
             name="get_code_intelligence",
@@ -1726,6 +1794,40 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["crate_name"],
             },
         ),
+        # Health Monitoring Tools
+        types.Tool(
+            name="server_health",
+            description="Get comprehensive server health status including subsystems",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "include_subsystems": {
+                        "type": "string",
+                        "default": "true",
+                        "description": "Include detailed subsystem status",
+                    },
+                    "include_metrics": {
+                        "type": "string",
+                        "default": "false",
+                        "description": "Include performance metrics",
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="get_ingestion_status",
+            description="Get detailed pre-ingestion progress and statistics",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "include_progress": {
+                        "type": "string",
+                        "default": "true",
+                        "description": "Include detailed progress breakdown",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -1782,12 +1884,6 @@ async def handle_call_tool(
             result = await suggest_migrations_handler(**arguments)
         elif name == "trace_reexports":
             result = await trace_reexports_handler(**arguments)
-        elif name == "getDocumentationDetail":
-            result = await get_documentation_detail(**arguments)
-        elif name == "extractUsagePatterns":
-            result = await extract_usage_patterns(**arguments)
-        elif name == "generateLearningPath":
-            result = await generate_learning_path(**arguments)
         # Phase 5: Code Intelligence Tools
         elif name == "get_code_intelligence":
             result = await get_code_intelligence(**arguments)
@@ -1795,6 +1891,11 @@ async def handle_call_tool(
             result = await get_error_types(**arguments)
         elif name == "get_unsafe_items":
             result = await get_unsafe_items(**arguments)
+        # Health Monitoring Tools
+        elif name == "server_health":
+            result = await server_health(**arguments)
+        elif name == "get_ingestion_status":
+            result = await get_ingestion_status(**arguments)
         else:
             raise ValueError(f"Unknown tool: {name}")
 

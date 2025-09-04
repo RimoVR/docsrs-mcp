@@ -87,15 +87,15 @@ graph LR
     subgraph "docsrs_mcp Package"
         subgraph "Service Layer"
             CRATE_SVC[crate_service.py<br/>CrateService class<br/>FIXED: search_examples method dictionary handling<br/>Proper mapping to CodeExample model requirements<br/>Search, documentation, versions<br/>Transport-agnostic business logic<br/>_build_module_tree() transformation method]
-            INGEST_SVC[ingestion_service.py<br/>IngestionService class<br/>Pipeline management<br/>Pre-ingestion control<br/>Cargo file processing]
+            INGEST_SVC[ingestion_service.py<br/>IngestionService class<br/>Pipeline management<br/>Pre-ingestion control<br/>Cargo file processing<br/>Enhanced with dependency relationship storage]
             TYPE_NAV_SVC[type_navigation_service.py<br/>TypeNavigationService class<br/>Code intelligence operations<br/>get_item_intelligence(), search_by_safety()<br/>get_error_catalog() methods]
-            MCP_RUNNER[mcp_runner.py<br/>MCPServerRunner class<br/>Memory leak mitigation<br/>1000 calls/1GB restart<br/>Process health monitoring]
+            MCP_RUNNER[mcp_runner.py<br/>MCPServerRunner class<br/>Memory leak mitigation<br/>1000 calls/1GB restart<br/>Process health monitoring<br/>Enhanced with comprehensive health probing]
             PARAM_VAL[parameter_validation.py<br/>String parameter utilities<br/>Type conversion functions<br/>Boolean/integer validation]
             VALIDATION[validation.py<br/>Centralized validation utilities<br/>Performance-optimized patterns<br/>MCP client compatibility]
         end
         
         subgraph "MCP Implementations"
-            OFFICIAL_SVR[mcp_sdk_server.py<br/>Official MCP SDK 1.13.1 - Default<br/>Native @server.tool() decorators<br/>Complete MCP resources support<br/>All 10 tools + resource handlers]
+            OFFICIAL_SVR[mcp_sdk_server.py<br/>Official MCP SDK 1.13.1 - Default<br/>Native @server.tool() decorators<br/>Complete MCP resources support<br/>All tools + resource handlers<br/>Enhanced with server_health and get_ingestion_status tools]
             FASTMCP_SVR[fastmcp_server.py<br/>FastMCP 2.11.1 - Deprecated<br/>Schema override support<br/>Legacy compatibility layer]
         end
         
@@ -130,7 +130,7 @@ graph LR
                 SIG_EXTRACTOR[signature_extractor.py<br/>Metadata extraction (~365 LOC)<br/>Complete item extraction<br/>Macro extraction patterns<br/>Enhanced schema validation]
                 INTELLIGENCE_EXTRACTOR[intelligence_extractor.py<br/>Code Intelligence Extraction<br/>Error types, safety info, feature requirements<br/>Pre-compiled regex patterns<br/>Session-based caching mechanism]
                 CODE_EXAMPLES[code_examples.py<br/>Code example extraction (~343 LOC)<br/>FIXED: Character fragmentation bug at lines 234-242<br/>FIXED: Vector sync step for vec_example_embeddings<br/>Language detection via pygments<br/>30% confidence threshold<br/>Batch processing for embeddings sync<br/>JSON structure with metadata]
-                STORAGE_MGR[storage_manager.py<br/>Batch embedding storage (~296 LOC)<br/>FIXED: NULL constraint protection for content field<br/>Enhanced robustness with explicit NULL checks<br/>Transaction management<br/>Streaming batch inserts<br/>Memory-aware chunking]
+                STORAGE_MGR[storage_manager.py<br/>Batch embedding storage (~296 LOC)<br/>FIXED: NULL constraint protection for content field<br/>Enhanced robustness with explicit NULL checks<br/>Transaction management<br/>Streaming batch inserts<br/>Memory-aware chunking<br/>NEW: store_crate_dependencies function for dependency relationships]
             end
             
             ING[ingest.py<br/>Backward compatibility layer<br/>Re-exports from modular components<br/>Maintains existing API surface]
@@ -309,7 +309,7 @@ The system now supports two parallel MCP implementations to ensure compatibility
 - **Critical Fix Applied**: Proper logging configuration to stderr prevents MCP tool failures
 
 **Tool Migration Status**
-All 10 tools successfully migrated:
+All tools successfully migrated and cleaned up:
 1. `search_items` - Documentation search with embedding similarity
 2. `get_item_doc` - Individual item documentation retrieval
 3. `get_crate_summary` - Crate overview and metadata
@@ -320,6 +320,10 @@ All 10 tools successfully migrated:
 8. `get_popular_crates` - Popular crates listing
 9. `get_ingestion_stats` - Pipeline status monitoring
 10. `get_version_info` - Version-specific information
+11. `server_health` - Comprehensive health monitoring for MCP SDK mode
+12. `get_ingestion_status` - Detailed ingestion status reporting
+
+**Tool Name Cleanup**: Removed duplicate camelCase tool names (`getDocumentationDetail`, `extractUsagePatterns`, `generateLearningPath`) in favor of consistent snake_case Python conventions following Python naming standards.
 
 ### MCP Resources Implementation
 
@@ -681,6 +685,7 @@ src/docsrs_mcp/
 │   ├── connection.py        # Database connection management, retry logic, performance utilities (~259 LOC)
 │   ├── schema.py            # Database schema initialization and migrations (~542 LOC)
 │   ├── storage.py           # Data insertion operations for crates, modules, re-exports (~155 LOC)
+│   │                        # ENHANCED: store_crate_dependencies function for Cargo.toml dependency relationships
 │   ├── search.py            # Vector search operations using sqlite-vec with caching (~504 LOC)
 │   ├── retrieval.py         # Database retrieval operations and queries (~326 LOC)
 │   ├── ingestion.py         # Ingestion status tracking and recovery support (~363 LOC)
@@ -1259,6 +1264,8 @@ sequenceDiagram
         Worker->>Worker: Validate item paths with fallback generation
         Worker->>Worker: Parse complete rustdoc structure
         Worker->>Worker: Extract module hierarchy (build_module_hierarchy)
+        Worker->>Worker: Parse Cargo.toml for dependency relationships
+        Worker->>DB: Store dependency relationships to reexports table (link_type='dependency')
         Worker->>Worker: Extract and store re-export mappings
         Worker->>Worker: Extract cross-references from links field
         Worker->>DB: Store re-export mappings to reexports table
@@ -2543,9 +2550,9 @@ graph TD
     end
     
     subgraph "Core Operations"
-        RESOLVE[resolve_import()<br/>Import path resolution<br/>Confidence scoring<br/>Alternative suggestions]
+        RESOLVE[resolve_import()<br/>Import path resolution<br/>Confidence scoring<br/>Alternative suggestions<br/>COMPLETED: Database query implementation<br/>with similarity matching and confidence scoring]
         GRAPH[get_dependency_graph()<br/>Path-based JOIN operations<br/>String extraction from item_path<br/>Cycle detection via DFS<br/>Production schema compatible]
-        MIGRATE[suggest_migrations()<br/>UNION of LEFT JOINs pattern<br/>Embeddings table integration<br/>Breaking change detection<br/>SQLite-compatible operations]
+        MIGRATE[suggest_migrations()<br/>FIXED: Complex JOIN condition simplified<br/>Direct crate_metadata table usage<br/>Returns MigrationSuggestionsResponse object<br/>SQLite-compatible operations]
         TRACE[trace_reexports()<br/>alias_path/actual_path columns<br/>Path-based relationship mapping<br/>Confidence calculation<br/>Schema-aligned queries]
     end
     
@@ -7999,6 +8006,20 @@ if os.getenv("DOCSRS_EMBEDDINGS_WARMUP_ENABLED", "true").lower() == "true":
 ### Health Monitoring Integration
 
 The embedding warmup system integrates with the existing health monitoring infrastructure to provide visibility into warmup status.
+
+#### Enhanced Health Probing for MCP SDK Mode
+
+The MCP SDK server now includes comprehensive health monitoring tools specifically designed for stdio-based MCP servers:
+
+**New Health Tools**:
+- `server_health`: Comprehensive health monitoring including database, memory, and pre-ingestion worker status
+- `get_ingestion_status`: Detailed ingestion status reporting with subsystem checks
+
+**Health Monitoring Architecture**:
+- **Database Health**: Connection status, query performance, and schema integrity
+- **Memory Health**: Process memory usage, leak detection, and garbage collection status  
+- **Pre-ingestion Health**: Worker status, queue depth, and processing rates
+- **STDIO Compatibility**: Health data delivered through MCP JSON-RPC protocol
 
 **Health Endpoint Response**:
 ```json

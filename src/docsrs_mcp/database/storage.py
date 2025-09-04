@@ -98,6 +98,48 @@ async def store_reexports(db_path: Path, crate_id: int, reexports: list[dict]) -
         else:
             logger.info(f"Stored {reexport_count} re-export mappings")
 
+async def store_crate_dependencies(
+    db_path: Path, 
+    crate_id: int, 
+    crate_name: str, 
+    dependencies: list[dict]
+) -> None:
+    """Store crate-to-crate dependency relationships.
+    
+    Args:
+        db_path: Path to database
+        crate_id: ID of the parent crate
+        crate_name: Name of the parent crate
+        dependencies: List of dependency dicts from Cargo.toml parsing
+                     Each dict contains 'name' and 'version' keys
+    """
+    if not dependencies:
+        return
+    
+    import aiosqlite
+    
+    # Convert dependencies to reexport format for storage
+    dependency_data = []
+    for dep in dependencies:
+        dep_name = dep.get("name", "").replace("@", "")
+        dep_version = dep.get("version", "latest")
+        
+        # Create entries for dependency relationships
+        # Format: parent_crate depends on dep_crate
+        dependency_data.append({
+            "alias_path": f"{crate_name}::__dependency::{dep_name}",
+            "actual_path": f"{dep_name}",
+            "is_glob": False,
+            "link_type": "dependency",
+            "link_text": f"{dep_name}@{dep_version}",
+            "confidence_score": 1.0
+        })
+    
+    # Store using the existing store_reexports function
+    await store_reexports(db_path, crate_id, dependency_data)
+    
+    logger.info(f"Stored {len(dependency_data)} dependency relationships for {crate_name}")
+
 
 async def store_modules(db_path: Path, crate_id: int, modules: dict) -> None:
     """Store module hierarchy for a crate.
@@ -151,5 +193,6 @@ async def store_modules(db_path: Path, crate_id: int, modules: dict) -> None:
 __all__ = [
     "store_crate_metadata",
     "store_reexports",
+    "store_crate_dependencies",
     "store_modules",
 ]

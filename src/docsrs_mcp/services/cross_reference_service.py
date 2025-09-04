@@ -7,6 +7,10 @@ import time
 import aiosqlite
 
 from .. import fuzzy_resolver
+from ..models.cross_references import (
+    MigrationSuggestion,
+    MigrationSuggestionsResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,9 +137,58 @@ class CrossReferenceService:
 
         # Get alternatives if requested or if no exact match
         if include_alternatives or not resolved_path:
-            # For now, provide empty alternatives
-            # TODO: Implement proper cross-reference lookup when schema is ready
+            # Query database for alternative import paths
             alternatives = []
+            try:
+                import aiosqlite
+                async with aiosqlite.connect(self.db_path) as conn:
+                    # Look for items with similar names in the database
+                    query = """
+                    SELECT DISTINCT e.item_path, 
+                           r.alias_path,
+                           CASE 
+                               WHEN e.item_path = ? THEN 1.0
+                               WHEN e.item_path LIKE ? THEN 0.8
+                               WHEN e.item_path LIKE ? THEN 0.6
+                               ELSE 0.4
+                           END as confidence
+                    FROM embeddings e
+                    LEFT JOIN reexports r ON e.item_path = r.actual_path
+                    WHERE e.item_path LIKE ?
+                       OR r.alias_path LIKE ?
+                    ORDER BY confidence DESC
+                    LIMIT 5
+                    """
+                    
+                    # Create search patterns
+                    exact_pattern = import_path
+                    prefix_pattern = f"{crate_name}::{import_path.split('::')[-1] if '::' in import_path else import_path}"
+                    suffix_pattern = f"%::{import_path.split('::')[-1] if '::' in import_path else import_path}"
+                    general_pattern = f"%{import_path.split('::')[-1] if '::' in import_path else import_path}%"
+                    
+                    cursor = await conn.execute(
+                        query,
+                        (exact_pattern, prefix_pattern, suffix_pattern, general_pattern, general_pattern)
+                    )
+                    rows = await cursor.fetchall()
+                    
+                    for path, alias, conf in rows:
+                        # Skip the already resolved path
+                        if path == resolved_path:
+                            continue
+                        
+                        alt = {
+                            "path": path,
+                            "confidence": conf,
+                            "type": "direct" if not alias else "reexport",
+                        }
+                        if alias:
+                            alt["alias"] = alias
+                        alternatives.append(alt)
+                    
+            except Exception as e:
+                logger.warning(f"Failed to get alternatives for {import_path}: {e}")
+            
             result["alternatives"] = alternatives
 
             # If no resolved path was found, return the original path
@@ -349,109 +402,109 @@ class CrossReferenceService:
 
     async def suggest_migrations(
         self, crate_name: str, from_version: str, to_version: str
-    ) -> list[dict]:
-        """Suggest migration paths for breaking changes.
-
+    ) -> MigrationSuggestionsResponse:
+        """Suggest migration paths between versions.
+        
         Args:
             crate_name: Name of the crate
-            from_version: Starting version
+            from_version: Source version
             to_version: Target version
-
+            
         Returns:
-            List of migration suggestions
+            Migration suggestions with confidence scores
         """
         suggestions = []
-
+        
         async with aiosqlite.connect(self.db_path) as conn:
-            # Modified query to use embeddings table and UNION approach for SQLite compatibility
-            # SQLite doesn't support FULL OUTER JOIN, so we use UNION of LEFT JOINs
+            # Simplified query that works with the actual schema
+            # Since each database is per crate, we just need to compare items between versions
             query = """
             WITH old_version_items AS (
                 SELECT DISTINCT e.item_path, e.signature, e.item_type
                 FROM embeddings e
-                JOIN crate_metadata cm ON 
-                    SUBSTR(e.item_path, 1, INSTR(e.item_path || '::', '::') - 1) = cm.name
-                WHERE cm.name = ? AND cm.version = ?
+                JOIN crate_metadata cm ON cm.id = (
+                    SELECT id FROM crate_metadata 
+                    WHERE name = ? AND version = ?
+                    LIMIT 1
+                )
             ),
             new_version_items AS (
                 SELECT DISTINCT e.item_path, e.signature, e.item_type
                 FROM embeddings e
-                JOIN crate_metadata cm ON 
-                    SUBSTR(e.item_path, 1, INSTR(e.item_path || '::', '::') - 1) = cm.name
-                WHERE cm.name = ? AND cm.version = ?
+                JOIN crate_metadata cm ON cm.id = (
+                    SELECT id FROM crate_metadata 
+                    WHERE name = ? AND version = ?
+                    LIMIT 1
+                )
             )
             SELECT * FROM (
                 -- Items that were removed
                 SELECT 
-                    o.item_path as old_path,
+                    ovi.item_path as old_path,
                     NULL as new_path,
                     'removed' as change_type,
                     0.9 as confidence
-                FROM old_version_items o
-                LEFT JOIN new_version_items n ON o.item_path = n.item_path
-                WHERE n.item_path IS NULL
+                FROM old_version_items ovi
+                LEFT JOIN new_version_items nvi ON ovi.item_path = nvi.item_path
+                WHERE nvi.item_path IS NULL
                 
-                UNION ALL
+                UNION
                 
                 -- Items that were added
                 SELECT 
                     NULL as old_path,
-                    n.item_path as new_path,
+                    nvi.item_path as new_path,
                     'added' as change_type,
                     0.9 as confidence
-                FROM new_version_items n
-                LEFT JOIN old_version_items o ON n.item_path = o.item_path
-                WHERE o.item_path IS NULL
+                FROM new_version_items nvi
+                LEFT JOIN old_version_items ovi ON nvi.item_path = ovi.item_path
+                WHERE ovi.item_path IS NULL
                 
-                UNION ALL
+                UNION
                 
-                -- Items that may have been renamed (similar signatures)
+                -- Items with signature changes
                 SELECT 
-                    o.item_path as old_path,
-                    n.item_path as new_path,
-                    'renamed' as change_type,
+                    ovi.item_path as old_path,
+                    nvi.item_path as new_path,
+                    'modified' as change_type,
                     0.7 as confidence
-                FROM old_version_items o
-                CROSS JOIN new_version_items n
-                WHERE o.item_path != n.item_path
-                  AND o.item_type = n.item_type
-                  AND o.signature IS NOT NULL 
-                  AND n.signature IS NOT NULL
-                  AND o.signature = n.signature
-                  AND NOT EXISTS (
-                      SELECT 1 FROM new_version_items n2 
-                      WHERE n2.item_path = o.item_path
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM old_version_items o2 
-                      WHERE o2.item_path = n.item_path
-                  )
-            )
-            LIMIT 20;
+                FROM old_version_items ovi
+                JOIN new_version_items nvi ON ovi.item_path = nvi.item_path
+                WHERE ovi.signature != nvi.signature OR 
+                      (ovi.signature IS NULL AND nvi.signature IS NOT NULL) OR
+                      (ovi.signature IS NOT NULL AND nvi.signature IS NULL)
+            ) LIMIT 100
             """
-
+            
             try:
                 cursor = await conn.execute(
                     query, (crate_name, from_version, crate_name, to_version)
                 )
                 rows = await cursor.fetchall()
-
+                
                 for old_path, new_path, change_type, confidence in rows:
-                    suggestion = {
-                        "old_path": old_path or "",
-                        "new_path": new_path or "",
-                        "change_type": change_type,
-                        "confidence": confidence,
-                    }
+                    suggestion = MigrationSuggestion(
+                        old_path=old_path,
+                        new_path=new_path,
+                        change_type=change_type,
+                        confidence=confidence,
+                        notes=self._generate_migration_notes(change_type, old_path, new_path)
+                    )
                     suggestions.append(suggestion)
+                    
             except Exception as e:
-                logger.warning(f"Migration suggestion query failed: {e}")
+                logger.warning(f"Database query failed, using pattern-based fallback: {e}")
                 # Fallback to pattern-based suggestions
-                suggestions = self._pattern_based_migrations(
+                suggestions = await self._get_pattern_based_suggestions(
                     crate_name, from_version, to_version
                 )
-
-        return suggestions
+        
+        return MigrationSuggestionsResponse(
+            crate_name=crate_name,
+            from_version=from_version,
+            to_version=to_version,
+            suggestions=suggestions
+        )
 
     def _pattern_based_migrations(
         self, crate_name: str, from_version: str, to_version: str
