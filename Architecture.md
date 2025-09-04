@@ -340,6 +340,24 @@ The MCP SDK server provides complete resource endpoint support as defined in the
   - Returns PopularCrate objects with name, version, downloads, and description fields
   - Leverages existing popular crates management infrastructure
 
+#### Server Initialization Requirements
+
+**Capability Declaration** (Critical):
+- Resources must be explicitly declared in InitializationOptions during server startup
+- Required configuration in mcp_sdk_server.py:
+```python
+InitializationOptions(
+    server_name="docsrs-mcp",
+    server_version="0.1.0",
+    capabilities={
+        "tools": {},
+        "resources": {},  # Required for resource handlers to work
+    },
+)
+```
+- Without this declaration, resource handlers won't be accessible even if properly implemented
+- This enables the MCP protocol capability negotiation during client-server handshake
+
 #### Technical Implementation Details
 
 **Key Imports Added**:

@@ -12,7 +12,6 @@ from mcp.server import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
-from mcp.types import Resource
 from pydantic import AnyUrl
 
 from .models import (
@@ -1806,7 +1805,7 @@ async def handle_call_tool(
 
 
 @server.list_resources()
-async def handle_list_resources() -> list[Resource]:
+async def handle_list_resources() -> list[types.Resource]:
     """List available resources."""
     try:
         # Import config here to avoid circular imports
@@ -1815,7 +1814,7 @@ async def handle_list_resources() -> list[Resource]:
         resources = []
         for resource_config in MCP_RESOURCES_CONFIG:
             resources.append(
-                Resource(
+                types.Resource(
                     uri=resource_config["uri"],
                     name=resource_config["name"],
                     description=resource_config["description"],
@@ -2010,7 +2009,10 @@ async def run_sdk_server():
             InitializationOptions(
                 server_name="docsrs-mcp",
                 server_version="0.1.0",
-                capabilities={"tools": {}},
+                capabilities={
+                    "tools": {},
+                    "resources": {},
+                },
             ),
         )
     except Exception as e:

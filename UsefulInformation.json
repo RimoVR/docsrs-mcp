@@ -1024,6 +1024,18 @@
           "debuggingTechnique": "Check MCP client logs for capability negotiation during handshake; verify that server declares 'tools' in capabilities object during initialization"
         },
         {
+          "error": "MCP resources handlers implemented but not working with Claude Code client",
+          "rootCause": "Server initialization missing resources capability declaration in InitializationOptions. MCP resources handlers (@server.list_resources and @server.read_resource) were correctly implemented but server didn't advertise resources capability to clients during handshake.",
+          "solution": "Added 'resources': {} to capabilities alongside 'tools': {} in InitializationOptions at src/docsrs_mcp/mcp_sdk_server.py line 2013-2016",
+          "context": "MCP resources handlers were implemented and working in isolation but Claude Code client couldn't discover or use them because server didn't declare resources capability",
+          "lesson": "MCP protocol requires explicit capability declaration for all features (tools, resources, etc.) during server initialization. Even perfectly implemented handlers won't work without proper capability advertisement.",
+          "pattern": "Always declare all implemented capabilities in InitializationOptions: capabilities={'tools': {}, 'resources': {}} when server provides both tools and resources",
+          "dateEncountered": "2025-09-04",
+          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py"],
+          "codeExample": "# Before - Missing resources capability:\nInitializationOptions(\n    server_name='docsrs-mcp',\n    server_version='0.1.0',\n    capabilities={'tools': {}},  # Only tools declared\n)\n\n# After - Fixed with resources capability:\nInitializationOptions(\n    server_name='docsrs-mcp',\n    server_version='0.1.0',\n    capabilities={\n        'tools': {},\n        'resources': {},  # Added resources capability\n    },\n)",
+          "debuggingTechnique": "Test with actual MCP JSON-RPC protocol to identify capability negotiation issues; check client logs for capability discovery failures"
+        },
+        {
           "error": "SearchCache TypeError 'get_cache_stats() not found'",
           "rootCause": "Cache statistics method name mismatch between expected interface and implementation",
           "solution": "Add wrapper method get_cache_stats() that calls get_stats()",
