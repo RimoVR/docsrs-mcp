@@ -98,16 +98,25 @@ class DependencyFilter:
         if len(self._dependencies) % 1000 == 0:
             self._save_cache()
 
-    def is_dependency(self, module_path: str) -> bool:
+    def is_dependency(
+        self, module_path: str, crate_name: str | None = None
+    ) -> bool:
         """
         Check if a module is a dependency.
 
         Args:
             module_path: Module path to check
+            crate_name: Optional crate name for crate-specific lookup
 
         Returns:
             True if the module is a dependency
         """
+        # If crate_name is provided, check crate-specific dependencies first
+        if crate_name and crate_name in self._crate_dependencies:
+            if module_path in self._crate_dependencies[crate_name]:
+                return True
+
+        # Fall back to global dependencies check
         return module_path in self._dependencies
 
     def add_dependencies_from_rustdoc(

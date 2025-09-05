@@ -234,7 +234,7 @@ The docsrs-mcp server implements a service layer pattern that decouples business
 
 #### Core Services
 
-- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration. **Critical Fix Applied**: Implements `_build_module_tree()` helper method that transforms flat database results into hierarchical ModuleTreeNode structures, resolving Pydantic validation errors by properly fulfilling service layer data transformation responsibility. **Service Layer Fix**: Fixed search_examples method to properly handle dictionary results from search_example_embeddings, correctly mapping fields to CodeExample model requirements.
+- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration via `get_dependency_filter()` global instance for improved performance and cache utilization. **Critical Fix Applied**: Implements `_build_module_tree()` helper method that transforms flat database results into hierarchical ModuleTreeNode structures, resolving Pydantic validation errors by properly fulfilling service layer data transformation responsibility. **Service Layer Fix**: Fixed search_examples method to properly handle dictionary results from search_example_embeddings, correctly mapping fields to CodeExample model requirements.
 - **IngestionService**: Manages the complete ingestion pipeline, pre-ingestion workflows, and cargo file processing
 - **CrossReferenceService**: **Phase 6 Enhancement**: Provides advanced cross-reference operations including import resolution, dependency graph analysis, migration suggestions, and re-export tracing. Implements circuit breaker pattern for resilience, LRU cache with 5-minute TTL for performance, and DFS algorithms for cycle detection in dependency graphs.
 - **Transport Layer Decoupling**: Business logic is independent of whether accessed via MCP or REST
@@ -8892,23 +8892,30 @@ The new `dependency_filter.py` module provides efficient dependency tracking and
 The `DependencyFilter` class implements set-based dependency management with persistent caching:
 
 **Core Implementation**:
-- **Set-Based Storage**: Uses Python `set()` for O(1) lookup performance
+- **Set-Based Storage**: Uses Python `set()` for O(1) lookup performance  
+- **Dual Storage Architecture**: Maintains both global `_dependencies` set and crate-specific `_crate_dependencies` mapping
 - **JSON Persistence**: Caches dependency list at `/tmp/docsrs_deps.json`
 - **Lazy Loading**: Dependencies loaded on first access to minimize startup overhead
 - **Thread Safety**: Designed for concurrent access in async environment
+
+**Data Structures**:
+- **`_dependencies`**: Global set of all known dependencies for fallback lookup
+- **`_crate_dependencies`**: Dict mapping crate names to their specific dependency sets for targeted filtering
 
 **Key Methods**:
 ```python
 class DependencyFilter:
     def __init__(self):
         self._dependencies: Optional[Set[str]] = None
+        self._crate_dependencies: Optional[Dict[str, Set[str]]] = None
         self._cache_path = "/tmp/docsrs_deps.json"
     
     def add_dependency(self, crate_name: str) -> None:
         """Add crate to dependency set with persistence."""
     
-    def is_dependency(self, crate_name: str) -> bool:
-        """O(1) dependency lookup."""
+    def is_dependency(self, module_path: str, crate_name: str | None = None) -> bool:
+        """O(1) dependency lookup. Uses crate-specific lookup when crate_name provided, 
+        falls back to global lookup when None."""
     
     def filter_items(self, items: List[Dict]) -> List[Dict]:
         """Filter items and mark dependency status."""
@@ -9031,7 +9038,10 @@ flowchart TD
         end
         
         ADD_DEPENDENCY[add_dependency(crate_name)<br/>Add to set + persist]
-        IS_DEPENDENCY[is_dependency(crate_name)<br/>O(1) lookup]
+        IS_DEPENDENCY[is_dependency(module_path, crate_name?)]
+        CRATE_LOOKUP{crate_name provided?}
+        CRATE_SPECIFIC_LOOKUP[Check _crate_dependencies[crate_name]]
+        GLOBAL_LOOKUP[Check global _dependencies set]
         FILTER_ITEMS[filter_items(items)<br/>Batch marking]
         
         subgraph "Persistence Layer"
@@ -9040,7 +9050,7 @@ flowchart TD
         end
         
         subgraph "Service Integration"
-            CRATE_SERVICE[CrateService<br/>Auto-population]
+            CRATE_SERVICE[CrateService<br/>Uses get_dependency_filter() global instance<br/>Auto-population with crate-specific filtering]
             SEARCH_RESPONSE[SearchResult.is_dependency = bool]
             DOC_RESPONSE[GetItemDocResponse.is_dependency = bool]
         end
@@ -9066,12 +9076,17 @@ flowchart TD
     ADD_DEPENDENCY --> SAVE_CACHE
     SAVE_CACHE --> JSON_FORMAT
     
-    IS_DEPENDENCY --> CRATE_SERVICE
+    IS_DEPENDENCY --> CRATE_LOOKUP
+    CRATE_LOOKUP -->|Yes| CRATE_SPECIFIC_LOOKUP
+    CRATE_LOOKUP -->|No| GLOBAL_LOOKUP
+    CRATE_SPECIFIC_LOOKUP --> CRATE_SERVICE
+    GLOBAL_LOOKUP --> CRATE_SERVICE
     FILTER_ITEMS --> CRATE_SERVICE
     CRATE_SERVICE --> SEARCH_RESPONSE
     CRATE_SERVICE --> DOC_RESPONSE
     
-    IS_DEPENDENCY -.-> BLOOM_FILTER
+    CRATE_SPECIFIC_LOOKUP -.-> BLOOM_FILTER
+    GLOBAL_LOOKUP -.-> BLOOM_FILTER
     BLOOM_FILTER --> MEMORY_EFFICIENT
 ```
 

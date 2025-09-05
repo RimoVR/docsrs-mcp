@@ -218,10 +218,10 @@ class CrateService:
 
             # Check if this is a dependency item (if dependency filter is enabled)
             if config.DEPENDENCY_FILTER_ENABLED:
-                from ..dependency_filter import DependencyFilter
+                from ..dependency_filter import get_dependency_filter
 
-                dep_filter = DependencyFilter()
-                is_dependency = dep_filter.is_dependency(crate_name, item_path)
+                dep_filter = get_dependency_filter()
+                is_dependency = dep_filter.is_dependency(item_path, crate_name)
 
             result = SearchResult(
                 score=score,
@@ -282,10 +282,10 @@ class CrateService:
 
                 # Check if this is a dependency item (if dependency filter is enabled)
                 if config.DEPENDENCY_FILTER_ENABLED:
-                    from ..dependency_filter import DependencyFilter
+                    from ..dependency_filter import get_dependency_filter
 
-                    dep_filter = DependencyFilter()
-                    is_dependency = dep_filter.is_dependency(crate_name, row[0])
+                    dep_filter = get_dependency_filter()
+                    is_dependency = dep_filter.is_dependency(row[0], crate_name)
 
                 return {
                     "item_path": row[0],

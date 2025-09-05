@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-09-04",
+  "lastUpdated": "2025-09-05",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -2000,6 +2000,31 @@
             "Recovery scaling is conservative to prevent memory pressure oscillation"
           ],
           "measuredImpact": "Prevented OOM conditions and maintained processing throughput under memory constraints"
+        },
+        {
+          "error": "DependencyFilter.is_dependency() Parameter Mismatch - TypeError: is_dependency() takes 2 positional arguments but 3 were given",
+          "rootCause": "Method signature expected only module_path parameter but CrateService was calling with both crate_name and item_path. Original method signature was is_dependency(self, module_path: str) but CrateService calls were passing (item_path, crate_name) parameters in crate_service.py lines 224 and 288.",
+          "solution": "Extended is_dependency method to accept optional crate_name parameter for backward compatibility. New signature: is_dependency(self, module_path: str, crate_name: str | None = None) -> bool. Method now properly utilizes _crate_dependencies dict for crate-specific filtering. CrateService updated to use get_dependency_filter() global instance instead of creating new instances. Parameter order corrected to (item_path, crate_name).",
+          "context": "TypeError preventing MCP server startup when CrateService attempted to filter dependencies during item processing",
+          "lesson": "Method signatures must match caller expectations, especially for global instances accessed across modules. Always validate parameter order and count when refactoring method signatures.",
+          "pattern": "Use optional parameters with default values for backward compatibility when extending method signatures. Ensure global instances are accessed through proper getter functions.",
+          "dateEncountered": "2025-09-05",
+          "relatedFiles": ["src/docsrs_mcp/services/crate_service.py", "src/docsrs_mcp/dependencies.py"],
+          "codeExample": "# BEFORE (causing TypeError):\ndef is_dependency(self, module_path: str) -> bool:\n    return module_path in self._dependency_paths\n\n# CrateService calling:\nif self.dependency_filter.is_dependency(item_path, crate_name):  # TypeError\n\n# AFTER (Bug fix):\ndef is_dependency(self, module_path: str, crate_name: str | None = None) -> bool:\n    if crate_name and crate_name in self._crate_dependencies:\n        return module_path in self._crate_dependencies[crate_name]\n    return module_path in self._dependency_paths\n\n# CrateService updated to use global instance:\nif get_dependency_filter().is_dependency(item_path, crate_name):",
+          "debuggingTechnique": "Run unit tests to verify both method signatures work correctly. Test MCP server startup to confirm TypeError is resolved.",
+          "testingConfirmed": [
+            "Unit tests confirm both signatures work: is_dependency(path) and is_dependency(path, crate)",
+            "MCP server runs without TypeError during initialization", 
+            "CrateService properly filters dependencies using global instance",
+            "Backward compatibility maintained for existing code"
+          ],
+          "preventionStrategy": "Always run unit tests after method signature changes. Validate all calling sites when modifying method parameters. Use optional parameters to maintain backward compatibility.",
+          "implementationDetails": [
+            "Added optional crate_name parameter with default None value",
+            "Method now checks _crate_dependencies dict for crate-specific filtering",
+            "CrateService uses get_dependency_filter() instead of creating instances",
+            "Parameter order corrected throughout codebase"
+          ]
         }
       ]
     },
