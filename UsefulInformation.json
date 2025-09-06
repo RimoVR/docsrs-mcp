@@ -1452,6 +1452,30 @@
           "debuggingTechnique": "Use MCP protocol documentation as reference for exact parameter requirements. Test with minimal but complete initialization payloads.",
           "testingConfirmed": ["MCP protocol handshake now succeeds", "Standard library documentation accessible through MCP tools", "Protocol compliance verified with official MCP specification"],
           "preventionStrategy": "Create MCP protocol test templates with all required fields to ensure consistent protocol compliance across tests."
+        },
+        {
+          "error": "trait_info=False, for_type=False in enhanced trait extractor debug logs, causing empty trait resolution results",
+          "rootCause": "Enhanced trait extractor was accessing inner.trait and inner.for directly instead of accessing the nested structure inner[\"impl\"][\"trait\"] and inner[\"impl\"][\"for\"]. The rustdoc JSON structure has trait and for information nested under an 'impl' object within the 'inner' object.",
+          "solution": "Fixed field access in src/docsrs_mcp/ingestion/enhanced_trait_extractor.py lines 88-101 to properly access nested impl structure",
+          "context": "Systematic failures in get_trait_implementors(), get_type_traits(), and resolve_method() returning empty results due to incorrect JSON field access",
+          "lesson": "Rustdoc JSON structure requires careful navigation of nested objects - always verify actual JSON structure before accessing fields",
+          "pattern": "Access rustdoc impl data through proper nesting: inner[\"impl\"][\"trait\"] and inner[\"impl\"][\"for\"] rather than inner.get(\"trait\")",
+          "dateEncountered": "2025-09-06",
+          "status": "RESOLVED",
+          "resolution_date": "2025-09-06",
+          "fix_details": "Corrected field access pattern from inner.get(\"trait\") to inner[\"impl\"][\"trait\"] and inner.get(\"for\") to inner[\"impl\"][\"for\"]",
+          "relatedFiles": ["src/docsrs_mcp/ingestion/enhanced_trait_extractor.py"],
+          "codeExample": "# BEFORE (Broken):\ntrait_info = inner.get(\"trait\")\nfor_type = inner.get(\"for\")\n\n# AFTER (Fixed):\nimpl_data = inner[\"impl\"]\ntrait_info = impl_data.get(\"trait\") \nfor_type = impl_data.get(\"for\")",
+          "rustdocStructure": "{\"inner\": {\"impl\": {\"trait\": {...}, \"for\": {...}, \"items\": [...]}}}",
+          "impact": "Resolves systematic failures in get_trait_implementors(), get_type_traits(), and resolve_method() returning empty results",
+          "gitCommit": "e3d28b2 - fix(trait-extraction): resolve critical trait field access bug in enhanced extractor",
+          "debuggingTechnique": "Check debug logs for 'trait_info=False, for_type=False' patterns which indicate incorrect JSON field access in trait extraction logic",
+          "testingConfirmed": [
+            "Trait implementor queries now return proper results",
+            "Type trait resolution functions correctly",
+            "Method resolution includes trait methods"
+          ],
+          "preventionStrategy": "Always verify rustdoc JSON structure through actual data inspection before implementing field access patterns. Add comprehensive logging to catch field access failures early."
         }
       ]
     },

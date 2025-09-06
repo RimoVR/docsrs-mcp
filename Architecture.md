@@ -2366,9 +2366,9 @@ async def tool_handler(crate_name: str, **kwargs):
 - `get_item_signature`: Auto-ingests before signature lookup
 - `search_with_regex`: Auto-ingests before regex pattern search
 - `search_cross_crate`: Auto-ingests before cross-crate search
-- `get_trait_implementors`: Auto-ingests before trait implementation lookup
-- `get_type_traits`: Auto-ingests before type trait discovery
-- `resolve_method`: Auto-ingests before method resolution
+- `get_trait_implementors`: Auto-ingests before trait implementation lookup (FIXED: now returns accurate results)
+- `get_type_traits`: Auto-ingests before type trait discovery (FIXED: now returns accurate results)
+- `resolve_method`: Auto-ingests before method resolution (FIXED: now returns accurate results)
 - `suggest_imports`: Auto-ingests before import suggestion
 - `get_full_signature`: Auto-ingests before complete signature retrieval
 - `get_safety_info`: Auto-ingests before safety information extraction
@@ -2390,9 +2390,9 @@ graph TD
         GET_SIG[get_item_signature<br/>Auto-ingest → Item signature retrieval<br/>Input: item_path<br/>Output: complete signature]
         SEARCH_REGEX[search_with_regex<br/>Auto-ingest → Advanced regex pattern search<br/>Input: regex_pattern, scope, case_sensitive<br/>Output: matching items with context]
         SEARCH_CROSS_CRATE[search_cross_crate<br/>Auto-ingest → Cross-crate dependency search<br/>Input: item_path, include_transitive<br/>Output: usage across crate ecosystem]
-        GET_TRAIT_IMPL[get_trait_implementors<br/>Auto-ingest → Trait implementation discovery<br/>Input: trait_path, include_blanket<br/>Output: implementing types and details]
-        GET_TYPE_TRAITS[get_type_traits<br/>Auto-ingest → Type trait discovery<br/>Input: type_path, include_derived<br/>Output: implemented traits with sources]
-        RESOLVE_METHOD[resolve_method<br/>Auto-ingest → Method resolution with disambiguation<br/>Input: type_path, method_name, signature_hint<br/>Output: resolved method with trait source]
+        GET_TRAIT_IMPL[get_trait_implementors<br/>FIXED: Auto-ingest → Trait implementation discovery<br/>Input: trait_path, include_blanket<br/>Output: implementing types and details]
+        GET_TYPE_TRAITS[get_type_traits<br/>FIXED: Auto-ingest → Type trait discovery<br/>Input: type_path, include_derived<br/>Output: implemented traits with sources]
+        RESOLVE_METHOD[resolve_method<br/>FIXED: Auto-ingest → Method resolution with disambiguation<br/>Input: type_path, method_name, signature_hint<br/>Output: resolved method with trait source]
         SUGGEST_IMPORTS[suggest_imports<br/>Auto-ingest → Import path suggestions<br/>Input: item_path, target_crate<br/>Output: ranked import suggestions]
         GET_FULL_SIG[get_full_signature<br/>Auto-ingest → Complete signature with generics<br/>Input: item_path, expand_generics<br/>Output: full signature with constraints]
         GET_SAFETY_INFO[get_safety_info<br/>Auto-ingest → Safety information extraction<br/>Input: item_path<br/>Output: unsafe requirements and guarantees]
@@ -2424,9 +2424,9 @@ graph TD
         REST_CRATE_SUMMARY[POST /getCrateSummary<br/>Crate summary endpoint with schema override]
         REST_SEARCH_REGEX[POST /search_with_regex<br/>Advanced regex search endpoint]
         REST_CROSS_CRATE[POST /search_cross_crate<br/>Cross-crate dependency search endpoint]
-        REST_TRAIT_IMPL[POST /get_trait_implementors<br/>Trait implementation discovery endpoint]
-        REST_TYPE_TRAITS[POST /get_type_traits<br/>Type trait discovery endpoint]
-        REST_RESOLVE_METHOD[POST /resolve_method<br/>Method resolution endpoint]
+        REST_TRAIT_IMPL[POST /get_trait_implementors<br/>FIXED: Trait implementation discovery endpoint]
+        REST_TYPE_TRAITS[POST /get_type_traits<br/>FIXED: Type trait discovery endpoint]
+        REST_RESOLVE_METHOD[POST /resolve_method<br/>FIXED: Method resolution endpoint]
         REST_SUGGEST_IMPORTS[POST /suggest_imports<br/>Import suggestion endpoint]
         REST_FULL_SIG[POST /get_full_signature<br/>Complete signature retrieval endpoint]
         REST_SAFETY_INFO[POST /get_safety_info<br/>Safety information endpoint]
@@ -2590,7 +2590,7 @@ sequenceDiagram
     participant Ingestion as Ingestion Pipeline
     
     Client->>MCP_Tools: get_trait_implementors(trait_path)
-    MCP_Tools->>TypeNav: resolve_trait_implementations()
+    MCP_Tools->>TypeNav: resolve_trait_implementations() [FIXED]
     TypeNav->>DB: query trait_implementations table
     
     alt Data not found
@@ -2603,11 +2603,11 @@ sequenceDiagram
     end
     
     DB-->>TypeNav: trait implementation data
-    TypeNav->>TypeNav: enrich with method information
+    TypeNav->>TypeNav: enrich with method information [FIXED: proper JSON parsing]
     TypeNav->>DB: query type_methods for implementors
     DB-->>TypeNav: method signatures
-    TypeNav-->>MCP_Tools: complete trait implementation map
-    MCP_Tools-->>Client: formatted trait implementors
+    TypeNav-->>MCP_Tools: complete trait implementation map [FIXED: now returns accurate data]
+    MCP_Tools-->>Client: formatted trait implementors [FIXED: non-empty results]
 ```
 
 ## Enhanced Ingestion Pipeline with Stdlib Handling
@@ -3108,9 +3108,9 @@ class FeatureAnalyzer:
 **New MCP Tools**:
 1. **search_with_regex**: Advanced pattern search with regex support
 2. **search_cross_crate**: Cross-crate dependency and usage search
-3. **get_trait_implementors**: Discover all implementations of a trait
-4. **get_type_traits**: Find all traits implemented by a type
-5. **resolve_method**: Disambiguate method calls with trait context
+3. **get_trait_implementors**: Discover all implementations of a trait (FIXED: now returns accurate results)
+4. **get_type_traits**: Find all traits implemented by a type (FIXED: now returns accurate results)
+5. **resolve_method**: Disambiguate method calls with trait context (FIXED: now returns accurate results)
 6. **suggest_imports**: Intelligent import path suggestions
 7. **get_full_signature**: Complete signatures with generic constraints
 8. **get_safety_info**: Extract unsafe usage requirements
@@ -3155,6 +3155,15 @@ class EnhancedTraitExtractor:
     def detect_blanket_implementations(self, impl_data: dict) -> bool:
         """Identify blanket implementations"""
 
+    def get_trait_implementors(self, trait_path: str) -> List[TraitImplementor]:
+        """FIXED: Resolves trait implementations from correct rustdoc JSON structure"""
+        
+    def get_type_traits(self, type_path: str) -> List[TraitInfo]:
+        """FIXED: Discovers traits implemented by types using proper JSON field access"""
+        
+    def resolve_method(self, type_path: str, method_name: str) -> MethodInfo:
+        """FIXED: Resolves method signatures with correct trait source attribution"""
+
 class EnhancedMethodExtractor:
     """Extracts method signatures and associations"""
     
@@ -3167,6 +3176,55 @@ class EnhancedMethodExtractor:
     def analyze_method_safety(self, method_data: dict) -> SafetyInfo:
         """Extract unsafe requirements and guarantees"""
 ```
+
+### Critical Trait Extraction Bug Fix (RESOLVED)
+
+**Root Cause Analysis**: The EnhancedTraitExtractor was experiencing systematic failures in trait resolution functions due to incorrect rustdoc JSON field access patterns. The extractor was attempting to access `inner.trait` and `inner.for` directly, but rustdoc JSON stores these fields within a nested `impl` structure.
+
+**Actual Rustdoc JSON Structure**:
+```json
+{
+  "inner": {
+    "impl": {
+      "trait": { /* trait information */ },
+      "for": { /* implementing type information */ },
+      "items": [ /* implementation items */ ]
+    }
+  }
+}
+```
+
+**Incorrect Field Access** (causing empty results):
+```python
+# BROKEN: Direct access to inner fields
+trait_info = inner.get("trait")
+for_type = inner.get("for")
+```
+
+**Corrected Field Access** (implemented fix):
+```python
+# FIXED: Access through nested impl structure
+impl_data = inner["impl"]
+trait_info = impl_data.get("trait")
+for_type = impl_data.get("for")
+```
+
+**Functions Affected and Fixed**:
+- `get_trait_implementors()`: Now correctly extracts trait implementations from `inner["impl"]["trait"]`
+- `get_type_traits()`: Now properly accesses implementing types from `inner["impl"]["for"]`  
+- `resolve_method()`: Now accurately resolves method signatures using correct trait source attribution
+
+**Implementation Location**: 
+- File: `src/docsrs_mcp/ingestion/enhanced_trait_extractor.py`
+- Lines: 88-101 (field access correction)
+
+**Architectural Impact**:
+- **Trait Resolution Reliability**: All trait-related MCP tools now return accurate, non-empty results
+- **Method Disambiguation**: Method resolution properly attributes methods to their trait sources
+- **Type Navigation**: Complete trait implementation discovery enables comprehensive type analysis
+- **Cross-Reference Accuracy**: Trait-type relationships are correctly established in the database
+
+**Performance Impact**: No performance regression - fix only corrects JSON field access paths without changing processing logic.
 
 ## Enhanced Integration Architecture
 
