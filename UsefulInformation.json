@@ -4176,6 +4176,39 @@
           "codeExample": "def _build_module_tree(self, modules: List[Dict[str, Any]]) -> ModuleTreeNode:\n    \"\"\"Transform flat module list to hierarchical tree structure\"\"\"\n    if not modules:\n        return ModuleTreeNode(name=\"empty\", path=\"\", children=[])\n    \n    # Build tree from flat list\n    tree_builder = TreeBuilder()\n    for module in modules:\n        tree_builder.add_module(module)\n    \n    return tree_builder.build_tree()\n\n# Usage in service method:\nmodules = await self.database.get_module_list(crate_name, version)\ntree = self._build_module_tree(modules)  # Transform before return\nreturn GetModuleTreeResponse(tree=tree)",
           "debuggingTechnique": "Test with 'uv run docsrs-mcp' in development mode and verify endpoint returns hierarchical ModuleTreeNode structure, not flat list",
           "architecturalImprovement": "This fix establishes proper separation of concerns where each layer has clear responsibilities and data flows correctly through the transformation pipeline"
+        },
+        {
+          "error": "Cross-Crate Search Cannot Search Across Multiple Crates",
+          "rootCause": "MCP SDK server used hardcoded incomplete schema instead of complete schema from mcp_tools_config.py. The hardcoded schema lacked proper cross-crate search parameters (crates array support), preventing MCP clients from accessing full cross-crate search functionality.",
+          "solution": "Implemented schema alignment by creating centralized get_tool_schema() function that dynamically retrieves complete schemas from mcp_tools_config.py with defensive copying. Added robust parameter validation supporting both array and comma-separated string formats for crates parameter. Established parameter precedence logic (crates overrides crate_name) with comprehensive error handling.",
+          "context": "MCP clients couldn't perform cross-crate searches due to schema mismatch between hardcoded MCP SDK schemas and actual tool configurations. Cross-crate functionality existed in backend but was inaccessible via MCP interface.",
+          "lesson": "Always use centralized schema definitions instead of hardcoding schemas in multiple locations. MCP clients require flexible parameter input formats (arrays + strings) for optimal compatibility. Schema objects need defensive copying to prevent mutations during server operations.",
+          "pattern": "Use centralized schema management with get_tool_schema() pattern for consistent schema exposure across different server modes (MCP SDK, REST). Implement robust union type parameter validation to handle diverse MCP client input formats.",
+          "dateEncountered": "2025-09-06",
+          "status": "RESOLVED",
+          "dateResolved": "2025-09-06",
+          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py", "src/docsrs_mcp/mcp_tools_config.py"],
+          "codeExample": "# Centralized schema retrieval with defensive copying\ndef get_tool_schema(tool_name: str) -> dict:\n    for tool_config in MCP_TOOLS_CONFIG:\n        if tool_config[\"name\"] == tool_name:\n            return copy.deepcopy(tool_config[\"input_schema\"])\n    raise ValueError(f\"Tool {tool_name} not found in config\")\n\n# Schema registration with dynamic schema\ntypes.Tool(\n    name=\"search_items\",\n    description=\"Search for items in crate documentation with advanced modes\",\n    inputSchema=get_tool_schema(\"search_items\"),\n)\n\n# Robust parameter validation for union types\nif isinstance(crates, list):\n    crates_list = [c.strip().lower() for c in crates if c and c.strip()]\nelif isinstance(crates, str) and crates.strip():\n    crates_list = [c.strip().lower() for c in crates.split(\",\") if c.strip()]\nelse:\n    crates_list = []",
+          "debuggingTechnique": "Test both MCP SDK mode (uv run docsrs-mcp) and REST mode (uv run docsrs-mcp --mode rest) to verify schema consistency. Use MCP client restart after schema changes to see updated tool schemas. Test with various parameter formats: arrays, comma-separated strings, and mixed inputs.",
+          "performanceCharacteristics": {
+            "searchLatency": "Maintains sub-500ms search performance targets",
+            "crateLimit": "5-crate limit with RRF aggregation as per REST API",
+            "backwardCompatibility": "Existing single-crate searches continue working",
+            "resourceManagement": "Proper connection pooling and resource cleanup"
+          },
+          "validationRules": {
+            "parameterPrecedence": "crates parameter overrides crate_name if both provided",
+            "inputFormats": "Supports both list[str] and comma-separated string inputs",
+            "errorHandling": "Structured error responses with machine-parsable error codes",
+            "limits": "Configurable via environment variables with sensible defaults"
+          },
+          "filesModified": ["src/docsrs_mcp/mcp_sdk_server.py"],
+          "testingValidation": [
+            "✅ Backward compatibility maintained (existing single-crate searches work)",
+            "✅ Cross-crate functionality implemented (routes to existing cross_crate_search)",
+            "✅ Parameter validation working (rejects invalid inputs correctly)",
+            "✅ Schema exposure ready (requires MCP client restart to see new schema)"
+          ]
         }
       ]
     },

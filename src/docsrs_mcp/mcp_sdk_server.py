@@ -1,6 +1,7 @@
 """MCP SDK implementation for docsrs-mcp server."""
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ from .models import (
     TypeTraitsResponse,
     VersionDiffResponse,
 )
+from .mcp_tools_config import MCP_TOOLS_CONFIG
 from .models.workflow import (
     LearningPathResponse,
     ProgressiveDetailResponse,
@@ -60,6 +62,14 @@ server = Server("docsrs-mcp")
 _crate_service = None
 _ingestion_service = None
 _type_navigation_service = None
+
+
+def get_tool_schema(tool_name: str) -> dict:
+    """Extract and defensively copy tool schema from MCP_TOOLS_CONFIG."""
+    for tool_config in MCP_TOOLS_CONFIG:
+        if tool_config["name"] == tool_name:
+            return copy.deepcopy(tool_config["input_schema"])
+    raise ValueError(f"Tool '{tool_name}' not found in MCP_TOOLS_CONFIG")
 _workflow_service = None
 _cross_reference_service = None
 
@@ -182,10 +192,11 @@ async def get_crate_summary(crate_name: str, version: str = "latest") -> dict:
 
 
 async def search_items(
-    crate_name: str,
-    query: str,
-    version: str = "latest",
-    k: str = "5",
+    crate_name: str = "",
+    query: str = "",
+    version: str = "latest", 
+    k: int | str = 5,
+    crates: list[str] | str | None = None,
     item_type: str | None = None,
     crate_filter: str | None = None,
     module_path: str | None = None,
@@ -194,19 +205,20 @@ async def search_items(
     visibility: str | None = None,
     deprecated: str | None = None,
 ) -> dict:
-    """Search for items in a crate's documentation using semantic similarity.
+    """Search for items in crate documentation using semantic similarity.
 
-    Performs vector similarity search across all documentation in the specified crate.
-    Results are ranked by semantic similarity to the query.
+    Supports both single-crate and cross-crate search with vector similarity ranking.
+    Cross-crate search uses RRF (Reciprocal Rank Fusion) for result aggregation.
 
     Args:
-        crate_name: Name of the crate to search within
         query: Natural language search query
+        crate_name: Name of single crate to search (optional if crates provided)
         version: Specific version or 'latest' (default: latest)
-        k: Number of results to return (1-20, default: 5)
+        k: Number of results to return (1-50, default: 5)
+        crates: List of crates for cross-crate search (max 5, takes precedence over crate_name)
         item_type: Filter by item type (function, struct, trait, enum, module)
-        crate_filter: Filter results to specific crate
-        module_path: Filter results to specific module path within the crate
+        crate_filter: Filter results to specific crate (single-crate only)
+        module_path: Filter results to specific module path (single-crate only)
         has_examples: Filter to only items with code examples ("true"/"false")
         min_doc_length: Minimum documentation length in characters
         visibility: Filter by item visibility (public, private, crate)
@@ -214,10 +226,61 @@ async def search_items(
 
     Returns:
         Ranked search results with smart snippets
+        
+    Note:
+        Either crate_name or crates parameter is required.
+        Cross-crate search bypasses crate_filter and module_path filters by design.
+        Crates parameter supports both array format and comma-separated string.
     """
     try:
-        # Validate and convert parameters
-        k_int = validate_int_parameter(k, default=5, min_val=1, max_val=20)
+        # Parse and validate parameters - ensure required fields are provided
+        if not query or not query.strip():
+            return {"error": {"code": "missing_parameter", "message": "query parameter is required"}}
+            
+        # Parse and validate crates parameter with Union[List[str], str, None] support
+        import re
+        
+        crates_list = []
+        crate_name_regex = re.compile(r"^[a-z0-9]([_-]?[a-z0-9]+)*$")
+        
+        # Handle crates parameter - support both array and string formats
+        if crates is not None:
+            if isinstance(crates, list):
+                crates_list = [c.strip().lower() for c in crates if c and c.strip()]
+            elif isinstance(crates, str) and crates.strip():
+                # Handle comma-separated string input from MCP clients
+                crates_list = [c.strip().lower() for c in crates.split(",") if c.strip()]
+            else:
+                return {"error": {"code": "invalid_parameter", "message": "crates must be array or comma-separated string"}}
+        
+        # Handle parameter precedence: crates takes priority over crate_name
+        if crates_list:
+            final_crates = crates_list
+        elif crate_name and crate_name.strip():
+            final_crates = [crate_name.strip().lower()]
+        else:
+            return {"error": {"code": "missing_parameter", "message": "Either crate_name or crates parameter required"}}
+        
+        # Validate crate names, deduplicate, and enforce limits
+        validated_crates = []
+        seen_crates = set()
+        
+        for crate in final_crates:
+            if not crate_name_regex.match(crate):
+                return {"error": {"code": "invalid_crate_name", "message": f"Invalid crate name format: {crate}"}}
+            if len(crate) > 64:  # Reasonable limit for crate name length
+                return {"error": {"code": "crate_name_too_long", "message": f"Crate name too long: {crate}"}}
+            if crate not in seen_crates:
+                validated_crates.append(crate)
+                seen_crates.add(crate)
+        
+        # Enforce configurable 5-crate limit
+        max_crates = int(os.environ.get("DOCSRS_MAX_CRATES", "5"))
+        if len(validated_crates) > max_crates:
+            return {"error": {"code": "too_many_crates", "message": f"Maximum {max_crates} crates allowed, got {len(validated_crates)}"}}
+        
+        # Validate and convert other parameters
+        k_int = validate_int_parameter(k, default=5, min_val=1, max_val=50)
         has_examples_bool = validate_bool_parameter(has_examples)
         deprecated_bool = validate_bool_parameter(deprecated)
         min_doc_length_int = (
@@ -226,19 +289,36 @@ async def search_items(
             else None
         )
 
-        results = await get_crate_service().search_items(
-            crate_name,
-            query,
-            version=version if version != "latest" else None,
-            k=k_int,
-            item_type=item_type,
-            crate_filter=crate_filter,
-            module_path=module_path,
-            has_examples=has_examples_bool,
-            min_doc_length=min_doc_length_int,
-            visibility=visibility,
-            deprecated=deprecated_bool,
-        )
+        # Route to appropriate search function based on number of crates
+        if len(validated_crates) == 1:
+            # Single-crate search - maintain backward compatibility
+            results = await get_crate_service().search_items(
+                validated_crates[0],
+                query,
+                version=version if version != "latest" else None,
+                k=k_int,
+                item_type=item_type,
+                crate_filter=crate_filter,
+                module_path=module_path,
+                has_examples=has_examples_bool,
+                min_doc_length=min_doc_length_int,
+                visibility=visibility,
+                deprecated=deprecated_bool,
+            )
+        else:
+            # Cross-crate search - use existing cross_crate_search functionality
+            # Note: cross-crate search bypasses some single-crate filters by design
+            results = await get_crate_service().cross_crate_search(
+                validated_crates,
+                query,
+                version=version if version != "latest" else None,
+                k=k_int,
+                item_type=item_type,
+                has_examples=has_examples_bool,
+                min_doc_length=min_doc_length_int,
+                visibility=visibility,
+                deprecated=deprecated_bool,
+            )
         return SearchItemsResponse(results=results).model_dump()
     except Exception as e:
         logger.error(f"Error in search_items: {e}")
@@ -1179,59 +1259,8 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="search_items",
-            description="Search for items in a crate's documentation using semantic similarity",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "crate_name": {
-                        "type": "string",
-                        "description": "Name of the crate to search within",
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language search query",
-                    },
-                    "version": {
-                        "type": "string",
-                        "default": "latest",
-                        "description": "Specific version or 'latest'",
-                    },
-                    "k": {
-                        "type": "string",
-                        "default": "5",
-                        "description": "Number of results to return (1-20)",
-                    },
-                    "item_type": {
-                        "type": "string",
-                        "description": "Filter by item type (function, struct, trait, enum, module)",
-                    },
-                    "crate_filter": {
-                        "type": "string",
-                        "description": "Filter results to specific crate",
-                    },
-                    "module_path": {
-                        "type": "string",
-                        "description": "Filter results to specific module path",
-                    },
-                    "has_examples": {
-                        "type": "string",
-                        "description": "Filter to only items with code examples ('true'/'false')",
-                    },
-                    "min_doc_length": {
-                        "type": "string",
-                        "description": "Minimum documentation length in characters",
-                    },
-                    "visibility": {
-                        "type": "string",
-                        "description": "Filter by item visibility (public, private, crate)",
-                    },
-                    "deprecated": {
-                        "type": "string",
-                        "description": "Filter by deprecation status ('true'/'false')",
-                    },
-                },
-                "required": ["crate_name", "query"],
-            },
+            description="Search for items in crate documentation with advanced modes",
+            inputSchema=get_tool_schema("search_items"),
         ),
         types.Tool(
             name="get_item_doc",
