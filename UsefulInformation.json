@@ -1321,6 +1321,77 @@
           "codeExample": "async def resolve_import(self, item_path: str, context: str = None) -> Dict[str, Any]:\n    \"\"\"Find alternative import paths for the given item\"\"\"\n    # Query similar item paths from database\n    similar_items = await self.database.find_similar_paths(item_path, limit=10)\n    \n    alternatives = []\n    for item in similar_items:\n        # Calculate confidence score using fuzzy matching\n        confidence = fuzz.ratio(item_path, item['path']) / 100.0\n        alternatives.append({\n            'path': item['path'],\n            'crate': item['crate_name'],\n            'type': item['item_type'],\n            'confidence': confidence\n        })\n    \n    return {\n        'original_path': item_path,\n        'alternatives': sorted(alternatives, key=lambda x: x['confidence'], reverse=True)\n    }",
           "testingConfirmed": ["Import alternatives now return actual suggestions", "Confidence scoring helps users evaluate options", "Fuzzy matching finds relevant alternative paths"],
           "preventionStrategy": "Audit all TODO markers in user-facing code and implement basic functionality before feature release"
+        },
+        {
+          "error": "CHECK constraint failed: ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', NULL)",
+          "rootCause": "Database schema CHECK constraints were missing 'rust_lang_stdlib' tier option. The RUST_LANG_STDLIB tier was defined in ingestion logic but never added to the database schema constraints in both packages and indexed_items table definitions.",
+          "solution": "Added 'rust_lang_stdlib' to both CHECK constraint definitions in database schema. Updated constraints to: `ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', 'rust_lang_stdlib', NULL)` in both line 246 and line 528 of schema.py",
+          "context": "Standard library documentation ingestion failed immediately during database insertion due to schema constraint violation. This prevented Rust developers from accessing critical stdlib documentation through the MCP server.",
+          "lesson": "Database schema constraints must be kept in sync with application logic enum values. When adding new ingestion tiers, update ALL relevant CHECK constraints in the schema definition.",
+          "pattern": "Always grep for existing constraint definitions when adding new enum values: `grep -n 'CHECK.*ingestion_tier' schema.py` to find all constraints that need updating",
+          "dateEncountered": "2025-09-06",
+          "relatedFiles": ["src/docsrs_mcp/database/schema.py", "src/docsrs_mcp/ingestion/ingest_orchestrator.py"],
+          "codeExample": "# BEFORE - Missing rust_lang_stdlib in constraints:\ningestion_tier TEXT CHECK(ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', NULL))\n\n# AFTER - Fixed constraints (lines 246 and 528):\ningestion_tier TEXT CHECK(ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', 'rust_lang_stdlib', NULL))",
+          "debuggingTechnique": "Use SQLite error messages to identify constraint violations. Search schema file for all CHECK constraint definitions that reference the failing enum.",
+          "testingConfirmed": ["Standard library ingestion now completes successfully", "Database accepts rust_lang_stdlib tier without constraint violations", "MCP server can provide Rust stdlib documentation access"],
+          "preventionStrategy": "Create schema validation tests that verify all application enum values are included in database CHECK constraints. Use database migration scripts to ensure schema-code synchronization."
+        },
+        {
+          "error": "ASYNC230 Async functions should not open files with blocking methods like open",
+          "rootCause": "RustupDetector.detect_stdlib_path() used synchronous file I/O operations (`open()`) within an async function context. This violates async best practices and can cause blocking behavior that impacts server performance.",
+          "solution": "Added aiofiles dependency to pyproject.toml and converted all file operations to async: `async with aiofiles.open(file_path, 'r') as f: content = await f.read()`. Updated all file I/O in the detect_stdlib_path method to use proper async patterns.",
+          "context": "Standard library detection required reading rustup toolchain configuration files to locate local Rust stdlib documentation. Synchronous file operations in async functions triggered linting warnings and potential performance issues.",
+          "lesson": "All file I/O operations in async functions must use async file handling libraries like aiofiles. Never mix synchronous file operations with async functions as it can block the event loop.",
+          "pattern": "Replace `open(file, 'r')` with `async with aiofiles.open(file, 'r') as f:` and `file.read()` with `await f.read()` in all async functions",
+          "dateEncountered": "2025-09-06",
+          "relatedFiles": ["src/docsrs_mcp/ingestion/rustup_detector.py", "pyproject.toml"],
+          "codeExample": "# BEFORE - Blocking file operations in async function:\nasync def detect_stdlib_path(self) -> Optional[str]:\n    with open(toolchain_file, 'r') as f:\n        content = f.read()\n\n# AFTER - Proper async file operations:\nimport aiofiles\n\nasync def detect_stdlib_path(self) -> Optional[str]:\n    async with aiofiles.open(toolchain_file, 'r') as f:\n        content = await f.read()",
+          "debuggingTechnique": "Use ruff linting with ASYNC rules enabled to catch synchronous I/O operations in async functions. Look for ASYNC230 warnings specifically.",
+          "dependencies": "Added aiofiles>=24.1.0 to pyproject.toml for async file operations",
+          "testingConfirmed": ["No more ASYNC230 linting warnings", "Stdlib detection maintains async performance characteristics", "Cross-platform file path detection works correctly"],
+          "preventionStrategy": "Enable async linting rules in ruff configuration and use aiofiles consistently for all file operations in async codepaths."
+        },
+        {
+          "error": "CHECK constraint failed: status IN ('started', 'downloading', 'processing', 'completed', 'failed')",
+          "rootCause": "Standard library ingestion attempted to use custom status values like 'detecting_local_stdlib' that were not included in the database schema CHECK constraint for ingestion status. The schema only allowed the 5 predefined status values.",
+          "solution": "Modified ingestion logic to use only valid status values from the schema constraint. Used 'started' for detection phase, 'processing' for ingestion phase, and 'completed'/'failed' for final states. Avoided creating custom status values that violate schema constraints.",
+          "context": "Stdlib ingestion process needed to track detection and ingestion phases but attempted to use descriptive status values that weren't defined in the database schema constraints.",
+          "lesson": "Always use predefined schema enum values rather than creating custom status strings. Database schema constraints are authoritative for allowed values.",
+          "pattern": "Check schema.py for valid status enum values before implementing new status tracking logic. Use existing status values creatively rather than adding new ones that require schema changes.",
+          "dateEncountered": "2025-09-06",
+          "relatedFiles": ["src/docsrs_mcp/database/schema.py", "src/docsrs_mcp/ingestion/ingest_orchestrator.py"],
+          "codeExample": "# WRONG - Custom status values that violate schema:\nstatus='detecting_local_stdlib'  # Not in schema constraint\n\n# CORRECT - Using valid schema status values:\nstatus='started'     # For detection phase\nstatus='processing'  # For ingestion phase\nstatus='completed'   # For successful completion\nstatus='failed'      # For errors",
+          "debuggingTechnique": "Review database schema CHECK constraints for status field to identify all valid values before implementing status tracking logic",
+          "testingConfirmed": ["Standard library ingestion completes without constraint violations", "Status tracking works within schema limitations", "Error states properly recorded as 'failed' status"],
+          "preventionStrategy": "Create constants for valid status values in code to prevent typos and constraint violations. Reference schema.py as single source of truth for allowed values."
+        },
+        {
+          "error": "Standard library support unavailable - ingestion pipeline missing stdlib integration",
+          "rootCause": "RustupDetector existed for detecting local Rust standard library installations but was never integrated into the main ingestion orchestrator. The RUST_LANG_STDLIB tier was defined but the detection and ingestion logic was not connected to the main ingestion pipeline.",
+          "solution": "Added RustupDetector import to ingest_orchestrator.py and integrated stdlib detection logic into the standard ingestion flow. Added conditional logic to detect local stdlib installations and queue them for ingestion using the rust_lang_stdlib tier.",
+          "context": "Rust developers could not access standard library documentation through the MCP server despite stdlib documentation being locally available via rustup installations. This was a critical gap in Rust development tooling support.",
+          "lesson": "Implementation of new features requires both detection logic AND integration into main application flows. Isolated utility classes are useless without proper integration points.",
+          "pattern": "When implementing new ingestion sources, ensure both detection logic exists AND is called from the main orchestrator. Use integration tests to verify end-to-end functionality.",
+          "dateEncountered": "2025-09-06",
+          "relatedFiles": ["src/docsrs_mcp/ingestion/ingest_orchestrator.py", "src/docsrs_mcp/ingestion/rustup_detector.py"],
+          "codeExample": "# Added to ingest_orchestrator.py:\nfrom .rustup_detector import RustupDetector\n\nasync def orchestrate_ingestion(self):\n    # Existing crate ingestion logic...\n    \n    # NEW: Standard library detection and ingestion\n    rustup_detector = RustupDetector()\n    stdlib_path = await rustup_detector.detect_stdlib_path()\n    if stdlib_path:\n        await self._ingest_stdlib_documentation(stdlib_path)",
+          "debuggingTechnique": "Test end-to-end workflows by checking if new features are accessible through the main application entry points, not just in isolation",
+          "testingConfirmed": ["Standard library documentation now accessible via MCP server", "Rustup installations properly detected across platforms", "Integration with existing ingestion pipeline successful"],
+          "preventionStrategy": "Create integration tests that verify new features work through the main application workflows. Don't just test isolated components."
+        },
+        {
+          "error": "Invalid request parameters in MCP protocol initialization",
+          "rootCause": "MCP protocol testing used incorrect initialization parameters. The protocol requires specific clientInfo fields including name and version, but test implementation only provided protocolVersion and capabilities without proper client identification.",
+          "solution": "Added required clientInfo object to MCP initialization request: `{\"protocolVersion\": \"2024-11-05\", \"capabilities\": {}, \"clientInfo\": {\"name\": \"test-client\", \"version\": \"1.0.0\"}}`. Also corrected notification method from 'initialized' to 'notifications/initialized'.",
+          "context": "Initial MCP protocol testing failed with parameter validation errors, preventing verification of standard library documentation access through the MCP interface.",
+          "lesson": "MCP protocol requires complete client identification in initialization requests. Follow the official MCP specification exactly for protocol handshake parameters.",
+          "pattern": "Always include clientInfo with name and version fields in MCP initialization. Use proper notification method names with 'notifications/' prefix.",
+          "dateEncountered": "2025-09-06",
+          "relatedFiles": ["test scripts for MCP protocol validation"],
+          "codeExample": "# WRONG - Missing clientInfo:\n{\n    \"protocolVersion\": \"2024-11-05\",\n    \"capabilities\": {}\n}\n\n# CORRECT - Complete initialization:\n{\n    \"protocolVersion\": \"2024-11-05\", \n    \"capabilities\": {},\n    \"clientInfo\": {\n        \"name\": \"test-client\",\n        \"version\": \"1.0.0\"\n    }\n}",
+          "debuggingTechnique": "Use MCP protocol documentation as reference for exact parameter requirements. Test with minimal but complete initialization payloads.",
+          "testingConfirmed": ["MCP protocol handshake now succeeds", "Standard library documentation accessible through MCP tools", "Protocol compliance verified with official MCP specification"],
+          "preventionStrategy": "Create MCP protocol test templates with all required fields to ensure consistent protocol compliance across tests."
         }
       ]
     },
@@ -4916,7 +4987,12 @@
       "Always validate data types before iteration - use isinstance() checks for external data",
       "Pydantic strict mode requires exact field matching - remove extra fields or update model definitions",
       "Method name consistency is critical - validate method existence before deployment using IDE tools",
-      "Root cause pattern: Schema evolution gaps, method signature drift, type assumptions, and service layer coupling"
+      "Root cause pattern: Schema evolution gaps, method signature drift, type assumptions, and service layer coupling",
+      "MCP protocol initialization requires complete clientInfo with name and version fields, not just protocolVersion and capabilities",
+      "Use 'notifications/initialized' method name, not just 'initialized' for proper MCP protocol compliance",
+      "MCP tool results are nested in response['result']['content'][0]['text'] format requiring JSON.parse() for structured data",
+      "Focus MCP testing on SDK endpoints (uv run docsrs-mcp) not REST API (--mode rest) for production validation",
+      "Always clear ~/.cache/docsrs-mcp/ when testing ingestion changes to avoid stale cache interference"
     ],
     "vectorSearch": [
       "Check embedding dimensions match (384 for BAAI/bge-small-en-v1.5)",
@@ -4997,7 +5073,13 @@
       "CRITICAL: FastEmbed global singleton causes memory leaks - configure ONNX with sess_options.enable_cpu_mem_arena = False",
       "Memory management: Implement explicit cleanup with del embedding_session and gc.collect() after processing",
       "Model selection: Consider lighter models like all-MiniLM-L6-v2 to reduce memory footprint",
-      "Database constraints: Add UNIQUE indexes on item_path to prevent duplicate entries during re-ingestion"
+      "Database constraints: Add UNIQUE indexes on item_path to prevent duplicate entries during re-ingestion",
+      "STANDARD LIBRARY INGESTION: Always check database schema constraints include 'rust_lang_stdlib' tier before ingestion",
+      "Stdlib detection: Use async file operations with aiofiles to prevent blocking during rustup toolchain detection",
+      "Database status constraints: Use only valid status values ('started', 'processing', 'completed', 'failed') not custom status strings",
+      "Stdlib integration: Ensure RustupDetector is imported and called from main ingestion orchestrator, not just standalone utilities",
+      "Cross-platform paths: Handle Windows, macOS, Linux path differences in rustup toolchain detection logic",
+      "Graceful degradation: Implement fallback to enhanced documentation (200+ modules) when local stdlib unavailable"
     ],
     "rateLimiting": [
       "MUST include Request parameter in endpoint function signatures or rate limiting won't work",
@@ -5194,7 +5276,9 @@
       "memoryLeakPrevention": "Configure FastEmbed ONNX Runtime with sess_options.enable_cpu_mem_arena = False to prevent memory accumulation, implement explicit model lifecycle management",
       "ingestionStatusTracking": "Use dedicated ingestion_status table with partial indexes for efficient incomplete detection queries, ~90% performance improvement over full table scans for status monitoring",
       "failFastRecovery": "DELETE and re-ingest pattern provides simpler implementation than complex state repair, uses more resources but eliminates cascading failure scenarios",
-      "startupOptimization": "Lazy factory pattern for service initialization achieves 46.6% startup time improvement (from 2.1s to 1.12s) by eliminating unnecessary import chains during module initialization. Use python -X importtime for profiling import overhead."
+      "startupOptimization": "Lazy factory pattern for service initialization achieves 46.6% startup time improvement (from 2.1s to 1.12s) by eliminating unnecessary import chains during module initialization. Use python -X importtime for profiling import overhead.",
+      "stdlibDocumentationOptimization": "Enhanced fallback documentation provides 200+ comprehensive stdlib modules when local rustup unavailable, ensuring consistent developer experience across environments. Cross-platform detection supports Windows, macOS, Linux with proper path resolution.",
+      "stdlibIngestionGracefulDegradation": "System falls back to enhanced documentation when local stdlib unavailable, maintains full functionality without requiring rustup installations. Performance optimized with async file operations using aiofiles to prevent event loop blocking during toolchain detection."
     }
   },
   "codeQuality": {

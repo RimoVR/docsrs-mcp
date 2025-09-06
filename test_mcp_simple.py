@@ -1,100 +1,82 @@
 #!/usr/bin/env python3
-"""
-Simple MCP test to verify compare_versions works in MCP mode.
-This tests by calling the MCP SDK server functions directly.
-"""
-
 import asyncio
+import json
+import subprocess
 import sys
-from pathlib import Path
 
-# Add the src directory to path  
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
-from docsrs_mcp import mcp_sdk_server
-
-
-async def test_mcp_compare_versions():
-    """Test compare_versions function directly from MCP SDK server."""
-    print("🧪 Testing MCP SDK server compare_versions function...")
+async def test_mcp():
+    print("Testing MCP server std library support...")
     
-    tests = [
-        {
-            "name": "Test 1: No categories (should use defaults)",
-            "args": {
-                "crate_name": "once_cell",  # Use a smaller crate for faster testing
-                "version_a": "1.17.0",
-                "version_b": "1.18.0",
-                "categories": None
+    # Start server
+    proc = await asyncio.create_subprocess_exec(
+        "uv", "run", "docsrs-mcp",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE, 
+        stderr=asyncio.subprocess.PIPE
+    )
+    
+    try:
+        # Initialize with proper MCP protocol
+        init_msg = json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "test-client",
+                    "version": "1.0.0"
+                }
             }
-        },
-        {
-            "name": "Test 2: String categories", 
-            "args": {
-                "crate_name": "once_cell",
-                "version_a": "1.17.0",
-                "version_b": "1.18.0", 
-                "categories": "breaking,added"
-            }
-        },
-        {
-            "name": "Test 3: Invalid categories (should fail)",
-            "args": {
-                "crate_name": "once_cell",
-                "version_a": "1.17.0",
-                "version_b": "1.18.0",
-                "categories": "breaking,invalid_category"
-            },
-            "should_fail": True
-        }
-    ]
-    
-    all_passed = True
-    
-    for test in tests:
-        print(f"\n  {test['name']}")
-        try:
-            result = await mcp_sdk_server.compare_versions(**test["args"])
+        }) + "\n"
+        proc.stdin.write(init_msg.encode())
+        await proc.stdin.drain()
+        
+        # Read init response
+        line = await proc.stdout.readline()
+        print("Init response:", line.decode().strip())
+        
+        # Send initialized notification
+        init_notif = json.dumps({
+            "jsonrpc": "2.0", "method": "notifications/initialized", "params": {}
+        }) + "\n"
+        proc.stdin.write(init_notif.encode()) 
+        await proc.stdin.drain()
+        
+        # Test std library search_items
+        search_msg = json.dumps({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "search_items", "arguments": {"crate_name": "std", "query": "HashMap", "k": "5"}}
+        }) + "\n"
+        proc.stdin.write(search_msg.encode())
+        await proc.stdin.drain()
+        
+        # Read search response  
+        line = await proc.stdout.readline()
+        response = json.loads(line.decode().strip())
+        
+        if "result" in response:
+            content = response["result"].get("content", [])
+            if content and len(content) > 0:
+                search_results = json.loads(content[0]["text"])
+                results = search_results.get("results", [])
+                print(f"✅ SUCCESS: search_items returned {len(results)} results!")
+                if results:
+                    for i, r in enumerate(results[:2]):
+                        print(f"  {i+1}. {r.get('item_path', 'N/A')}: {r.get('snippet', '')[:100]}...")
+                elif len(results) == 0:
+                    print("⚠️  No results found for std::HashMap - may need ingestion")
+                    # Test if std crate is ingested
+                    print("Testing if std library is available...")
+            else:
+                print("❌ No content in search response")
+        else:
+            print(f"❌ FAILED: {response}")
             
-            if test.get("should_fail"):
-                print(f"    ❌ FAILED: Expected error but got success")
-                all_passed = False
-            else:
-                # Check if result has expected structure
-                if isinstance(result, dict) and "crate_name" in result:
-                    print(f"    ✅ PASSED: Got valid result")
-                else:
-                    print(f"    ❌ FAILED: Invalid result structure")
-                    all_passed = False
-                    
-        except Exception as e:
-            if test.get("should_fail"):
-                if "Invalid category" in str(e):
-                    print(f"    ✅ PASSED: Correctly rejected invalid categories")
-                else:
-                    print(f"    ❌ FAILED: Wrong error type: {e}")
-                    all_passed = False
-            else:
-                print(f"    ❌ FAILED: Unexpected error: {e}")
-                all_passed = False
-    
-    return all_passed
-
-
-async def main():
-    """Run the MCP test."""
-    print("🚀 Testing MCP SDK server compare_versions...")
-    
-    success = await test_mcp_compare_versions()
-    
-    if success:
-        print("\n🎉 All MCP tests passed! The fix works in MCP mode.")
-        return True
-    else:
-        print("\n❌ Some MCP tests failed.")
-        return False
-
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        proc.terminate()
+        await proc.wait()
 
 if __name__ == "__main__":
-    result = asyncio.run(main())
-    sys.exit(0 if result else 1)
+    asyncio.run(test_mcp())

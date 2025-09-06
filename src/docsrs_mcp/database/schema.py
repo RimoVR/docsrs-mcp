@@ -243,7 +243,7 @@ async def init_database(db_path: Path) -> None:
                 items_processed INTEGER DEFAULT 0,
                 total_items INTEGER,
                 checkpoint_data TEXT,  -- JSON for extensibility
-                ingestion_tier TEXT CHECK(ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', NULL))
+                ingestion_tier TEXT CHECK(ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', 'rust_lang_stdlib', NULL))
             )
         """)
 
@@ -525,7 +525,7 @@ async def migrate_add_ingestion_tracking(db_path: Path) -> None:
                 items_processed INTEGER DEFAULT 0,
                 total_items INTEGER,
                 checkpoint_data TEXT,  -- JSON for extensibility
-                ingestion_tier TEXT CHECK(ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', NULL))
+                ingestion_tier TEXT CHECK(ingestion_tier IN ('rustdoc_json', 'source_extraction', 'description_only', 'rust_lang_stdlib', NULL))
             )
         """)
 

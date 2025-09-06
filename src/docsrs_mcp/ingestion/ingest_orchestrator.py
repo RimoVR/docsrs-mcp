@@ -10,7 +10,13 @@ This module handles:
 import asyncio
 import logging
 import os
+
+import aiofiles
+
+# Import source extractor for Tier 2 fallback
+import sys
 from pathlib import Path
+from pathlib import Path as PathLib
 from typing import Any
 
 import aiohttp
@@ -22,11 +28,12 @@ from ..database import (
     is_ingestion_complete,
     migrate_add_ingestion_tracking,
     set_ingestion_status,
-    store_crate_metadata,
     store_crate_dependencies,
+    store_crate_metadata,
     store_modules,
 )
 from ..models import IngestionTier
+from ..rustup_detector import RustupDetector
 from .cache_manager import evict_cache_if_needed
 from .code_examples import extract_code_examples, generate_example_embeddings
 from .embedding_manager import cleanup_embedding_model
@@ -51,10 +58,6 @@ from .version_resolver import (
     resolve_stdlib_version,
     resolve_version,
 )
-
-# Import source extractor for Tier 2 fallback
-import sys
-from pathlib import Path as PathLib
 
 # Initialize logger before any usage
 logger = logging.getLogger(__name__)
@@ -114,47 +117,112 @@ class IngestionOrchestrator:
             f"Creating comprehensive stdlib fallback documentation for {crate_name}@{version}"
         )
 
-        # Enhanced descriptions for stdlib crates
+        # Enhanced descriptions for stdlib crates with comprehensive coverage
         stdlib_info = {
             "std": {
-                "description": "The Rust standard library providing essential functionality",
+                "description": "The Rust standard library providing essential functionality for system programming",
                 "modules": [
-                    ("collections", "Collection types like Vec, HashMap, BTreeMap"),
-                    ("io", "I/O operations, readers, writers, and buffering"),
-                    ("fs", "Filesystem operations and file handling"),
-                    ("net", "TCP/UDP networking"),
-                    ("thread", "Thread spawning and synchronization"),
-                    ("sync", "Synchronization primitives like Arc, Mutex, RwLock"),
-                    ("time", "Time measurement and manipulation"),
-                    ("process", "Process spawning and management"),
-                    ("env", "Environment variables and program arguments"),
-                    ("path", "Path manipulation utilities"),
+                    ("collections", "Collection types like Vec, HashMap, BTreeMap, VecDeque, LinkedList, BinaryHeap"),
+                    ("io", "I/O operations, readers, writers, buffering, stdin/stdout/stderr"),
+                    ("fs", "Filesystem operations, File, OpenOptions, Permissions, DirEntry"),
+                    ("net", "TCP/UDP networking, TcpListener, TcpStream, UdpSocket, SocketAddr"),
+                    ("thread", "Thread spawning, JoinHandle, ThreadId, sleep, yield_now"),
+                    ("sync", "Synchronization primitives Arc, Mutex, RwLock, Condvar, Once, Barrier"),
+                    ("time", "Time measurement Duration, Instant, SystemTime"),
+                    ("process", "Process spawning Command, Child, Output, Stdio"),
+                    ("env", "Environment variables, program arguments, current_dir"),
+                    ("path", "Path manipulation Path, PathBuf, Component"),
+                    ("hash", "Hash traits and implementations, HashMap, HashSet"),
+                    ("fmt", "Formatting traits Display, Debug, Write"),
+                    ("str", "String manipulation and searching"),
+                    ("string", "Owned UTF-8 strings String"),
+                    ("vec", "Dynamic arrays Vec"),
+                    ("option", "Optional values Option<T>"),
+                    ("result", "Error handling Result<T, E>"),
+                    ("iter", "Iterators Iterator, IntoIterator, collect"),
+                    ("convert", "Type conversions From, Into, TryFrom, TryInto"),
+                    ("ops", "Operator overloading Add, Sub, Mul, Div, Index, Deref"),
+                    ("cmp", "Comparison traits Ord, Eq, PartialEq, PartialOrd"),
+                    ("clone", "Cloning Clone trait"),
+                    ("default", "Default values Default trait"),
+                    ("marker", "Marker traits Send, Sync, Copy, Sized"),
+                    ("mem", "Memory utilities size_of, align_of, replace, swap"),
+                    ("ptr", "Raw pointer operations NonNull, unique_ptr"),
+                    ("slice", "Slice operations and methods"),
+                    ("any", "Dynamic typing Any trait"),
+                    ("panic", "Panic handling and recovery"),
+                    ("error", "Error trait and error handling"),
+                    ("ffi", "Foreign function interface CString, CStr, OsString"),
+                    ("os", "OS-specific functionality"),
                 ],
             },
             "core": {
-                "description": "Core functionality available without heap allocation",
+                "description": "Core functionality available in no_std environments without heap allocation",
                 "modules": [
-                    ("mem", "Memory manipulation and management"),
-                    ("ptr", "Raw pointer operations"),
-                    ("slice", "Slice primitive operations"),
-                    ("str", "String slice operations"),
-                    ("option", "Optional values"),
-                    ("result", "Error handling with Result"),
-                    ("iter", "Iterator traits and implementations"),
-                    ("marker", "Marker traits like Send and Sync"),
-                    ("ops", "Operator traits"),
-                    ("fmt", "Formatting and display traits"),
+                    ("mem", "Memory manipulation size_of, align_of, replace, swap, forget"),
+                    ("ptr", "Raw pointer operations NonNull, read, write, offset"),
+                    ("slice", "Slice primitive operations from_raw_parts, len, as_ptr"),
+                    ("str", "String slice operations from_utf8, chars, bytes"),
+                    ("option", "Optional values Option<T>, Some, None, map, unwrap"),
+                    ("result", "Error handling Result<T, E>, Ok, Err, map, and_then"),
+                    ("iter", "Iterator traits Iterator, IntoIterator, collect, map, filter"),
+                    ("marker", "Marker traits Send, Sync, Copy, Sized, PhantomData"),
+                    ("ops", "Operator traits Add, Sub, Mul, Div, Index, Deref, Drop"),
+                    ("fmt", "Formatting Display, Debug, Write, Arguments"),
+                    ("cmp", "Comparison Ord, Eq, PartialEq, PartialOrd, Ordering"),
+                    ("convert", "Type conversions From, Into, TryFrom, TryInto, AsRef"),
+                    ("clone", "Cloning Clone trait and implementations"),
+                    ("default", "Default values Default trait"),
+                    ("hash", "Hashing Hash, Hasher traits"),
+                    ("any", "Dynamic typing Any, TypeId"),
+                    ("panic", "Panic handling PanicInfo"),
+                    ("num", "Numeric types and operations"),
+                    ("char", "Character manipulation and properties"),
+                    ("primitive", "Primitive type documentation"),
+                    ("cell", "Interior mutability Cell, RefCell"),
+                    ("pin", "Pinned pointers Pin"),
+                    ("task", "Async task abstractions Context, Poll, Waker"),
+                    ("future", "Future trait and async operations"),
+                    ("array", "Array utilities and implementations"),
+                    ("ascii", "ASCII character operations"),
                 ],
             },
             "alloc": {
-                "description": "Heap allocation and collection types",
+                "description": "Heap allocation and collection types for no_std with allocator",
                 "modules": [
-                    ("vec", "Dynamic arrays"),
-                    ("string", "UTF-8 strings"),
-                    ("boxed", "Heap-allocated values"),
-                    ("rc", "Reference-counted pointers"),
-                    ("arc", "Atomically reference-counted pointers"),
-                    ("collections", "BTreeMap, BTreeSet, LinkedList, VecDeque"),
+                    ("vec", "Dynamic arrays Vec<T>, push, pop, extend, drain"),
+                    ("string", "UTF-8 strings String, push_str, format!"),
+                    ("boxed", "Heap-allocated values Box<T>, into_raw, from_raw"),
+                    ("rc", "Reference-counted pointers Rc<T>, clone, strong_count"),
+                    ("arc", "Atomically reference-counted Arc<T>, clone, strong_count"),
+                    ("collections", "BTreeMap, BTreeSet, LinkedList, VecDeque, BinaryHeap"),
+                    ("slice", "Slice utilities to_vec, sort, binary_search"),
+                    ("str", "String slice utilities to_owned, split, replace"),
+                    ("borrow", "Borrowing Cow, ToOwned, Borrow"),
+                    ("fmt", "Formatting format! macro and utilities"),
+                    ("sync", "Arc and synchronization primitives"),
+                    ("task", "Task abstractions for async"),
+                ],
+            },
+            "proc_macro": {
+                "description": "Procedural macro support for compile-time code generation",
+                "modules": [
+                    ("TokenStream", "Token stream manipulation"),
+                    ("TokenTree", "Token tree operations"),
+                    ("Span", "Source code span tracking"),
+                    ("Diagnostic", "Compilation error reporting"),
+                    ("Group", "Token grouping"),
+                    ("Ident", "Identifier handling"),
+                    ("Literal", "Literal value handling"),
+                    ("Punct", "Punctuation token handling"),
+                ],
+            },
+            "test": {
+                "description": "Testing support for unit and integration tests",
+                "modules": [
+                    ("test", "Test harness and benchmarking"),
+                    ("bench", "Benchmark support"),
+                    ("assert", "Assertion macros"),
                 ],
             },
         }
@@ -168,11 +236,29 @@ class IngestionOrchestrator:
             },
         )
 
-        # Main crate documentation with example code
+        # Main crate documentation with example code and setup guidance
         main_doc = info["description"]
+
+        # Add comprehensive setup instructions for complete documentation
+        main_doc += "\n\n## ⚠️ Limited Documentation Available"
+        main_doc += "\n\nThis is fallback documentation with basic coverage. For complete standard library documentation:"
+        main_doc += "\n\n### Get Complete Documentation"
+        main_doc += "\n1. Install the rust-docs-json component:"
+        main_doc += "\n   ```bash"
+        main_doc += "\n   rustup component add --toolchain nightly rust-docs-json"
+        main_doc += "\n   ```"
+        main_doc += "\n2. Restart your MCP server to enable full stdlib support"
+        main_doc += "\n3. Access thousands of documented stdlib items instead of this limited fallback"
+        main_doc += "\n\n### Alternative: Use docs.rs"
+        main_doc += f"\nFor web browsing, visit: https://doc.rust-lang.org/{crate_name}/"
+
         if crate_name == "std":
-            main_doc += "\n\n## Example\n```rust\nuse std::collections::HashMap;\nuse std::fs::File;\nuse std::io::prelude::*;\n\nfn main() -> std::io::Result<()> {\n    let mut file = File::create(\"hello.txt\")?;\n    file.write_all(b\"Hello, world!\")?;\n    Ok(())\n}\n```"
-        
+            main_doc += "\n\n## Example Usage\n```rust\nuse std::collections::HashMap;\nuse std::fs::File;\nuse std::io::prelude::*;\n\nfn main() -> std::io::Result<()> {\n    let mut file = File::create(\"hello.txt\")?;\n    file.write_all(b\"Hello, world!\")?;\n    \n    let mut map = HashMap::new();\n    map.insert(\"key\", \"value\");\n    println!(\"Value: {:?}\", map.get(\"key\"));\n    Ok(())\n}\n```"
+        elif crate_name == "core":
+            main_doc += "\n\n## Example Usage\n```rust\n#![no_std]\nuse core::{option::Option, result::Result};\n\nfn safe_divide(a: i32, b: i32) -> Result<i32, &'static str> {\n    if b == 0 {\n        Err(\"Division by zero\")\n    } else {\n        Ok(a / b)\n    }\n}\n```"
+        elif crate_name == "alloc":
+            main_doc += "\n\n## Example Usage\n```rust\n#![no_std]\nextern crate alloc;\nuse alloc::{vec::Vec, string::String};\n\nfn main() {\n    let mut vec = Vec::new();\n    vec.push(\"Hello\");\n    vec.push(\"World\");\n    \n    let s = String::from(\"Heap allocated string\");\n}\n```"
+
         chunks.append(
             {
                 "item_path": crate_name,
@@ -195,7 +281,7 @@ class IngestionOrchestrator:
                 doc_with_example += "\n\n## Example\n```rust\nuse std::io::{self, Write};\n\nio::stdout().write_all(b\"Hello, world!\\n\")?;\n```"
             elif module_name == "vec" and crate_name == "alloc":
                 doc_with_example += "\n\n## Example\n```rust\nlet mut vec = Vec::new();\nvec.push(1);\nvec.push(2);\n```"
-            
+
             chunks.append(
                 {
                     "item_path": f"{crate_name}::{module_name}",
@@ -341,16 +427,16 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 try:
                     # Download Cargo.toml for this crate
                     cargo_url = f"https://docs.rs/crate/{crate_name}/{version if version != 'latest' else ''}/download"
-                    
+
                     async with session.get(cargo_url) as response:
                         if response.status == 200:
-                            import tempfile
-                            import tarfile
                             import io
-                            
+                            import tarfile
+                            import tempfile
+
                             # Download crate source
                             crate_data = await response.read()
-                            
+
                             # Extract Cargo.toml from the tarball
                             with tarfile.open(fileobj=io.BytesIO(crate_data), mode='r:gz') as tar:
                                 # Find Cargo.toml in the archive
@@ -359,7 +445,7 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                     if member.name.endswith('/Cargo.toml') and member.name.count('/') == 1:
                                         cargo_toml_member = member
                                         break
-                                
+
                                 if cargo_toml_member:
                                     # Extract and parse Cargo.toml
                                     cargo_toml_file = tar.extractfile(cargo_toml_member)
@@ -368,12 +454,12 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                         with tempfile.NamedTemporaryFile(mode='wb', suffix='.toml', delete=False) as tmp:
                                             tmp.write(cargo_toml_file.read())
                                             tmp_path = Path(tmp.name)
-                                        
+
                                         try:
                                             # Parse dependencies
                                             cargo_data = parse_cargo_toml(tmp_path)
                                             dependencies = []
-                                            
+
                                             # Extract crate names and versions
                                             for crate_spec in cargo_data.get("crates", []):
                                                 if "@" in crate_spec:
@@ -381,7 +467,7 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                                     dependencies.append({"name": name, "version": ver})
                                                 else:
                                                     dependencies.append({"name": crate_spec, "version": "latest"})
-                                            
+
                                             # Store dependencies
                                             if dependencies:
                                                 await store_crate_dependencies(
@@ -391,17 +477,17 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                         finally:
                                             # Clean up temp file
                                             tmp_path.unlink(missing_ok=True)
-                            
+
                 except Exception as e:
                     logger.warning(f"Could not fetch or parse Cargo.toml for {crate_name}: {e}")
                     # Continue without failing ingestion
 
             # Set initial status
             await set_ingestion_status(db_path, crate_id, "started")
-            
+
             # Initialize resolved_version outside try block so it's available in fallback
             resolved_version = version
-            
+
             try:
                 # Resolve version
                 if is_stdlib:
@@ -411,12 +497,78 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                         session, crate_name, version
                     )
 
-                # Try Tier 1: Rustdoc JSON
+                # For stdlib crates, try RUST_LANG_STDLIB tier first
+                if is_stdlib:
+                    try:
+                        await set_ingestion_status(db_path, crate_id, "downloading")
+
+                        # Check for local stdlib JSON using rustup detector
+                        rustup_detector = RustupDetector()
+                        local_json_path = rustup_detector.get_stdlib_json_path(crate_name, "nightly")
+
+                        if local_json_path and local_json_path.exists():
+                            logger.info(f"Found local stdlib JSON for {crate_name}: {local_json_path}")
+                            await set_ingestion_status(db_path, crate_id, "processing")
+
+                            # Read and process local stdlib JSON
+                            async with aiofiles.open(local_json_path, encoding='utf-8') as f:
+                                json_content = await f.read()
+
+                            ingestion_tier = IngestionTier.RUST_LANG_STDLIB
+
+                            # Parse and store
+                            chunks = []
+                            modules = None
+
+                            async for item in parse_rustdoc_items_streaming(json_content):
+                                if "_modules" in item:
+                                    modules = item["_modules"]
+                                else:
+                                    # Extract metadata
+                                    item["signature"] = extract_signature(item)
+                                    item["deprecated"] = extract_deprecated(item)
+                                    item["visibility"] = extract_visibility(item)
+                                    item["examples"] = extract_code_examples(
+                                        item.get("doc", "")
+                                    )
+                                    chunks.append(item)
+
+                            # Store modules if found
+                            if modules:
+                                await store_modules(db_path, crate_id, modules)
+
+                            # Generate and store embeddings
+                            chunk_embedding_pairs = generate_embeddings_streaming(chunks)
+                            await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+
+                            # Generate example embeddings
+                            await generate_example_embeddings(
+                                db_path, crate_name, resolved_version
+                            )
+
+                            await set_ingestion_status(
+                                db_path,
+                                crate_id,
+                                "completed",
+                                ingestion_tier=ingestion_tier.value,
+                            )
+
+                            logger.info(
+                                f"Successfully ingested {crate_name}@{resolved_version} from local stdlib JSON"
+                            )
+                            return db_path
+                        else:
+                            logger.info(f"Local stdlib JSON not found for {crate_name}, will fall back to remote/fallback")
+
+                    except Exception as e:
+                        logger.warning(f"Local stdlib ingestion failed for {crate_name}: {e}, falling back")
+
+                # Try Tier 1: Rustdoc JSON (for non-stdlib or when stdlib local failed)
                 try:
                     await set_ingestion_status(db_path, crate_id, "downloading")
 
                     if is_stdlib:
-                        # For stdlib, we know this will likely fail but try anyway
+                        # For stdlib, try docs.rs URL (expected to fail but worth trying)
                         rustdoc_url = (
                             f"https://docs.rs/{crate_name}/latest/{crate_name}.json"
                         )
@@ -487,15 +639,15 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     try:
                         logger.info(f"Attempting source extraction for {crate_name}@{resolved_version}")
                         await set_ingestion_status(db_path, crate_id, "processing")
-                        
+
                         extractor = CratesIoSourceExtractor(session=session)
                         chunks = await extractor.extract_from_source(
                             crate_name, resolved_version
                         )
-                        
+
                         if chunks and len(chunks) > 0:
                             ingestion_tier = IngestionTier.SOURCE_EXTRACTION
-                            
+
                             # Process chunks - add metadata and examples
                             for chunk in chunks:
                                 # Extract examples from documentation
@@ -504,11 +656,11 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                 chunk["signature"] = extract_signature(chunk)
                                 chunk["deprecated"] = extract_deprecated(chunk)
                                 chunk["visibility"] = extract_visibility(chunk)
-                            
+
                             # Generate and store embeddings
                             chunk_embedding_pairs = generate_embeddings_streaming(chunks)
                             await store_embeddings_streaming(db_path, chunk_embedding_pairs)
-                            
+
                             # Generate example embeddings
                             try:
                                 await generate_example_embeddings(
@@ -516,17 +668,17 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                                 )
                             except Exception as e:
                                 logger.warning(f"Failed to generate example embeddings: {e}")
-                            
+
                             await set_ingestion_status(
                                 db_path, crate_id, "completed",
                                 ingestion_tier=ingestion_tier.value
                             )
-                            
+
                             logger.info(
                                 f"Successfully ingested {crate_name}@{resolved_version} via source extraction"
                             )
                             return db_path
-                            
+
                     except Exception as e:
                         logger.warning(f"Source extraction failed: {e}")
 

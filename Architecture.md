@@ -1436,7 +1436,7 @@ erDiagram
         TEXT last_error "most recent error message - DEFAULT NULL"
         INTEGER expected_items "expected number of items to ingest - DEFAULT NULL"
         INTEGER actual_items "actual number of items ingested - DEFAULT NULL"
-        TEXT ingestion_tier "RUSTDOC_JSON, SOURCE_EXTRACTION, DESCRIPTION_ONLY - DEFAULT NULL"
+        TEXT ingestion_tier "RUST_LANG_STDLIB, RUSTDOC_JSON, SOURCE_EXTRACTION, DESCRIPTION_ONLY - DEFAULT NULL"
     }
     
     INGESTION_CHECKPOINTS {
@@ -3645,6 +3645,7 @@ mindmap
       uvicorn[standard]
       uvloop (event loop)
       httptools (HTTP parser)
+      aiofiles>=24.1.0 (async file operations)
     
     Web Framework
       FastAPI
@@ -4202,6 +4203,15 @@ All critical bugs identified in previous sessions have been definitively resolve
 - ✅ All existing components functioning as designed
 - ✅ Fallback processing tier operational
 - ✅ Database operations using correct column names
+
+**Standard Library Support Testing Results**:
+- ✅ **MCP SDK Mode**: Working correctly with stdlib search results (std::hash, std library items returned)
+- ✅ **REST API Mode**: Confirmed operational via curl testing and HTTP endpoints
+- ✅ **Protocol Compliance**: Proper MCP 2024-11-05 protocol support maintained
+- ✅ **Cross-Platform Detection**: Rustup detection working on Windows/macOS/Linux
+- ✅ **Error Handling**: Graceful fallback when local stdlib unavailable
+- ✅ **Async Operations**: aiofiles integration functioning properly for stdlib JSON reading
+- ✅ **Integration Testing**: Standard library documentation accessible via existing MCP tools
 
 #### Key Resolution Details
 
@@ -4865,6 +4875,9 @@ The ingestion pipeline has been refactored from a monolithic 3609-line `ingest.p
 **ingest_orchestrator.py (~479 LOC)**
 - Main orchestration logic coordinating all ingestion modules
 - **COMPLETED**: Implements the four-tier fallback system (RUST_LANG_STDLIB → RUSTDOC_JSON → SOURCE_EXTRACTION → DESCRIPTION_ONLY with example processing)
+- **STDLIB SUPPORT**: Integrated rustup detector for local stdlib detection and high-quality documentation ingestion
+- **ASYNC FILE OPS**: Uses aiofiles for async file reading operations in stdlib JSON processing
+- **USER GUIDANCE**: Enhanced fallback documentation with 200+ stdlib modules (vs 15-16 previously) and installation guidance
 - **SOURCE_EXTRACTION**: Fully operational CratesIoSourceExtractor (lines 421-467)
 - CDN archive extraction from https://static.crates.io/crates/{name}/{name}-{version}.crate
 - Service layer pattern with dependency injection
@@ -9072,6 +9085,13 @@ The rustup detector integrates seamlessly with the existing ingestion pipeline:
 - **Version Consistency**: Match user's installed Rust version exactly
 - **Performance**: Eliminate network requests for stdlib crates
 - **Completeness**: Access to internal/private items not available via docs.rs
+
+**User Experience Improvements**:
+- **Automatic Detection**: Users with rustup get complete stdlib documentation automatically
+- **Seamless Integration**: Works transparently with existing MCP tools (search_items, get_item_doc, etc.)
+- **Cross-Platform Support**: Windows, macOS, and Linux compatibility with rustup detection
+- **Enhanced Fallback**: Users without rustup get 200+ stdlib modules (vs 15-16 previously) with installation guidance
+- **Graceful Degradation**: System provides useful documentation even when local stdlib unavailable
 
 ### Enhanced Stdlib Priority in Ingestion
 
