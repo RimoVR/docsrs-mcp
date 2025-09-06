@@ -8486,7 +8486,9 @@ classDiagram
         +processed_crates: Set[str]
         +background_task: asyncio.Task
         +memory_monitor: MemoryMonitor
+        +state: WorkerState (lifecycle management)
         +start_worker() -> None
+        +stop() -> None (transitions to STOPPED state)
         +schedule_crate(crate: str, priority: int) -> None
         +process_queue() -> None
         +adjust_concurrency(memory_usage: float) -> None
@@ -8494,6 +8496,16 @@ classDiagram
         -_process_single_crate(crate: str) -> None
         -_should_pre_ingest(crate: str, version: str) -> bool
         -_check_duplicate(crate: str) -> bool
+        -_run() -> None (main worker loop with state preservation)
+    }
+    
+    class WorkerState {
+        <<enumeration>>
+        IDLE = "idle"
+        RUNNING = "running"
+        PAUSED = "paused"
+        STOPPING = "stopping"
+        STOPPED = "stopped"
     }
     
     class PriorityQueue {
@@ -8564,6 +8576,7 @@ classDiagram
     PopularCratesManager --> CircuitBreakerState
     PreIngestionWorker --> PriorityQueue
     PreIngestionWorker --> MemoryMonitor
+    PreIngestionWorker --> WorkerState
     PriorityQueue --> PreIngestionItem
     IngestionScheduler --> PopularCratesManager
     IngestionScheduler --> PreIngestionWorker
@@ -8609,6 +8622,84 @@ classDiagram
 - **Atomic Operations**: File locking and atomic writes prevent data corruption during failures
 - **Graceful Degradation**: Failed pre-ingestion attempts don't impact on-demand user requests
 - **Comprehensive Logging**: Detailed error tracking without impacting user-facing performance
+
+### Worker State Lifecycle Management
+
+The PreIngestionWorker implements comprehensive state management through the `WorkerState` enum to enable proper monitoring, control, and lifecycle management of pre-ingestion operations.
+
+#### WorkerState Enum Definition
+
+The `WorkerState` enum provides five distinct states that cover the complete worker lifecycle:
+
+```python
+class WorkerState(str, Enum):
+    IDLE = "idle"       # Worker initialized but not actively processing
+    RUNNING = "running" # Worker actively processing crates from queue
+    PAUSED = "paused"   # Worker temporarily suspended (can resume)
+    STOPPING = "stopping"  # Worker gracefully shutting down
+    STOPPED = "stopped"    # Worker explicitly stopped (final state)
+```
+
+**Critical Fix**: The `STOPPED = "stopped"` attribute was missing from the original enum definition, causing `AttributeError` exceptions in `endpoints.py:113` and `mcp_sdk_server.py:1129` when code attempted to access this state. This fix resolves these runtime errors and enables proper worker lifecycle management.
+
+#### State Transition Flow
+
+The worker follows a well-defined state transition pattern:
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE : Worker Initialization
+    IDLE --> RUNNING : start_worker()
+    RUNNING --> PAUSED : pause() operation
+    PAUSED --> RUNNING : resume() operation  
+    RUNNING --> STOPPING : stop() called
+    PAUSED --> STOPPING : stop() called
+    STOPPING --> STOPPED : Graceful shutdown complete
+    STOPPED --> [*] : Worker cleanup
+    
+    note right of STOPPED : STOPPED state distinguishes<br/>explicitly stopped workers<br/>from idle workers
+```
+
+#### Key State Management Features
+
+**Explicit Stop State**: The `STOPPED` state distinguishes workers that have been explicitly stopped from those that are simply idle, enabling:
+- Proper monitoring and control of worker lifecycle
+- Prevention of accidental restarts of intentionally stopped workers  
+- Clear differentiation between natural idle state and deliberate termination
+
+**Enhanced stop() Method**: Updated to transition workers to `STOPPED` instead of `IDLE`:
+```python
+def stop(self) -> None:
+    """Stop the worker and transition to STOPPED state."""
+    self.state = WorkerState.STOPPING
+    # ... graceful shutdown logic ...
+    self.state = WorkerState.STOPPED
+```
+
+**State Preservation in _run() Loop**: The main worker loop's finally block now preserves the `STOPPED` state:
+```python
+async def _run(self) -> None:
+    """Main worker processing loop with state preservation."""
+    try:
+        self.state = WorkerState.RUNNING
+        # ... main processing logic ...
+    except Exception as e:
+        logger.error(f"Worker error: {e}")
+        raise
+    finally:
+        # Preserve STOPPED state if explicitly set
+        if self.state != WorkerState.STOPPED:
+            self.state = WorkerState.IDLE
+```
+
+#### State Monitoring Integration
+
+Worker state is integrated with the health monitoring system:
+- **Health Endpoints**: Worker state exposed via `/health` and MCP health tools
+- **Status Reporting**: Real-time state visibility for monitoring and debugging
+- **Lifecycle Events**: State transitions logged for operational visibility
+
+This state management enhancement ensures robust worker lifecycle control and eliminates the AttributeError exceptions that previously occurred when attempting to access the missing `STOPPED` state.
 
 ## Ingestion Completion Tracking Architecture
 

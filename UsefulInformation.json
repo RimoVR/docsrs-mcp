@@ -40,6 +40,29 @@
           "similarIssuesFixed": "This follows the same pattern as CompareVersionsRequest.categories and list_versions validation fixes - service layer field alignment with Pydantic model requirements"
         },
         {
+          "error": "AttributeError: 'WorkerState' object has no attribute 'STOPPED'",
+          "rootCause": "WorkerState enum in popular_crates.py was missing STOPPED attribute that was referenced in endpoints.py and mcp_sdk_server.py for monitoring worker status transitions",
+          "solution": "Added STOPPED = 'stopped' to WorkerState enum definition and updated all references to use WorkerState.STOPPED for consistent state management",
+          "context": "Worker status monitoring failed when attempting to check pre-ingestion worker state, causing crashes in monitoring endpoints",
+          "lesson": "Always define all enum values that are referenced throughout the codebase to prevent AttributeError exceptions during runtime state checks",
+          "pattern": "Use defensive enum access patterns like getattr(WorkerState, 'STOPPED', None) when accessing potentially missing enum attributes, or ensure complete enum definitions upfront",
+          "dateEncountered": "2025-09-06",
+          "relatedFiles": [
+            "src/docsrs_mcp/popular_crates.py",
+            "src/docsrs_mcp/endpoints.py", 
+            "src/docsrs_mcp/mcp_sdk_server.py"
+          ],
+          "fixLocations": [
+            "popular_crates.py:42 - Added STOPPED state to WorkerState enum",
+            "popular_crates.py:577 - Updated stop() method to use WorkerState.STOPPED",
+            "popular_crates.py:648 - Updated finally block to preserve STOPPED state"
+          ],
+          "codeExample": "# Before (causing AttributeError):\nclass WorkerState(Enum):\n    IDLE = 'idle'\n    PROCESSING = 'processing'\n    # STOPPED was missing\n\n# After (complete enum definition):\nclass WorkerState(Enum):\n    IDLE = 'idle'\n    PROCESSING = 'processing'\n    STOPPED = 'stopped'  # Added missing state\n\n# Defensive access pattern for future safety:\nif hasattr(WorkerState, 'STOPPED'):\n    worker_state = WorkerState.STOPPED\nelse:\n    worker_state = getattr(WorkerState, 'STOPPED', WorkerState.IDLE)",
+          "impact": "Prevents monitoring pre-ingestion worker status crashes and ensures proper state transitions during worker lifecycle management",
+          "prevention": "Implement comprehensive enum validation tests that verify all referenced enum values exist, and use static analysis tools to detect missing enum attributes",
+          "debuggingTechnique": "Check enum definitions when encountering AttributeError on enum access, and verify all state transitions use defined enum values"
+        },
+        {
           "error": "compareVersions Schema Reference Error - PointerToNowhere for '/components/schemas/ItemChange'",
           "rootCause": "MCP manifest uses $ref to ChangeCategory enum that doesn't exist in the schema structure. The schema references undefined components.",
           "solution": "Replace $ref with inline enum array definitions in the MCP manifest schema. Define enum values directly instead of referencing external components.",

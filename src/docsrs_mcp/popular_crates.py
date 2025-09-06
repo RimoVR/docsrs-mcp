@@ -39,6 +39,7 @@ class WorkerState(Enum):
     RUNNING = "running"
     PAUSED = "paused"
     STOPPING = "stopping"
+    STOPPED = "stopped"
     ERROR = "error"
 
 
@@ -573,7 +574,7 @@ class PreIngestionWorker:
             if self._workers:
                 await asyncio.gather(*self._workers, return_exceptions=True)
 
-            self._state = WorkerState.IDLE
+            self._state = WorkerState.STOPPED
             logger.info("Pre-ingestion worker stopped")
             return True
         return False
@@ -644,7 +645,7 @@ class PreIngestionWorker:
         finally:
             # Cleanup
             await self.manager.close()
-            if self._state != WorkerState.ERROR:
+            if self._state not in [WorkerState.ERROR, WorkerState.STOPPED]:
                 self._state = WorkerState.IDLE
 
     async def _ingest_worker(self, worker_id: int):
