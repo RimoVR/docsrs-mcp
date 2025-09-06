@@ -1476,6 +1476,39 @@
             "Method resolution includes trait methods"
           ],
           "preventionStrategy": "Always verify rustdoc JSON structure through actual data inspection before implementing field access patterns. Add comprehensive logging to catch field access failures early."
+        },
+        {
+          "error": "Empty module structures and missing code snippets in MCP responses",
+          "symptoms": "get_crate_summary returns 'modules: []', get_module_tree returns empty structures, MCP tools showing no module content",
+          "rootCause": "Import failure in storage_manager.py line 563 - 'from .intelligence_extractor import store_modules' but store_modules is located in database.storage module, not intelligence_extractor",
+          "solution": "Change import from relative to absolute: 'from docsrs_mcp.database.storage import store_modules'. This resolves the ImportError and restores module extraction functionality immediately.",
+          "context": "All crates returned empty modules arrays despite successful rustdoc JSON parsing, breaking core MCP functionality",
+          "lesson": "Use absolute imports instead of relative imports for cross-package dependencies to avoid import resolution failures in complex module hierarchies",
+          "pattern": "Always use absolute imports for dependencies outside the current package: 'from package.module import function' instead of 'from .module import function'",
+          "dateEncountered": "2025-09-06",
+          "status": "RESOLVED",
+          "resolution_date": "2025-09-06",
+          "fix_details": "Changed import statement in storage_manager.py from relative to absolute path, immediately restoring full module extraction functionality",
+          "relatedFiles": ["src/docsrs_mcp/ingestion/storage_manager.py", "src/docsrs_mcp/database/storage.py"],
+          "codeExample": "# BEFORE (Broken):\nfrom .intelligence_extractor import store_modules\n\n# AFTER (Fixed):\nfrom docsrs_mcp.database.storage import store_modules",
+          "verificationResults": {
+            "before": "serde: modules: [], tokio: modules: [], all crates returned empty structures",
+            "after": "serde: 21 modules with hierarchical nesting, tokio: 43 modules with deep structure, all MCP tools working normally"
+          },
+          "impact": "Immediately resolves module extraction - restores full functionality for get_crate_summary, get_module_tree, and all dependent MCP operations",
+          "debuggingTechnique": "Check import paths when functions seem to exist but cannot be imported. Use 'import isolation tests' to verify imports work correctly. Test database storage separately from parsing to isolate storage failures.",
+          "preventionStrategies": [
+            "Use absolute imports instead of relative imports for cross-package dependencies",
+            "Add import isolation tests to prevent regression",
+            "Verify end-to-end pipeline testing after major changes",
+            "Use IDE import checking during development"
+          ],
+          "testingConfirmed": [
+            "All crates now return proper module hierarchies",
+            "MCP tools functioning without regressions", 
+            "Database storage operations working correctly",
+            "End-to-end pipeline restored to full functionality"
+          ]
         }
       ]
     },

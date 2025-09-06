@@ -130,7 +130,7 @@ graph LR
                 SIG_EXTRACTOR[signature_extractor.py<br/>Metadata extraction (~365 LOC)<br/>Complete item extraction<br/>Macro extraction patterns<br/>Enhanced schema validation]
                 INTELLIGENCE_EXTRACTOR[intelligence_extractor.py<br/>Code Intelligence Extraction<br/>Error types, safety info, feature requirements<br/>Pre-compiled regex patterns<br/>Session-based caching mechanism]
                 CODE_EXAMPLES[code_examples.py<br/>Code example extraction (~343 LOC)<br/>FIXED: Character fragmentation bug at lines 234-242<br/>FIXED: Vector sync step for vec_example_embeddings<br/>Language detection via pygments<br/>30% confidence threshold<br/>Batch processing for embeddings sync<br/>JSON structure with metadata]
-                STORAGE_MGR[storage_manager.py<br/>Batch embedding storage (~296 LOC)<br/>FIXED: NULL constraint protection for content field<br/>Enhanced robustness with explicit NULL checks<br/>Transaction management<br/>Streaming batch inserts<br/>Memory-aware chunking<br/>NEW: store_crate_dependencies function for dependency relationships]
+                STORAGE_MGR[storage_manager.py<br/>Batch embedding storage (~296 LOC)<br/>CRITICAL IMPORT BUG FIXED: Incorrect import in line 563<br/>OLD: from .intelligence_extractor import store_modules<br/>NEW: from docsrs_mcp.database.storage import store_modules<br/>FIXED: NULL constraint protection for content field<br/>Enhanced robustness with explicit NULL checks<br/>Transaction management<br/>Streaming batch inserts<br/>Memory-aware chunking<br/>NEW: store_crate_dependencies function for dependency relationships]
             end
             
             ING[ingest.py<br/>Backward compatibility layer<br/>Re-exports from modular components<br/>Maintains existing API surface]
@@ -5048,6 +5048,14 @@ The ingestion pipeline has been refactored from a monolithic 3609-line `ingest.p
 - Regression testing coverage for both stdlib and normal crates
 
 **storage_manager.py (~296 LOC)** - ROBUSTNESS ENHANCED
+- **CRITICAL IMPORT BUG FIX**: Resolved incorrect import at line 563 that prevented all module data from being stored
+  - **Root Cause**: `from .intelligence_extractor import store_modules` when function is in `..database.storage`
+  - **Fix Applied**: Changed to absolute import `from docsrs_mcp.database.storage import store_modules`
+  - **Impact**: Modules now correctly parsed AND stored, fixing empty module structures across all crates
+- **VERIFICATION RESULTS**: 
+  - ✅ serde: 21 modules extracted with full hierarchy (was empty)
+  - ✅ tokio: 43 modules with 4-level deep nesting (`tokio::doc::os::windows::io`)
+  - ✅ All MCP tools working: get_crate_summary, get_module_tree, search_items, get_item_doc, search_examples
 - **FIXED**: Added NULL constraint protection for content field in _store_batch function
 - **CRITICAL FIX**: Resolved vector table synchronization failure that caused search_items to return empty results
 - **ENHANCED**: Manual vec_embeddings table synchronization following pattern from code_examples.py
@@ -5077,6 +5085,12 @@ The main `ingest.py` file now serves as a compatibility layer:
 #### Recent Architectural Fixes and Enhancements
 
 **Critical Issues Resolved**:
+- **CRITICAL IMPORT BUG**: Fixed storage_manager.py:563 incorrect import that silently prevented all module data from being stored
+  - **Pipeline Flow**: Parsing → Trait Extraction → Intelligence Extraction → **STORAGE FAILURE** (silent)
+  - **Root Cause**: `from .intelligence_extractor import store_modules` when function is actually in `..database.storage`
+  - **Solution**: Absolute import `from docsrs_mcp.database.storage import store_modules`
+  - **System Impact**: All modules now correctly parsed AND stored, fixing empty module hierarchies
+  - **Verification**: serde (21 modules), tokio (43 modules with 4-level nesting), all MCP tools functional
 - **Rustdoc Parser Overhaul**: Complete rewrite to handle actual rustdoc JSON structure with proper extraction from "index" and "paths" sections
 - **Character Fragmentation Bug**: Fixed critical bug in code_examples.py where examples were treated as individual characters instead of whole code blocks
 - **Storage Robustness**: Added NULL constraint protection in storage_manager.py to prevent database integrity issues
@@ -5101,8 +5115,10 @@ The modular architecture follows a clear dependency graph with the orchestrator 
 ingest_orchestrator.py (Main Controller)
 ├── version_resolver.py → cache_manager.py
 ├── rustdoc_parser.py → signature_extractor.py → intelligence_extractor.py → code_examples.py
-└── embedding_manager.py → storage_manager.py
+└── embedding_manager.py → storage_manager.py → database.storage.store_modules [FIXED IMPORT]
 ```
+
+**CRITICAL ARCHITECTURAL INSIGHT**: The ingestion pipeline was working correctly through all phases (parsing, trait extraction, intelligence extraction) but silently failing at the final storage step due to an incorrect import in `storage_manager.py:563`. The module hierarchy building in `rustdoc_parser.py` was functioning perfectly, and the database schema properly supports hierarchical relationships, but modules were never being persisted due to the broken import path.
 
 **Enhanced Ingestion Flow Through Modules** (Updated with Recent Fixes):
 1. **Orchestrator** receives ingestion request and determines tier strategy
@@ -5112,10 +5128,11 @@ ingest_orchestrator.py (Main Controller)
 5. **Intelligence Extractor** analyzes signatures and docs for error types, safety info, and features
 6. **Code Examples** extractor (FIXED) processes documentation with character fragmentation protection and proper vector sync
 7. **Embedding Manager** generates vectors for both items and examples in adaptive batches
-8. **Storage Manager** (FIXED) handles transactional database operations with NULL constraint protection, streaming inserts, and critical vector table synchronization
-9. **Vector Sync Step** (FIXED) populates both vec_embeddings and vec_example_embeddings virtual tables for complete search functionality
-10. **Database Diagnostics** (NEW) provides consistency checking and repair capabilities for vector table synchronization issues
-11. **Orchestrator** coordinates error handling and tier fallback across all modules
+8. **Storage Manager** (CRITICAL IMPORT FIX) now correctly imports `store_modules` from `docsrs_mcp.database.storage`, enabling module hierarchy storage that was previously silently failing
+9. **Module Storage Step** (NOW WORKING) stores complete module hierarchies with parent_id relationships via corrected import
+10. **Vector Sync Step** (FIXED) populates both vec_embeddings and vec_example_embeddings virtual tables for complete search functionality
+11. **Database Diagnostics** (NEW) provides consistency checking and repair capabilities for vector table synchronization issues
+12. **Orchestrator** coordinates error handling and tier fallback across all modules
 
 ### Ingestion Layer Details
 

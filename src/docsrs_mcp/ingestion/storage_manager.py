@@ -12,6 +12,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 import sqlite_vec
@@ -391,3 +392,188 @@ async def store_embeddings(
     # Convert to streaming format
     chunk_embedding_pairs = zip(chunks, embeddings, strict=False)
     await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+
+
+async def store_trait_implementations(
+    db_path: Path, trait_implementations: list[dict[str, Any]], crate_id: int
+) -> None:
+    """Store trait implementations in the database.
+    
+    Args:
+        db_path: Path to the database file
+        trait_implementations: List of trait implementation dictionaries
+        crate_id: Database crate ID for foreign key constraint
+    """
+    if not trait_implementations:
+        logger.debug("No trait implementations to store")
+        return
+        
+    async with aiosqlite.connect(db_path) as db:
+        try:
+            # Prepare batch insert for trait implementations
+            trait_impl_data = []
+            for impl in trait_implementations:
+                trait_impl_data.append((
+                    crate_id,
+                    impl.get("trait_path", ""),
+                    impl.get("impl_type_path", ""), 
+                    impl.get("generic_params"),
+                    impl.get("where_clauses"),
+                    1 if impl.get("is_blanket", False) else 0,
+                    1 if impl.get("is_negative", False) else 0,
+                    impl.get("impl_signature"),
+                    None,  # source_location - not available from rustdoc JSON
+                    impl.get("stability_level", "stable"),
+                    impl.get("item_id", "")
+                ))
+            
+            # Batch insert with proper SQLite syntax
+            await db.executemany("""
+                INSERT OR IGNORE INTO trait_implementations (
+                    crate_id, trait_path, impl_type_path, generic_params, 
+                    where_clauses, is_blanket, is_negative, impl_signature,
+                    source_location, stability_level, item_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, trait_impl_data)
+            
+            await db.commit()
+            logger.info(f"Stored {len(trait_implementations)} trait implementations for crate {crate_id}")
+            
+        except Exception as e:
+            logger.error(f"Error storing trait implementations: {e}")
+            await db.rollback()
+            raise
+
+
+async def store_trait_definitions(
+    db_path: Path, trait_definitions: list[dict[str, Any]], crate_id: int
+) -> None:
+    """Store trait definitions in the database.
+    
+    Note: This stores in trait_implementations table with special markers
+    for trait definitions themselves.
+    
+    Args:
+        db_path: Path to the database file
+        trait_definitions: List of trait definition dictionaries
+        crate_id: Database crate ID for foreign key constraint
+    """
+    if not trait_definitions:
+        logger.debug("No trait definitions to store")
+        return
+        
+    async with aiosqlite.connect(db_path) as db:
+        try:
+            # Store trait definitions as special entries
+            # We could create a separate traits table, but for MVP we'll use
+            # the existing structure with a marker
+            trait_def_data = []
+            for trait_def in trait_definitions:
+                # Store trait definition as impl of itself
+                trait_def_data.append((
+                    crate_id,
+                    trait_def.get("trait_path", ""),
+                    f"_TRAIT_DEF_{trait_def.get('trait_path', '')}", # Special marker
+                    trait_def.get("generic_params"),
+                    json.dumps(trait_def.get("supertraits", [])) if trait_def.get("supertraits") else None,
+                    0,  # not blanket
+                    0,  # not negative
+                    f"trait {trait_def.get('trait_path', '').split('::')[-1]}" if trait_def.get("trait_path") else "",
+                    None,  # source_location
+                    trait_def.get("stability_level", "stable"),
+                    trait_def.get("item_id", "")
+                ))
+            
+            await db.executemany("""
+                INSERT OR IGNORE INTO trait_implementations (
+                    crate_id, trait_path, impl_type_path, generic_params,
+                    where_clauses, is_blanket, is_negative, impl_signature,
+                    source_location, stability_level, item_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, trait_def_data)
+            
+            await db.commit()
+            logger.info(f"Stored {len(trait_definitions)} trait definitions for crate {crate_id}")
+            
+        except Exception as e:
+            logger.error(f"Error storing trait definitions: {e}")
+            await db.rollback()
+            raise
+
+
+async def store_enhanced_items_streaming(
+    db_path: Path, enhanced_items_stream, crate_id: int
+) -> None:
+    """Store enhanced rustdoc items with trait extraction support.
+    
+    This function handles both regular items and trait-specific data
+    from the enhanced rustdoc parser.
+    
+    Args:
+        db_path: Path to the database file
+        enhanced_items_stream: Stream of enhanced items with trait data
+        crate_id: Database crate ID for trait storage
+    """
+    from .signature_extractor import (
+        extract_signature,
+        extract_deprecated, 
+        extract_visibility,
+    )
+    from .code_examples import extract_code_examples
+    
+    regular_items = []
+    trait_implementations = []
+    trait_definitions = []
+    modules_data = None
+    
+    # Collect items from stream
+    async for item in enhanced_items_stream:
+        if "_trait_impl" in item:
+            # This is trait implementation data
+            trait_implementations.append(item["_trait_impl"])
+        elif "_trait_def" in item:
+            # This is trait definition data
+            trait_definitions.append(item["_trait_def"])
+        elif "_modules" in item:
+            # Module hierarchy data
+            modules_data = item["_modules"]
+        else:
+            # Regular item for embedding storage - enhance with metadata
+            try:
+                item["signature"] = extract_signature(item)
+                item["deprecated"] = extract_deprecated(item)
+                item["visibility"] = extract_visibility(item)
+                item["examples"] = extract_code_examples(item.get("doc", ""))
+                regular_items.append(item)
+            except Exception as e:
+                logger.warning(f"Error enhancing item metadata: {e}")
+                regular_items.append(item)  # Store anyway
+    
+    # Store trait implementations and definitions first
+    if trait_implementations:
+        await store_trait_implementations(db_path, trait_implementations, crate_id)
+        
+    if trait_definitions:
+        await store_trait_definitions(db_path, trait_definitions, crate_id)
+    
+    # Store module hierarchy if present
+    if modules_data:
+        try:
+            # Import and store modules
+            from docsrs_mcp.database.storage import store_modules
+            await store_modules(db_path, crate_id, modules_data)
+            logger.info(f"Stored module hierarchy with {len(modules_data)} modules")
+        except Exception as e:
+            logger.warning(f"Error storing modules: {e}")
+    
+    # Generate embeddings and store regular items if any
+    if regular_items:
+        logger.info(f"Processing {len(regular_items)} regular items for embedding")
+        chunk_embedding_pairs = generate_embeddings_streaming(regular_items)
+        await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+    
+    logger.info(
+        f"Enhanced storage complete: {len(regular_items)} items, "
+        f"{len(trait_implementations)} trait impls, "
+        f"{len(trait_definitions)} trait defs"
+    )
