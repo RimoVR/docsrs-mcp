@@ -256,11 +256,11 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Name of the Rust crate",
                 },
-                "version1": {
+                "version_a": {
                     "type": "string",
                     "description": "First version to compare",
                 },
-                "version2": {
+                "version_b": {
                     "type": "string",
                     "description": "Second version to compare",
                 },
@@ -273,7 +273,7 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
                     "description": "Show only breaking changes (true/false)",
                 },
             },
-            "required": ["crate_name", "version1", "version2"],
+            "required": ["crate_name", "version_a", "version_b"],
         },
     },
     {

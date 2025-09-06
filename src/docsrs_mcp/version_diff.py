@@ -206,8 +206,8 @@ class VersionDiffEngine:
         # Validate inputs before expensive operations
         try:
             validated_crate = validate_crate_name(request.crate_name)
-            validated_version_a = validate_version_string(request.version_a)
-            validated_version_b = validate_version_string(request.version_b)
+            validated_version_a = validate_version_string(request.version_a) or "latest"
+            validated_version_b = validate_version_string(request.version_b) or "latest"
         except ValueError as e:
             raise ValueError(f"Invalid input parameters: {e}") from e
 

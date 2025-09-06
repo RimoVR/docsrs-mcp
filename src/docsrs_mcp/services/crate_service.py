@@ -2,7 +2,10 @@
 
 import logging
 
+import aiohttp
 import aiosqlite
+
+from .. import config
 
 from ..database import (
     get_module_tree as get_module_tree_from_db,
@@ -501,32 +504,135 @@ class CrateService:
         Returns:
             Dictionary with version information
         """
-        # For now, ingest the latest version to ensure we have the crate
-        db_path = await ingest_crate(crate_name, "latest")
+        try:
+            # Query crates.io API for all versions
+            url = f"https://crates.io/api/v1/crates/{crate_name}/versions"
+            headers = {
+                "User-Agent": f"docsrs-mcp/{config.VERSION} (https://github.com/anthropics/docsrs-mcp)"
+            }
 
-        # Get version from the ingested crate
-        async with aiosqlite.connect(db_path) as db:
-            cursor = await db.execute("SELECT version FROM crate_metadata LIMIT 1")
-            row = await cursor.fetchone()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status == 404:
+                        raise ValueError(f"Crate '{crate_name}' not found on crates.io")
+                    elif resp.status != 200:
+                        raise Exception(
+                            f"Failed to fetch versions for {crate_name}: HTTP {resp.status}"
+                        )
 
-            if row:
-                current_version = row[0]
-            else:
-                current_version = "unknown"
+                    data = await resp.json()
+                    versions_data = data.get("versions", [])
 
-        # In a real implementation, we would query crates.io API for all versions
-        # For now, return the current version
-        return {
-            "crate_name": crate_name,
-            "versions": [
-                {
-                    "version": current_version,
-                    "yanked": False,
-                    "is_latest": True,
-                }
-            ],
-            "latest": current_version,
-        }
+                    if not versions_data:
+                        raise ValueError(f"No versions found for crate '{crate_name}'")
+
+                    # Process versions and find latest
+                    versions = []
+                    latest_version = None
+                    latest_timestamp = 0
+
+                    for version_info in versions_data:
+                        version_str = version_info.get("num", "unknown")
+                        yanked = version_info.get("yanked", False)
+                        created_at = version_info.get("created_at", "")
+                        
+                        # Parse timestamp to find latest non-yanked version
+                        try:
+                            import dateutil.parser
+                            timestamp = dateutil.parser.parse(created_at).timestamp()
+                            if not yanked and (latest_version is None or timestamp > latest_timestamp):
+                                latest_version = version_str
+                                latest_timestamp = timestamp
+                        except:
+                            # If timestamp parsing fails, still include the version
+                            if not yanked and latest_version is None:
+                                latest_version = version_str
+
+                        versions.append({
+                            "version": version_str,
+                            "yanked": yanked,
+                            "is_latest": False,  # Will be set correctly below
+                        })
+
+                    # Mark the latest version
+                    if latest_version:
+                        for version in versions:
+                            if version["version"] == latest_version:
+                                version["is_latest"] = True
+                                break
+
+                    # Sort versions by semver if possible, fallback to string sort
+                    try:
+                        import semver
+                        # Filter to valid semver versions for sorting
+                        semver_versions = []
+                        other_versions = []
+                        
+                        for version in versions:
+                            try:
+                                semver.Version.parse(version["version"])
+                                semver_versions.append(version)
+                            except:
+                                other_versions.append(version)
+                        
+                        # Sort semver versions in descending order (newest first)
+                        semver_versions.sort(
+                            key=lambda v: semver.Version.parse(v["version"]), 
+                            reverse=True
+                        )
+                        
+                        # Sort other versions by string (newest first)
+                        other_versions.sort(key=lambda v: v["version"], reverse=True)
+                        
+                        # Combine with semver versions first
+                        versions = semver_versions + other_versions
+                        
+                    except ImportError:
+                        # Fallback to simple string sorting
+                        versions.sort(key=lambda v: v["version"], reverse=True)
+
+                    return {
+                        "crate_name": crate_name,
+                        "versions": versions,
+                        "latest": latest_version,
+                    }
+
+        except ValueError:
+            # Re-raise validation errors as-is
+            raise
+        except Exception as e:
+            # For network or parsing errors, fall back to local version if possible
+            logger.warning(f"Failed to fetch versions from crates.io for {crate_name}: {e}")
+            
+            try:
+                # Try to get version from local cache as fallback
+                db_path = await ingest_crate(crate_name, "latest")
+                
+                async with aiosqlite.connect(db_path) as db:
+                    cursor = await db.execute("SELECT version FROM crate_metadata LIMIT 1")
+                    row = await cursor.fetchone()
+                    
+                    if row:
+                        current_version = row[0]
+                        return {
+                            "crate_name": crate_name,
+                            "versions": [
+                                {
+                                    "version": current_version,
+                                    "yanked": False,
+                                    "is_latest": True,
+                                }
+                            ],
+                            "latest": current_version,
+                        }
+                    
+            except Exception as fallback_error:
+                logger.error(f"Fallback failed for {crate_name}: {fallback_error}")
+            
+            # If all else fails, raise the original error
+            raise Exception(f"Unable to fetch versions for {crate_name}: {e}")
 
     async def compare_versions(
         self,

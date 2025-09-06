@@ -20,6 +20,66 @@
           "additionalBugFixed": "VersionDiffResponse field name bug: Changed 'items' to 'changes' in crate_service.py return dict to match VersionDiffResponse model schema"
         },
         {
+          "error": "Parameter Mismatch Error in compare_versions - DependencyFilter parameter type mismatch",
+          "rootCause": "CompareVersionsRequest model expected specific parameter types but received different types from MCP clients, causing parameter validation failures during version comparison operations",
+          "solution": "Fixed parameter type validation in CompareVersionsRequest model with comprehensive field validators that handle string inputs and convert them to appropriate types with proper error handling and fallback mechanisms",
+          "context": "Version comparison functionality failing due to parameter type mismatches between MCP client inputs and server-side validation expectations",
+          "lesson": "Parameter type validation must be flexible enough to handle various input formats from different MCP clients while maintaining type safety",
+          "pattern": "Use @field_validator with mode='before' for robust parameter type conversion and validation",
+          "dateEncountered": "2025-08-25",
+          "status": "RESOLVED",
+          "resolution_date": "2025-09-06",
+          "fix_details": "Implemented comprehensive parameter validation system with string-to-type conversion, defensive None handling, and proper error messages for all compare_versions parameters",
+          "files_modified": ["src/docsrs_mcp/models/requests.py", "src/docsrs_mcp/version_diff.py"],
+          "verification": "Tested with various parameter input formats including None, strings, and proper types. All parameter combinations now work correctly with clear error messages for invalid inputs.",
+          "relatedFiles": ["src/docsrs_mcp/models/requests.py", "src/docsrs_mcp/version_diff.py"]
+        },
+        {
+          "error": "Version Listing Limitation - list_versions only showing 'latest' instead of all available versions",
+          "rootCause": "Original list_versions implementation only returned latest version information instead of complete version history from crates.io API, limiting user ability to see all available versions for comparison",
+          "solution": "Implemented complete list_versions functionality with full crates.io API integration to fetch all available versions, including proper sorting, metadata extraction, and error handling for comprehensive version listing",
+          "context": "Users could not see all available crate versions, only the latest one, making version comparison and analysis difficult",
+          "lesson": "API integration should provide complete data sets rather than minimal subsets to maximize user utility",
+          "pattern": "Integrate with external APIs to provide comprehensive data rather than limited subsets",
+          "dateEncountered": "2025-08-24",
+          "status": "RESOLVED",
+          "resolution_date": "2025-09-06",
+          "fix_details": "Complete integration with crates.io API to fetch all available versions with proper parsing, sorting, and metadata handling. Added comprehensive error handling and fallback mechanisms.",
+          "files_modified": ["src/docsrs_mcp/services/crate_service.py", "src/docsrs_mcp/models/responses.py"],
+          "verification": "Verified that list_versions now returns complete version lists for multiple crates including version numbers, publication dates, and proper sorting from newest to oldest.",
+          "relatedFiles": ["src/docsrs_mcp/services/crate_service.py"]
+        },
+        {
+          "error": "NoneType Errors in Version Comparison - AttributeError when processing None values",
+          "rootCause": "Version comparison operations attempted to call string methods on None values returned from data lookups, causing AttributeError exceptions during version difference analysis",
+          "solution": "Added comprehensive defensive programming patterns with None checks before all string operations, default value handling, and proper fallback mechanisms for missing data in version comparison workflows",
+          "context": "Version comparison failing with AttributeError when encountering None values in version data processing",
+          "lesson": "Always validate for None values before calling methods, even when using dict.get() with defaults, as the stored values might still be None",
+          "pattern": "Use defensive None checking: if value is not None before calling methods on potentially None values",
+          "dateEncountered": "2025-08-25",
+          "status": "RESOLVED",
+          "resolution_date": "2025-09-06",
+          "fix_details": "Implemented comprehensive None checking throughout version comparison pipeline with proper default values ('latest' fallback) and error handling for missing version information",
+          "files_modified": ["src/docsrs_mcp/version_diff.py", "src/docsrs_mcp/services/crate_service.py"],
+          "verification": "Tested version comparisons with missing version data, None values, and incomplete crate information. All scenarios now handle gracefully with appropriate defaults and clear error messages.",
+          "relatedFiles": ["src/docsrs_mcp/version_diff.py"]
+        },
+        {
+          "error": "Version Validation Inconsistency - inconsistent handling of version parameters across different endpoints",
+          "rootCause": "Different endpoints handled version validation differently, some accepting None values, others requiring explicit versions, causing inconsistent behavior and user confusion across the API",
+          "solution": "Standardized version validation across all endpoints with consistent fallback to 'latest' for None values, uniform error handling, and clear documentation of version parameter behavior",
+          "context": "Inconsistent version parameter handling across different API endpoints causing user confusion and unpredictable behavior",
+          "lesson": "Consistent parameter validation patterns across all endpoints improve user experience and reduce debugging complexity",
+          "pattern": "Standardize parameter validation patterns across all related endpoints with consistent fallback behavior",
+          "dateEncountered": "2025-08-24",
+          "status": "RESOLVED",
+          "resolution_date": "2025-09-06",
+          "fix_details": "Implemented uniform version validation with consistent 'latest' fallback handling, standardized error messages, and comprehensive parameter validation across all version-related endpoints",
+          "files_modified": ["src/docsrs_mcp/services/crate_service.py", "src/docsrs_mcp/models/requests.py", "src/docsrs_mcp/version_diff.py"],
+          "verification": "Tested all version-related endpoints with None values, empty strings, and various version formats. All endpoints now behave consistently with clear fallback behavior and proper error handling.",
+          "relatedFiles": ["src/docsrs_mcp/services/crate_service.py", "src/docsrs_mcp/version_diff.py"]
+        },
+        {
           "error": "get_documentation_detail ProgressiveDetailResponse validation error - 1 validation error for ProgressiveDetailResponse item_path Field required",
           "rootCause": "WorkflowService.get_documentation_with_detail_level() returns error response missing required 'item_path' field. When item is not found, the service returns error dict without the item_path field that ProgressiveDetailResponse model requires.",
           "solution": "Added missing 'item_path' field to error response dictionary in workflow_service.py. The service layer must return ALL required fields defined in response models even in error scenarios when using Pydantic models with required fields.",
@@ -5384,6 +5444,44 @@
       }
     }
   },
+  "successful_patterns": [
+    {
+      "pattern": "crates.io API integration for version listing",
+      "implementation": "Full REST API integration with proper error handling and fallback mechanisms for comprehensive version data retrieval from crates.io registry",
+      "benefits": "Users can now see all available versions instead of just 'latest', enabling better version comparison and analysis workflows",
+      "files": ["src/docsrs_mcp/services/crate_service.py"],
+      "technical_details": "Implemented complete HTTP client integration with crates.io API endpoints, proper JSON parsing, version sorting, and comprehensive error handling for network failures and malformed responses",
+      "performance_impact": "Cached version data reduces API calls and improves response times for subsequent requests",
+      "date_implemented": "2025-09-06"
+    },
+    {
+      "pattern": "Defensive version validation with fallbacks",
+      "implementation": "None values default to 'latest' to prevent NoneType errors throughout the version processing pipeline with comprehensive validation and error handling",
+      "benefits": "Version operations are more robust and handle edge cases gracefully, reducing user-facing errors and improving API reliability",
+      "files": ["src/docsrs_mcp/version_diff.py", "src/docsrs_mcp/services/crate_service.py"],
+      "technical_details": "Added None checks before all string operations, implemented consistent fallback behavior across all version-related functions, and standardized error messages for better debugging",
+      "performance_impact": "Minimal overhead from validation checks, significant improvement in error recovery and user experience",
+      "date_implemented": "2025-09-06"
+    },
+    {
+      "pattern": "Comprehensive parameter validation with mode='before' field validators",
+      "implementation": "Robust parameter validation system that handles diverse input formats from different MCP clients while maintaining type safety and proper error reporting",
+      "benefits": "Maximum MCP client compatibility with clear error messages and flexible input handling, supporting both string and native type inputs",
+      "files": ["src/docsrs_mcp/models/requests.py"],
+      "technical_details": "Implemented Pydantic field validators with mode='before' for intercepting raw parameters, comprehensive type conversion logic, and user-friendly error messages with examples",
+      "performance_impact": "Optimized validation with lookup tables and compiled patterns for high-frequency operations",
+      "date_implemented": "2025-09-06"
+    },
+    {
+      "pattern": "Consistent version parameter handling across API endpoints",
+      "implementation": "Standardized version validation patterns across all endpoints with uniform fallback behavior and error handling to ensure predictable API behavior",
+      "benefits": "Reduced user confusion and debugging complexity through consistent parameter behavior across the entire API surface",
+      "files": ["src/docsrs_mcp/services/crate_service.py", "src/docsrs_mcp/models/requests.py"],
+      "technical_details": "Created shared validation utilities, standardized error message formats, and implemented consistent fallback logic that can be reused across all version-related endpoints",
+      "performance_impact": "Improved maintainability and reduced code duplication while maintaining performance",
+      "date_implemented": "2025-09-06"
+    }
+  ],
   "securityConsiderations": {
     "security_vulnerabilities": [
       "CVE-2025-49596: Critical RCE in MCP Inspector (CVSS 9.4) - upgrade to v0.14.1+",
