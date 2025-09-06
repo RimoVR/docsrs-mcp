@@ -180,7 +180,7 @@ class CrossReferenceService:
                         alt = {
                             "path": path,
                             "confidence": conf,
-                            "type": "direct" if not alias else "reexport",
+                            "link_type": "direct" if not alias else "reexport",
                         }
                         if alias:
                             alt["alias"] = alias

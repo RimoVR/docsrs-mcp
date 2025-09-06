@@ -4970,6 +4970,27 @@
           "relatedFiles": ["CLAUDE.md", "deployment scripts"],
           "codeExample": "# Development testing (reflects local changes):\nnohup uv run docsrs-mcp > server.log 2>&1 & echo $!\n\n# Production testing (uses cached/installed version):\nnohup uvx docsrs-mcp > server.log 2>&1 & echo $!",
           "debuggingTechnique": "When testing code changes, always verify which deployment method is being used. Use 'uv run' during development to ensure immediate reflection of code modifications."
+        },
+        {
+          "error": "Path Alias Resolution Schema Validation Errors - 10 validation errors for ResolveImportResponse",
+          "rootCause": "Field name mismatch in service layer: cross_reference_service.py:183 used 'type' field while Pydantic ImportAlternative model expected 'link_type' field. Error occurred during ResolveImportResponse(**result) instantiation in MCP handler. Missing FastMCP schema override for resolve_import tool caused parameter validation issues.",
+          "solution": "Comprehensive three-layer fix: 1) Schema field alignment - changed cross_reference_service.py:183 from 'type': 'direct' if not alias else 'reexport' to 'link_type': 'direct' if not alias else 'reexport', 2) Backward compatibility enhancement - added validation_alias=AliasChoices('link_type', 'type') to ImportAlternative model in cross_references.py:20, 3) MCP parameter validation fix - added resolve_import to tools_to_fix dictionary with boolean parameter override in mcp_server.py:107-109",
+          "context": "Common aliases like serde::Deserialize not resolving due to validation failures when calling resolve_import tool. Missing link_type fields and forbidden type fields in schema validation blocked PATH_ALIASES system with 105+ alias mappings.",
+          "lesson": "Field name consistency crucial between service dictionaries and Pydantic model schemas. Service layer → Pydantic validation → MCP response pipeline requires careful field alignment. Use AliasChoices for robust field aliasing when changing field names.",
+          "pattern": "Always verify service response dictionaries match Pydantic model field names exactly. Use field aliasing for backward compatibility. Include comprehensive validation tests for all MCP tools with complex schemas. Monitor FastMCP override configuration to prevent parameter validation issues.",
+          "dateEncountered": "2025-09-06",
+          "status": "RESOLVED",
+          "resolution_date": "2025-09-06",
+          "testingResults": [
+            "resolve_import('serde', 'Deserialize') returns 'serde::de::Deserialize'",
+            "include_alternatives=true parameter validates correctly",
+            "No validation errors in response serialization",
+            "PATH_ALIASES system working with 105+ alias mappings"
+          ],
+          "relatedFiles": ["src/docsrs_mcp/services/cross_reference_service.py", "src/docsrs_mcp/models/cross_references.py", "src/docsrs_mcp/mcp_server.py"],
+          "codeExample": "# Service layer field generation (CORRECT):\nalt = {\n    \"path\": path,\n    \"confidence\": conf,\n    \"link_type\": \"direct\" if not alias else \"reexport\",  # matches schema\n}\n\n# Pydantic model with robust aliasing:\nlink_type: str = Field(\n    ..., \n    validation_alias=AliasChoices(\"link_type\", \"type\"),\n    serialization_alias=\"link_type\",\n    description=\"Type of link (reexport, crossref, etc.)\"\n)",
+          "debuggingTechnique": "Test with actual MCP tool calls to verify end-to-end functionality. Use direct import tests to verify service response dictionaries match Pydantic schemas. Verify FastMCP schema override system includes all tools with complex parameter types.",
+          "preventionStrategy": "Create comprehensive validation tests for all MCP tools with complex schemas. Monitor service layer → Pydantic validation → MCP response pipeline for field alignment. Use AliasChoices for backward compatibility when changing field names."
         }
       ]
     }

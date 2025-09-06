@@ -7,7 +7,7 @@ migration suggestions, and re-export tracing.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 
 from .base import strict_config
 
@@ -17,7 +17,7 @@ class ImportAlternative(BaseModel):
 
     path: str = Field(..., description="Alternative import path")
     confidence: float = Field(..., description="Confidence score (0.0-1.0)")
-    link_type: str = Field(..., description="Type of link (reexport, crossref, etc.)")
+    link_type: str = Field(..., validation_alias=AliasChoices("link_type", "type"), serialization_alias="link_type", description="Type of link (reexport, crossref, etc.)")
 
     model_config = strict_config
 

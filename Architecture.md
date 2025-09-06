@@ -2754,6 +2754,39 @@ The service integrates with specialized response models for type safety and stru
 - **MigrationSuggestionsResponse**: Version migration recommendations with breaking changes
 - **CrossReferencesResponse**: General cross-reference queries with metadata
 
+### Path Alias Resolution Schema Validation Bug Fix (RESOLVED)
+
+**Critical Schema Alignment Issue Fixed**: The CrossReferenceService experienced systematic validation failures in `resolve_import` operations due to field name mismatches between the service layer and Pydantic response models.
+
+**Root Cause Analysis**:
+- Service layer returned `"type": "direct"/"reexport"` field in `cross_reference_service.py:183`
+- ResolveImportResponse model expected `"link_type": "direct"/"reexport"` field
+- Caused "10 validation errors for ResolveImportResponse" when `ResolveImportResponse(**result)` instantiated
+
+**Technical Solution Implemented**:
+1. **Primary Fix**: Updated field name from `"type"` to `"link_type"` in service response at line 183
+2. **Robustness Enhancement**: Added `AliasChoices("link_type", "type")` to ImportAlternative model for backward compatibility
+3. **FastMCP Schema Override**: Extended `tools_to_fix` dictionary with `resolve_import` tool boolean parameter handling
+
+**Architecture Impact**:
+- Cross-reference service validation pipeline now correctly aligned with Pydantic schemas
+- PATH_ALIASES system confirmed working with comprehensive coverage (105+ static aliases)
+- Three-tier resolution hierarchy maintains integrity: database reexports → static aliases → fuzzy fallback
+- MCP client compatibility enhanced through proper schema override configuration
+
+**Validation Results**:
+- ✅ `resolve_import('serde', 'Deserialize')` → `"serde::de::Deserialize"` (exact alias resolution functional)
+- ✅ Boolean parameter `include_alternatives` validates correctly with FastMCP overrides
+- ✅ ImportAlternative schema compliance verified for alternatives array responses
+- ✅ No more schema validation errors in response serialization pipeline
+
+**Prevention Measures Applied**:
+- Field name consistency validation between service layer and Pydantic models
+- Comprehensive aliasing pattern implemented using `AliasChoices` for backward compatibility
+- FastMCP override system extended to cover all cross-reference tools with proper parameter type handling
+
+This fix restores complete intended functionality for path alias resolution while maintaining the existing high-performance architecture and adding robustness improvements through dual-field compatibility patterns.
+
 ### Performance Characteristics
 
 | Operation | Typical Latency | Cache Hit Ratio | Memory Usage |

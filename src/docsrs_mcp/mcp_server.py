@@ -104,6 +104,9 @@ async def override_fastmcp_schemas():
                 "control_pre_ingestion": {},  # Only has enum parameters
                 "get_item_doc": {},  # Only has string parameters
                 "get_module_tree": {},  # Only has string parameters
+                "resolve_import": {
+                    "include_alternatives": "boolean",  # Include alternative suggestions
+                },
             }
 
             # Track tools not in our fix list for monitoring
