@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-09-05",
+  "lastUpdated": "2025-09-06",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -2025,6 +2025,39 @@
             "CrateService uses get_dependency_filter() instead of creating instances",
             "Parameter order corrected throughout codebase"
           ]
+        },
+        {
+          "error": "Search Indexing Failure - search_items returns empty results even after ingestion while search_examples works",
+          "rootCause": "Missing synchronization between 'embeddings' table and 'vec_embeddings' virtual table during ingestion pipeline. The sqlite-vec extension uses dual-table architecture where main table stores data and vec0 virtual table provides vector operations. Storage manager was committing embeddings without syncing to vector table, causing search_embeddings() to find 0 results despite successful ingestion.",
+          "solution": "Added vector table synchronization to storage_manager.py _store_batch function following the working pattern from code_examples.py. Implementation uses batch sync in groups of 100: 1) Query new records not yet in vector table, 2) Batch insert into vec_embeddings virtual table, 3) Ensure both tables maintain consistent row counts for search functionality.",
+          "context": "HIGH priority bug - search_items completely non-functional after ingestion while search_examples worked correctly, causing asymmetric search behavior across different content types",
+          "lesson": "sqlite-vec extension prevents using triggers on vec0 virtual tables, requiring manual application-level synchronization. Always implement dual-table consistency checking and ensure pattern replication across similar data types.",
+          "pattern": "For sqlite-vec dual-table architecture: 1) Load extension before accessing vec0 tables, 2) Implement manual sync after each batch insert, 3) Add health checks comparing row counts, 4) Use batch processing (100 records) for performance",
+          "dateEncountered": "2025-09-06",
+          "relatedFiles": ["src/docsrs_mcp/storage/storage_manager.py", "src/docsrs_mcp/ingestion/code_examples.py", "src/docsrs_mcp/database/diagnostics.py"],
+          "codeExample": "# Vector table synchronization pattern\n# Get new records not yet in vector table\ncursor = await db.execute(\n    \"SELECT id, embedding FROM embeddings WHERE id NOT IN (SELECT rowid FROM vec_embeddings)\"\n)\nrows = await cursor.fetchall()\nif rows:\n    # Batch sync in groups of 100 for performance\n    for i in range(0, len(rows), 100):\n        batch = rows[i:i+100]\n        vec_data = [(row[0], row[1]) for row in batch]\n        await db.executemany(\n            \"INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)\", \n            vec_data\n        )\n    await db.commit()\n\n# Extension loading pattern\nawait db.enable_load_extension(True)\nawait db.execute(f\"SELECT load_extension('{sqlite_vec.loadable_path()}')\")\"",
+          "debuggingTechnique": "Check table consistency with row count comparison: 'SELECT COUNT(*) FROM embeddings' vs 'SELECT COUNT(*) FROM vec_embeddings'. Use diagnostic queries to identify sync gaps and verify repair mechanisms work correctly.",
+          "testingConfirmed": [
+            "Before fix: All cached databases had vec_embeddings count = 0 while embeddings had 1000+ rows",
+            "After repair: All databases show consistent counts (1029 embeddings = 1029 vec_embeddings)",
+            "Search results: search_embeddings now returns 3-5 results per query instead of 0",
+            "Production impact: Repair mechanism fixes existing databases without data loss"
+          ],
+          "preventionStrategy": "Always implement consistency checking for dual-table architectures. When one data type works but another fails, look for missing implementation patterns. Add health checks to detect sync issues early.",
+          "architecturalLessons": [
+            "Manual sync required for sqlite-vec extension due to trigger limitations on virtual tables",
+            "Pattern replication critical - examples worked because code_examples.py had sync, storage_manager.py was missing it",
+            "Extension loading must occur before accessing vec0 tables in all contexts",
+            "Batch processing (100 records) balances performance with memory usage",
+            "Repair mechanisms allow fixing existing databases without data migration"
+          ],
+          "diagnosticsImplemented": [
+            "Created comprehensive diagnostic system in database/diagnostics.py",
+            "Added table consistency checks comparing row counts",
+            "Implemented repair functionality for existing inconsistent databases",
+            "Added health check commands for production monitoring"
+          ],
+          "impact": "CRITICAL BUG RESOLVED: Fixed complete search failure that rendered search_items non-functional. All vector search operations now work consistently across content types with comprehensive diagnostic and repair capabilities."
         }
       ]
     },

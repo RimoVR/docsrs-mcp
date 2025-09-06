@@ -283,6 +283,45 @@ async def _store_batch(
 
     await db.commit()
 
+    # Sync to vec_embeddings virtual table (following pattern from code_examples.py)
+    if chunk_buffer:  # Only sync if we actually stored data
+        logger.debug(f"Batch {batch_num}: Syncing {len(chunk_buffer)} embeddings to vector index...")
+        
+        # Get the rowids of just inserted records to avoid resyncing everything
+        # Find the minimum ID from this batch to only sync new records
+        min_id = await db.execute("SELECT MIN(id) FROM embeddings WHERE rowid > (SELECT COALESCE(MAX(rowid), 0) FROM vec_embeddings)")
+        min_id_result = await min_id.fetchone()
+        min_id_value = min_id_result[0] if min_id_result and min_id_result[0] else 0
+        
+        # Populate the vector table from embeddings table for new records
+        cursor = await db.execute("""
+            SELECT id, embedding FROM embeddings 
+            WHERE id >= ? AND id NOT IN (SELECT rowid FROM vec_embeddings)
+        """, (min_id_value,))
+        
+        vec_data = []
+        async for row in cursor:
+            rowid, embedding_blob = row
+            vec_data.append((rowid, embedding_blob))
+            
+            # Process in batches for efficiency (same pattern as code_examples.py)
+            if len(vec_data) >= 100:
+                await db.executemany(
+                    "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
+                    vec_data
+                )
+                vec_data = []
+        
+        # Insert remaining data
+        if vec_data:
+            await db.executemany(
+                "INSERT INTO vec_embeddings(rowid, embedding) VALUES (?, ?)",
+                vec_data
+            )
+        
+        await db.commit()
+        logger.debug(f"Batch {batch_num}: Vector index sync completed")
+
     logger.debug(
         f"Batch {batch_num}: Stored {len(chunk_buffer)} embeddings "
         f"(total: {total_items + len(chunk_buffer)})"
