@@ -11,6 +11,7 @@ from ..database import (
     get_module_tree as get_module_tree_from_db,
 )
 from ..database import (
+    cross_crate_search as cross_crate_search_db,
     get_see_also_suggestions,
     search_embeddings,
     search_example_embeddings,
@@ -240,6 +241,175 @@ class CrateService:
             search_results.append(result)
 
         return search_results
+
+    async def cross_crate_search(
+        self,
+        query: str,
+        crates: list[str] | None = None,
+        version: str | None = None,
+        k: int = 5,
+        type_filter: str | None = None,
+        has_examples: bool | None = None,
+        min_doc_length: int | None = None,
+        visibility: str | None = None,
+        deprecated: bool | None = None,
+        stability_filter: str | None = None,
+        timeout_ms: int = 3000,
+    ) -> list[SearchResult]:
+        """Search across multiple crates with RRF aggregation.
+        
+        Args:
+            query: Search query (minimum 2 characters)
+            crates: List of crate names to search (max 5). If None/empty, searches all available crates
+            version: Version specification (default: 'latest')
+            k: Number of results to return (1-20, default: 5)
+            type_filter: Filter by item type (struct, trait, function, etc.)
+            has_examples: Filter items with code examples
+            min_doc_length: Minimum documentation length filter
+            visibility: Filter by visibility (public, crate, private)
+            deprecated: Include deprecated items (True/False)
+            stability_filter: Filter by stability (stable, unstable, experimental, all)
+            timeout_ms: Timeout in milliseconds (default: 3000)
+            
+        Returns:
+            List of SearchResult objects with cross-crate ranking
+            
+        Raises:
+            ValueError: For invalid parameters (query too short, too many crates, etc.)
+            TimeoutError: If search exceeds timeout
+        """
+        # Validation
+        if not query or len(query.strip()) < 2:
+            raise ValueError("Query must be at least 2 characters long")
+        
+        if crates is not None and len(crates) > 5:
+            raise ValueError("Maximum 5 crates allowed for cross-crate search")
+            
+        if k < 1 or k > 20:
+            raise ValueError("k must be between 1 and 20")
+        
+        query = query.strip()
+        version = version or "latest"
+        
+        # Handle crate list - if None or empty, we would search all available crates
+        # For now, we'll require at least one crate to be specified to avoid unbounded searches
+        if not crates:
+            raise ValueError("At least one crate must be specified for cross-crate search")
+        
+        try:
+            import asyncio
+            from pathlib import Path
+            
+            # Generate embedding for query
+            model = get_embedding_model()
+            query_embedding = list(model.embed([query]))[0]
+            
+            # Ingest all crates and collect database paths
+            crate_paths = []
+            failed_crates = []
+            
+            # Use semaphore to limit concurrent ingestion
+            semaphore = asyncio.Semaphore(3)
+            
+            async def ingest_single_crate(crate_name: str) -> tuple[str, Path | None]:
+                async with semaphore:
+                    try:
+                        db_path = await ingest_crate(crate_name, version)
+                        return crate_name, db_path
+                    except Exception as e:
+                        logger.warning(f"Failed to ingest crate {crate_name}: {e}")
+                        return crate_name, None
+            
+            # Ingest all crates concurrently
+            ingestion_results = await asyncio.gather(
+                *[ingest_single_crate(crate) for crate in crates],
+                return_exceptions=False
+            )
+            
+            # Separate successful and failed ingestion
+            for crate_name, db_path in ingestion_results:
+                if db_path:
+                    crate_paths.append(db_path)
+                else:
+                    failed_crates.append(crate_name)
+            
+            if not crate_paths:
+                raise ValueError(f"No crates could be ingested successfully. Failed: {failed_crates}")
+            
+            if failed_crates:
+                logger.warning(f"Some crates failed to ingest and will be excluded: {failed_crates}")
+            
+            # Perform cross-crate search with timeout
+            search_task = cross_crate_search_db(
+                crate_paths=crate_paths,
+                query_embedding=query_embedding,
+                k=k,
+                type_filter=type_filter,
+                has_examples=has_examples,
+                min_doc_length=min_doc_length,
+                visibility=visibility,
+                deprecated=deprecated,
+                stability_filter=stability_filter,
+            )
+            
+            # Apply timeout
+            timeout_seconds = timeout_ms / 1000.0
+            try:
+                results = await asyncio.wait_for(search_task, timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"Cross-crate search timed out after {timeout_ms}ms")
+            
+            # Convert database results to SearchResult objects
+            search_results = []
+            for score, item_path, header, content in results:
+                from ..app import extract_smart_snippet
+                
+                # Determine crate name from item_path (assumes crate:: prefix)
+                crate_name = item_path.split('::', 1)[0] if '::' in item_path else "unknown"
+                
+                # Check if item is from stdlib or dependency
+                is_stdlib = crate_name in config.STDLIB_CRATES
+                is_dependency = False
+                
+                # Check dependency status if filter is enabled
+                if config.DEPENDENCY_FILTER_ENABLED:
+                    try:
+                        from ..dependency_filter import get_dependency_filter
+                        dep_filter = get_dependency_filter()
+                        is_dependency = dep_filter.is_dependency(item_path, crate_name)
+                    except Exception as e:
+                        logger.warning(f"Failed to check dependency status for {item_path}: {e}")
+                        is_dependency = False
+                
+                result = SearchResult(
+                    score=score,
+                    item_path=item_path,
+                    header=header,
+                    snippet=extract_smart_snippet(content),
+                    is_stdlib=is_stdlib,
+                    is_dependency=is_dependency,
+                )
+                search_results.append(result)
+            
+            # Add metadata about failed crates to first result if any
+            if search_results and failed_crates:
+                first_result = search_results[0]
+                if not hasattr(first_result, 'suggestions') or not first_result.suggestions:
+                    first_result.suggestions = []
+                first_result.suggestions.insert(0, f"Note: Some crates failed to load: {', '.join(failed_crates)}")
+            
+            logger.info(f"Cross-crate search completed: {len(results)} results from {len(crate_paths)} crates")
+            return search_results
+            
+        except ValueError:
+            # Re-raise validation errors as-is
+            raise
+        except TimeoutError:
+            # Re-raise timeout errors as-is
+            raise
+        except Exception as e:
+            logger.error(f"Cross-crate search failed for query '{query}': {e}")
+            raise ValueError(f"Cross-crate search failed: {str(e)}")
 
     async def get_item_doc(
         self, crate_name: str, item_path: str, version: str | None = None

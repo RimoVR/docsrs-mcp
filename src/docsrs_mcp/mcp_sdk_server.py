@@ -254,12 +254,22 @@ async def search_items(
                 return {"error": {"code": "invalid_parameter", "message": "crates must be array or comma-separated string"}}
         
         # Handle parameter precedence: crates takes priority over crate_name
+        # NEW: Allow query-only searches for cross-crate search (per oneOf schema)
         if crates_list:
             final_crates = crates_list
+            search_mode = "cross-crate"
         elif crate_name and crate_name.strip():
             final_crates = [crate_name.strip().lower()]
+            search_mode = "single-crate"
         else:
-            return {"error": {"code": "missing_parameter", "message": "Either crate_name or crates parameter required"}}
+            # Query-only search defaults to cross-crate search across available crates
+            # For now, require explicit crate specification to avoid unbounded searches
+            return {
+                "error": {
+                    "code": "missing_crate_specification", 
+                    "message": "Either 'crate_name' (single-crate) or 'crates' (cross-crate) parameter required. Query-only cross-crate search not yet implemented."
+                }
+            }
         
         # Validate crate names, deduplicate, and enforce limits
         validated_crates = []
@@ -289,40 +299,157 @@ async def search_items(
             else None
         )
 
-        # Route to appropriate search function based on number of crates
-        if len(validated_crates) == 1:
-            # Single-crate search - maintain backward compatibility
-            results = await get_crate_service().search_items(
-                validated_crates[0],
-                query,
-                version=version if version != "latest" else None,
-                k=k_int,
-                item_type=item_type,
-                crate_filter=crate_filter,
-                module_path=module_path,
-                has_examples=has_examples_bool,
-                min_doc_length=min_doc_length_int,
-                visibility=visibility,
-                deprecated=deprecated_bool,
-            )
+        # Route to appropriate search function with explicit mode-based logic
+        feature_flag_cross_crate = os.environ.get("DOCSRS_ENABLE_CROSS_CRATE", "true").lower() == "true"
+        
+        if search_mode == "single-crate" and len(validated_crates) == 1:
+            # Single-crate search - maintain full backward compatibility
+            logger.info(f"Single-crate search: crate={validated_crates[0]}, query='{query[:50]}...'")
+            try:
+                results = await get_crate_service().search_items(
+                    crate_name=validated_crates[0],
+                    query=query,
+                    version=version if version != "latest" else None,
+                    k=k_int,
+                    item_type=item_type,
+                    crate_filter=crate_filter,
+                    module_path=module_path,
+                    has_examples=has_examples_bool,
+                    min_doc_length=min_doc_length_int,
+                    visibility=visibility,
+                    deprecated=deprecated_bool,
+                )
+            except Exception as e:
+                logger.error(f"Single-crate search failed for {validated_crates[0]}: {e}")
+                return {
+                    "error": {
+                        "code": "search_failed",
+                        "message": f"Single-crate search failed: {str(e)}"
+                    }
+                }
+        elif search_mode == "cross-crate" and len(validated_crates) > 1:
+            # Cross-crate search with feature flag check
+            if not feature_flag_cross_crate:
+                return {
+                    "error": {
+                        "code": "feature_disabled",
+                        "message": "Cross-crate search is currently disabled. Set DOCSRS_ENABLE_CROSS_CRATE=true to enable."
+                    }
+                }
+            
+            logger.info(f"Cross-crate search: {len(validated_crates)} crates, query='{query[:50]}...'")
+            
+            # Get configurable timeout (default 5 seconds)
+            timeout_ms = int(os.environ.get("DOCSRS_CROSS_CRATE_TIMEOUT_MS", "5000"))
+            
+            try:
+                # Cross-crate search - note parameter order: query first, then crates
+                results = await get_crate_service().cross_crate_search(
+                    query=query,
+                    crates=validated_crates,
+                    version=version if version != "latest" else None,
+                    k=k_int,
+                    type_filter=item_type,
+                    has_examples=has_examples_bool,
+                    min_doc_length=min_doc_length_int,
+                    visibility=visibility,
+                    deprecated=deprecated_bool,
+                    timeout_ms=timeout_ms,
+                )
+            except ValueError as e:
+                # Handle validation errors with specific error codes
+                if "at least 2 characters" in str(e).lower():
+                    error_code = "query_too_short"
+                elif "maximum 5 crates" in str(e).lower():
+                    error_code = "too_many_crates"
+                elif "must be between" in str(e).lower():
+                    error_code = "invalid_k_value"
+                elif "at least one crate" in str(e).lower():
+                    error_code = "no_crates_specified"
+                else:
+                    error_code = "validation_failed"
+                    
+                return {
+                    "error": {
+                        "code": error_code,
+                        "message": str(e)
+                    }
+                }
+            except TimeoutError as e:
+                return {
+                    "error": {
+                        "code": "search_timeout",
+                        "message": f"Cross-crate search timed out: {str(e)}"
+                    }
+                }
+            except Exception as e:
+                logger.error(f"Cross-crate search failed for {validated_crates}: {e}")
+                return {
+                    "error": {
+                        "code": "search_failed",
+                        "message": f"Cross-crate search failed: {str(e)}"
+                    }
+                }
         else:
-            # Cross-crate search - use existing cross_crate_search functionality
-            # Note: cross-crate search bypasses some single-crate filters by design
-            results = await get_crate_service().cross_crate_search(
-                validated_crates,
-                query,
-                version=version if version != "latest" else None,
-                k=k_int,
-                item_type=item_type,
-                has_examples=has_examples_bool,
-                min_doc_length=min_doc_length_int,
-                visibility=visibility,
-                deprecated=deprecated_bool,
-            )
-        return SearchItemsResponse(results=results).model_dump()
-    except Exception as e:
-        logger.error(f"Error in search_items: {e}")
+            # Edge case: single crate in cross-crate mode - redirect to single-crate for efficiency
+            if len(validated_crates) == 1 and search_mode == "cross-crate":
+                logger.info(f"Redirecting single-crate cross-crate search to single-crate mode: {validated_crates[0]}")
+                try:
+                    results = await get_crate_service().search_items(
+                        crate_name=validated_crates[0],
+                        query=query,
+                        version=version if version != "latest" else None,
+                        k=k_int,
+                        item_type=item_type,
+                        has_examples=has_examples_bool,
+                        min_doc_length=min_doc_length_int,
+                        visibility=visibility,
+                        deprecated=deprecated_bool,
+                        # Note: crate_filter and module_path not supported in cross-crate mode
+                    )
+                except Exception as e:
+                    logger.error(f"Redirected single-crate search failed: {e}")
+                    return {
+                        "error": {
+                            "code": "search_failed",
+                            "message": f"Search failed: {str(e)}"
+                        }
+                    }
+            else:
+                return {
+                    "error": {
+                        "code": "invalid_routing",
+                        "message": f"Invalid search configuration: mode={search_mode}, crates={len(validated_crates)}"
+                    }
+                }
+        # Convert results to response format with structured metadata
+        response = SearchItemsResponse(results=results)
+        response_dict = response.model_dump()
+        
+        # Add search metadata for debugging and monitoring
+        response_dict["search_metadata"] = {
+            "mode": search_mode,
+            "crates_count": len(validated_crates),
+            "crates": validated_crates,
+            "results_count": len(results),
+            "query_length": len(query),
+        }
+        
+        return response_dict
+        
+    except ValueError as e:
+        # Specific validation errors - already handled above
+        logger.warning(f"Validation error in search_items: {e}")
         raise
+    except Exception as e:
+        # Unexpected errors - log and re-raise for proper error handling
+        logger.error(f"Unexpected error in search_items: {e}")
+        return {
+            "error": {
+                "code": "internal_error",
+                "message": f"An unexpected error occurred: {str(e)}"
+            }
+        }
 
 
 async def get_item_doc(

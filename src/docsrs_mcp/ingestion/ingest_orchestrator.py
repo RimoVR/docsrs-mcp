@@ -48,6 +48,7 @@ from .signature_extractor import (
 from .storage_manager import (
     generate_embeddings_streaming,
     store_embeddings_streaming,
+    store_enhanced_items_streaming,
 )
 from .version_resolver import (
     RustdocVersionNotFoundError,
@@ -517,29 +518,17 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                             ingestion_tier = IngestionTier.RUST_LANG_STDLIB
 
                             # Parse and store
-                            chunks = []
-                            modules = None
-
-                            async for item in parse_rustdoc_items_streaming(json_content):
-                                if "_modules" in item:
-                                    modules = item["_modules"]
-                                else:
-                                    # Extract metadata
-                                    item["signature"] = extract_signature(item)
-                                    item["deprecated"] = extract_deprecated(item)
-                                    item["visibility"] = extract_visibility(item)
-                                    item["examples"] = extract_code_examples(
-                                        item.get("doc", "")
-                                    )
-                                    chunks.append(item)
-
-                            # Store modules if found
-                            if modules:
-                                await store_modules(db_path, crate_id, modules)
-
-                            # Generate and store embeddings
-                            chunk_embedding_pairs = generate_embeddings_streaming(chunks)
-                            await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+                            # Use enhanced parser with trait extraction
+                            enhanced_items_stream = parse_rustdoc_items_streaming(
+                                json_content, crate_name, resolved_version
+                            )
+                            
+                            # Store enhanced items with trait support
+                            await store_enhanced_items_streaming(
+                                db_path, enhanced_items_stream, crate_id
+                            )
+                            
+                            # Note: Module storage is now handled in enhanced storage
 
                             # Generate example embeddings
                             await generate_example_embeddings(
@@ -584,29 +573,15 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                     # Parse and store
                     await set_ingestion_status(db_path, crate_id, "processing")
 
-                    chunks = []
-                    modules = None
-
-                    async for item in parse_rustdoc_items_streaming(json_content):
-                        if "_modules" in item:
-                            modules = item["_modules"]
-                        else:
-                            # Extract metadata
-                            item["signature"] = extract_signature(item)
-                            item["deprecated"] = extract_deprecated(item)
-                            item["visibility"] = extract_visibility(item)
-                            item["examples"] = extract_code_examples(
-                                item.get("doc", "")
-                            )
-                            chunks.append(item)
-
-                    # Store modules if found
-                    if modules:
-                        await store_modules(db_path, crate_id, modules)
-
-                    # Generate and store embeddings
-                    chunk_embedding_pairs = generate_embeddings_streaming(chunks)
-                    await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+                    # Use enhanced parser with trait extraction
+                    enhanced_items_stream = parse_rustdoc_items_streaming(
+                        json_content, crate_name, resolved_version
+                    )
+                    
+                    # Store enhanced items with trait support
+                    await store_enhanced_items_streaming(
+                        db_path, enhanced_items_stream, crate_id
+                    )
 
                     # Generate example embeddings
                     await generate_example_embeddings(

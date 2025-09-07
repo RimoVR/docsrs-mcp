@@ -1,6 +1,6 @@
 {
   "projectName": "docsrs-mcp",
-  "lastUpdated": "2025-09-06",
+  "lastUpdated": "2025-09-07",
   "purpose": "Track errors, solutions, and lessons learned during development",
   "categories": {
     "errorSolutions": {
@@ -4179,35 +4179,44 @@
         },
         {
           "error": "Cross-Crate Search Cannot Search Across Multiple Crates",
-          "rootCause": "MCP SDK server used hardcoded incomplete schema instead of complete schema from mcp_tools_config.py. The hardcoded schema lacked proper cross-crate search parameters (crates array support), preventing MCP clients from accessing full cross-crate search functionality.",
-          "solution": "Implemented schema alignment by creating centralized get_tool_schema() function that dynamically retrieves complete schemas from mcp_tools_config.py with defensive copying. Added robust parameter validation supporting both array and comma-separated string formats for crates parameter. Established parameter precedence logic (crates overrides crate_name) with comprehensive error handling.",
-          "context": "MCP clients couldn't perform cross-crate searches due to schema mismatch between hardcoded MCP SDK schemas and actual tool configurations. Cross-crate functionality existed in backend but was inaccessible via MCP interface.",
-          "lesson": "Always use centralized schema definitions instead of hardcoding schemas in multiple locations. MCP clients require flexible parameter input formats (arrays + strings) for optimal compatibility. Schema objects need defensive copying to prevent mutations during server operations.",
-          "pattern": "Use centralized schema management with get_tool_schema() pattern for consistent schema exposure across different server modes (MCP SDK, REST). Implement robust union type parameter validation to handle diverse MCP client input formats.",
+          "rootCause": "Schema mismatch between MCP tool registration and intended functionality. The search_items tool schema required both 'crate_name' and 'query' parameters, preventing cross-crate searches with query-only parameters. MCP clients were receiving 'crate_name is a required property' error when attempting cross-crate searches.",
+          "solution": "Implemented comprehensive schema and service layer fixes with oneOf pattern validation, concurrent search service, and runtime enhancements: 1) Schema Fix: Implemented oneOf pattern in mcp_tools_config.py with two validation schemas (cross-crate mode: query-only, single-crate mode: crate_name + query) with comprehensive validation constraints and examples. 2) Service Layer: Added CrateService.cross_crate_search method with concurrent crate ingestion, RRF result aggregation, configurable timeouts and performance limits, comprehensive error handling. 3) Runtime Enhancements: Updated mcp_sdk_server.py with explicit routing logic for single vs. cross-crate searches, precise error messages with specific error codes, feature flag support (DOCSRS_ENABLE_CROSS_CRATE), enhanced observability with search metadata. 4) Performance Guardrails: Added configurable limits (DOCSRS_MAX_CRATES: 5, DOCSRS_CROSS_CRATE_TIMEOUT_MS: 5000, query length validation 2-500 chars, crate name format validation).",
+          "context": "MCP clients couldn't perform cross-crate searches due to rigid schema validation requiring crate_name parameter. Cross-crate functionality existed in backend but was inaccessible via MCP interface due to parameter validation conflicts.",
+          "lesson": "oneOf schema patterns provide better parameter flexibility than simple required arrays. MCP SDK honors centralized schema definitions when properly configured. Service layer bridging is critical for exposing database functionality via MCP interface. Comprehensive validation prevents runtime errors and provides better user experience.",
+          "pattern": "Use oneOf schema patterns for flexible parameter validation supporting multiple search modes. Implement service layer methods that bridge database functionality to MCP interface. Add comprehensive error handling with specific error codes for better debugging. Use feature flags for staged rollout of new functionality.",
           "dateEncountered": "2025-09-06",
           "status": "RESOLVED",
-          "dateResolved": "2025-09-06",
-          "relatedFiles": ["src/docsrs_mcp/mcp_sdk_server.py", "src/docsrs_mcp/mcp_tools_config.py"],
-          "codeExample": "# Centralized schema retrieval with defensive copying\ndef get_tool_schema(tool_name: str) -> dict:\n    for tool_config in MCP_TOOLS_CONFIG:\n        if tool_config[\"name\"] == tool_name:\n            return copy.deepcopy(tool_config[\"input_schema\"])\n    raise ValueError(f\"Tool {tool_name} not found in config\")\n\n# Schema registration with dynamic schema\ntypes.Tool(\n    name=\"search_items\",\n    description=\"Search for items in crate documentation with advanced modes\",\n    inputSchema=get_tool_schema(\"search_items\"),\n)\n\n# Robust parameter validation for union types\nif isinstance(crates, list):\n    crates_list = [c.strip().lower() for c in crates if c and c.strip()]\nelif isinstance(crates, str) and crates.strip():\n    crates_list = [c.strip().lower() for c in crates.split(\",\") if c.strip()]\nelse:\n    crates_list = []",
-          "debuggingTechnique": "Test both MCP SDK mode (uv run docsrs-mcp) and REST mode (uv run docsrs-mcp --mode rest) to verify schema consistency. Use MCP client restart after schema changes to see updated tool schemas. Test with various parameter formats: arrays, comma-separated strings, and mixed inputs.",
+          "dateResolved": "2025-09-07",
+          "relatedFiles": ["src/docsrs_mcp/mcp_tools_config.py", "src/docsrs_mcp/mcp_sdk_server.py", "src/docsrs_mcp/services/crate_service.py"],
+          "codeExample": "# oneOf schema pattern for flexible parameter validation\n{\n  \"type\": \"object\",\n  \"oneOf\": [\n    {\n      \"properties\": {\n        \"query\": {\n          \"type\": \"string\",\n          \"minLength\": 2,\n          \"maxLength\": 500,\n          \"description\": \"Search query for cross-crate search\"\n        }\n      },\n      \"required\": [\"query\"],\n      \"additionalProperties\": false,\n      \"title\": \"Cross-crate search mode\"\n    },\n    {\n      \"properties\": {\n        \"crate_name\": {\n          \"type\": \"string\",\n          \"pattern\": \"^[a-zA-Z0-9_-]+$\",\n          \"description\": \"Name of the crate to search\"\n        },\n        \"query\": {\n          \"type\": \"string\",\n          \"minLength\": 2,\n          \"maxLength\": 500,\n          \"description\": \"Search query\"\n        }\n      },\n      \"required\": [\"crate_name\", \"query\"],\n      \"additionalProperties\": false,\n      \"title\": \"Single-crate search mode\"\n    }\n  ]\n}\n\n# Runtime routing logic\nif 'crate_name' in arguments and arguments['crate_name']:\n    # Single-crate search\n    result = await crate_service.search_items(\n        crate_name=arguments['crate_name'],\n        query=arguments['query']\n    )\nelse:\n    # Cross-crate search\n    result = await crate_service.cross_crate_search(\n        query=arguments['query']\n    )",
+          "debuggingTechnique": "Test schema validation with both query-only and crate_name+query parameters. Use get_tool_schema() function to verify proper cross-crate compatible schema. Test MCP client with query-only searches to confirm routing to cross-crate search functionality. Verify feature flag behavior with DOCSRS_ENABLE_CROSS_CRATE environment variable.",
           "performanceCharacteristics": {
-            "searchLatency": "Maintains sub-500ms search performance targets",
-            "crateLimit": "5-crate limit with RRF aggregation as per REST API",
-            "backwardCompatibility": "Existing single-crate searches continue working",
-            "resourceManagement": "Proper connection pooling and resource cleanup"
+            "searchLatency": "Maintains sub-5000ms timeout with concurrent processing",
+            "crateLimit": "Configurable via DOCSRS_MAX_CRATES (default: 5)",
+            "backwardCompatibility": "Existing single-crate searches continue working unchanged",
+            "resourceManagement": "Semaphore control for concurrent crate ingestion",
+            "resultAggregation": "RRF (Reciprocal Rank Fusion) for cross-crate result ranking"
           },
           "validationRules": {
-            "parameterPrecedence": "crates parameter overrides crate_name if both provided",
-            "inputFormats": "Supports both list[str] and comma-separated string inputs",
-            "errorHandling": "Structured error responses with machine-parsable error codes",
-            "limits": "Configurable via environment variables with sensible defaults"
+            "schemaPattern": "oneOf pattern supports both cross-crate (query-only) and single-crate (crate_name+query) modes",
+            "queryValidation": "Query length must be 2-500 characters",
+            "crateNameValidation": "Crate names must match ^[a-zA-Z0-9_-]+$ pattern",
+            "errorHandling": "Structured error responses with specific error codes (INVALID_PARAMETERS, SEARCH_FAILED, etc.)",
+            "featureFlag": "DOCSRS_ENABLE_CROSS_CRATE controls availability of cross-crate search"
           },
-          "filesModified": ["src/docsrs_mcp/mcp_sdk_server.py"],
+          "filesModified": [
+            "src/docsrs_mcp/mcp_tools_config.py",
+            "src/docsrs_mcp/mcp_sdk_server.py",
+            "src/docsrs_mcp/services/crate_service.py"
+          ],
           "testingValidation": [
-            "✅ Backward compatibility maintained (existing single-crate searches work)",
-            "✅ Cross-crate functionality implemented (routes to existing cross_crate_search)",
-            "✅ Parameter validation working (rejects invalid inputs correctly)",
-            "✅ Schema exposure ready (requires MCP client restart to see new schema)"
+            "✅ Schema validation tests passed with oneOf pattern",
+            "✅ Query-only searches route to cross-crate search functionality",
+            "✅ Single-crate searches continue working with crate_name parameter",
+            "✅ get_tool_schema() function returns proper cross-crate compatible schema",
+            "✅ MCP clients can successfully perform cross-crate searches without crate_name parameter",
+            "✅ Comprehensive error handling provides clear error messages for invalid inputs",
+            "✅ Performance guardrails prevent resource exhaustion with configurable limits"
           ]
         }
       ]

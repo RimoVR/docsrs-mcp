@@ -274,10 +274,10 @@ async def download_rustdoc(
     Raises:
         RustdocVersionNotFoundError: If rustdoc JSON is not available for this version
     """
-    # Use provided URL or construct default
+    # Use provided URL or construct default using correct docs.rs API pattern
     if rustdoc_url is None:
-        json_name = crate_name.replace("-", "_")
-        rustdoc_url = f"https://docs.rs/{crate_name}/{version}/{json_name}.json"
+        # Use the correct docs.rs API pattern: /crate/{name}/{version}/json
+        rustdoc_url = f"https://docs.rs/crate/{crate_name}/{version}/json"
 
     # Try different compression formats in order of preference
     urls_to_try = []
@@ -287,8 +287,8 @@ async def download_rustdoc(
         urls_to_try.append(rustdoc_url)
     # For the new JSON API pattern (/crate/{name}/{version}/json)
     elif rustdoc_url.endswith("/json"):
-        # Try zstd (default), then gzip
-        urls_to_try.extend([rustdoc_url, f"{rustdoc_url}.gz"])
+        # Try zstd (default), then gzip, then uncompressed
+        urls_to_try.extend([f"{rustdoc_url}.zst", f"{rustdoc_url}.gz", rustdoc_url])
     else:
         # Fallback for old-style URLs
         base_url = (
@@ -390,55 +390,93 @@ async def decompress_content(content: bytes, url: str) -> str:
     Raises:
         Exception: If decompressed size exceeds limits
     """
+    logger.debug(f"Attempting to decompress {len(content)} bytes from {url}")
+    
     # Check if content is zstd compressed (default for /json endpoint)
     # zstd magic bytes: 0x28, 0xb5, 0x2f, 0xfd
     is_zstd = content[:4] == b"\x28\xb5\x2f\xfd" if len(content) >= 4 else False
+    
+    logger.debug(f"Content analysis: magic bytes={content[:4].hex() if len(content) >= 4 else 'too short'}, is_zstd={is_zstd}")
 
-    if url.endswith(".json.zst") or (url.endswith("/json") and is_zstd):
+    if url.endswith(".json.zst") or url.endswith("/json.zst") or (url.endswith("/json") and is_zstd):
         # Zstandard decompression
-        dctx = zstandard.ZstdDecompressor(max_window_size=2**31)
+        try:
+            dctx = zstandard.ZstdDecompressor(max_window_size=2**31)
 
-        # Stream decompress with size checking
-        decompressed_chunks = []
-        total_size = 0
+            # Stream decompress with size checking
+            decompressed_chunks = []
+            total_size = 0
 
-        with dctx.stream_reader(io.BytesIO(content)) as reader:
-            while True:
-                chunk = reader.read(DOWNLOAD_CHUNK_SIZE)
-                if not chunk:
-                    break
+            with dctx.stream_reader(io.BytesIO(content)) as reader:
+                while True:
+                    chunk = reader.read(DOWNLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
 
-                decompressed_chunks.append(chunk)
-                total_size += len(chunk)
+                    decompressed_chunks.append(chunk)
+                    total_size += len(chunk)
 
-                if total_size > MAX_DECOMPRESSED_SIZE:
-                    raise Exception(
-                        f"Decompressed size exceeded limit: {total_size} bytes"
-                    )
+                    if total_size > MAX_DECOMPRESSED_SIZE:
+                        raise Exception(
+                            f"Decompressed size exceeded limit: {total_size} bytes"
+                        )
 
-        decompressed = b"".join(decompressed_chunks)
-        logger.info(
-            f"Decompressed .zst file: {len(content)} -> {len(decompressed)} bytes"
-        )
-        return decompressed.decode("utf-8")
+            decompressed = b"".join(decompressed_chunks)
+            logger.info(
+                f"Decompressed .zst file: {len(content)} -> {len(decompressed)} bytes"
+            )
+            return decompressed.decode("utf-8")
+            
+        except zstandard.ZstdError as e:
+            logger.warning(f"Zstd decompression failed: {e}")
+            # If zstd fails but URL suggests compression, the content might actually be uncompressed
+            # Try treating as plain JSON
+            if len(content) > MAX_DECOMPRESSED_SIZE:
+                raise Exception(f"Content size exceeded limit: {len(content)} bytes")
+            try:
+                # Attempt to decode as UTF-8 and parse as JSON to verify
+                text_content = content.decode("utf-8")
+                import json
+                json.loads(text_content[:1000])  # Quick sanity check
+                logger.info(f"Content appears to be uncompressed JSON despite .zst extension")
+                return text_content
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                # Re-raise the original zstd error
+                raise Exception(f"zstd decompress error: {e}")
 
     elif url.endswith(".json.gz") or url.endswith("/json.gz"):
         # Gzip decompression
-        decompressed = gzip.decompress(content)
+        try:
+            decompressed = gzip.decompress(content)
 
-        if len(decompressed) > MAX_DECOMPRESSED_SIZE:
-            raise Exception(
-                f"Decompressed size exceeded limit: {len(decompressed)} bytes"
+            if len(decompressed) > MAX_DECOMPRESSED_SIZE:
+                raise Exception(
+                    f"Decompressed size exceeded limit: {len(decompressed)} bytes"
+                )
+
+            logger.info(
+                f"Decompressed .gz file: {len(content)} -> {len(decompressed)} bytes"
             )
-
-        logger.info(
-            f"Decompressed .gz file: {len(content)} -> {len(decompressed)} bytes"
-        )
-        return decompressed.decode("utf-8")
+            return decompressed.decode("utf-8")
+            
+        except (gzip.BadGzipFile, OSError) as e:
+            logger.warning(f"Gzip decompression failed: {e}")
+            # Similar fallback as with zstd
+            if len(content) > MAX_DECOMPRESSED_SIZE:
+                raise Exception(f"Content size exceeded limit: {len(content)} bytes")
+            try:
+                text_content = content.decode("utf-8")
+                import json
+                json.loads(text_content[:1000])  # Quick sanity check
+                logger.info(f"Content appears to be uncompressed JSON despite .gz extension")
+                return text_content
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise Exception(f"gzip decompress error: {e}")
 
     else:
         # Uncompressed JSON
         if len(content) > MAX_DECOMPRESSED_SIZE:
             raise Exception(f"Uncompressed size exceeded limit: {len(content)} bytes")
 
+        logger.info(f"Processing uncompressed content: {len(content)} bytes")
         return content.decode("utf-8")

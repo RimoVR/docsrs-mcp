@@ -1,4 +1,4 @@
-"""Rustdoc JSON parsing with streaming optimization.
+"""Rustdoc JSON parsing with streaming optimization and trait extraction.
 
 This module handles:
 - Streaming JSON parsing with ijson (656x speedup)
@@ -6,9 +6,11 @@ This module handles:
 - Item extraction with type classification
 - Path normalization for stable IDs
 - Code intelligence extraction (Phase 5)
+- Enhanced trait implementation extraction (Phase 6)
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -22,26 +24,28 @@ from .intelligence_extractor import (
     extract_safety_info,
     safe_extract,
 )
+from .enhanced_trait_extractor import EnhancedTraitExtractor
+from .enhanced_method_extractor import EnhancedMethodExtractor
 
 logger = logging.getLogger(__name__)
 
 
 async def parse_rustdoc_items_streaming(
-    json_content: str,
+    json_content: str, crate_name: str = "unknown", crate_version: str = "unknown"
 ) -> AsyncGenerator[dict[str, Any], None]:
-    """Parse rustdoc JSON and yield items in streaming fashion.
+    """Parse rustdoc JSON and yield items in streaming fashion with trait extraction.
 
     This function parses the rustdoc JSON and yields properly structured items
-    with all required fields for storage.
+    with all required fields for storage, including enhanced trait extraction.
 
     Args:
         json_content: Raw JSON string from rustdoc
+        crate_name: Name of the crate being processed
+        crate_version: Version of the crate being processed
 
     Yields:
-        Dict containing parsed item data
+        Dict containing parsed item data, trait implementations, and trait definitions
     """
-    import json
-    
     try:
         # Parse the JSON content (3MB is manageable)
         data = json.loads(json_content)
@@ -53,8 +57,17 @@ async def parse_rustdoc_items_streaming(
         # Build module hierarchy from paths
         modules = build_module_hierarchy(paths)
         
+        # Initialize trait extractors
+        trait_extractor = EnhancedTraitExtractor()
+        method_extractor = EnhancedMethodExtractor()
+        
+        # Generate crate identifier
+        crate_id = f"{crate_name}:{crate_version}"
+        
         # Process items from the index
         items_processed = 0
+        trait_impls_extracted = 0
+        trait_defs_extracted = 0
         
         for item_id, item_data in index.items():
             try:
@@ -91,15 +104,42 @@ async def parse_rustdoc_items_streaming(
                     else:
                         item_path = f"item_{item_id}"  # Fallback
                 
-                # Determine item type from inner or kind
+                # CRITICAL FIX: rustdoc JSON stores kind as keys inside the "inner" dict
+                # Structure: {"inner": {"impl": {...}}} not {"kind": "impl", "inner": {...}}
                 if isinstance(inner, dict):
-                    inner_kind = inner.get("kind")
-                    if inner_kind:
+                    inner_keys = list(inner.keys())
+                    if inner_keys:
+                        # Use the first key as the item kind (e.g., "impl", "struct", "trait")
+                        inner_kind = inner_keys[0] 
                         item_type = normalize_item_type(inner_kind)
+                        logger.info(f"🎯 ITEM {item_id}: name={name}, inner_kind={inner_kind}, item_type={item_type}, inner_keys={inner_keys}")
                     else:
                         item_type = normalize_item_type(item_kind)
+                        logger.info(f"📍 ITEM {item_id}: name={name}, empty_inner_fallback={item_kind}, item_type={item_type}")
                 else:
                     item_type = normalize_item_type(item_kind)
+                    logger.info(f"🗂️ ITEM {item_id}: name={name}, no_inner_fallback={item_kind}, item_type={item_type}")
+                
+                # Debug logging for impl detection and method analysis
+                if item_type == "trait_impl":
+                    logger.info(f"🎯 FOUND IMPL BLOCK {item_id}: name={name}, inner keys={list(inner.keys()) if isinstance(inner, dict) else 'no inner'}")
+                    if isinstance(inner, dict) and "impl" in inner:
+                        impl_data = inner["impl"]
+                        trait_ref = impl_data.get("trait")
+                        for_type = impl_data.get("for") 
+                        items_list = impl_data.get("items", [])
+                        logger.info(f"  📋 IMPL DETAILS: trait={trait_ref}, for={for_type}, items={items_list}")
+                elif item_type == "unknown":
+                    logger.info(f"❓ UNKNOWN METHOD {item_id}: name={name} - likely orphaned from impl block")
+                
+                # Additional logging to track all method-like names
+                method_names = {"from", "clone", "drop", "fmt", "new", "into", "try_from", "try_into", "deref", "borrow", "as_ref", "downcast", "downcast_ref"}
+                if name and name.lower() in method_names:
+                    logger.info(f"🔍 TRACKING METHOD: {item_id}:{name} - item_type={item_type}, needs parent impl resolution")
+                
+                # Additional debugging for trait_impl items
+                if item_type == "trait_impl":
+                    logger.info(f"Processing trait_impl item {item_id} with inner keys: {list(inner.keys()) if isinstance(inner, dict) else 'no inner'}")
                 
                 # Use name as header, or derive from path
                 if name:
@@ -196,6 +236,60 @@ async def parse_rustdoc_items_streaming(
                 item["generic_params"] = generic_params
                 item["trait_bounds"] = trait_bounds
                 
+                # Enhanced trait extraction based on item type
+                if item_type == "trait_impl":
+                    # Extract trait implementations from impl blocks
+                    try:
+                        implementations = trait_extractor.extract_impl_blocks(
+                            item_data, item_id, crate_id, paths
+                        )
+                        for impl in implementations:
+                            # Yield trait implementation as separate data
+                            yield {
+                                "_trait_impl": {
+                                    "trait_path": impl.trait_path,
+                                    "impl_type_path": impl.impl_type_path,
+                                    "crate_id": impl.crate_id,
+                                    "item_id": impl.item_id,
+                                    "generic_params": impl.generic_params,
+                                    "where_clauses": impl.where_clauses,
+                                    "is_blanket": impl.is_blanket,
+                                    "is_negative": impl.is_negative,
+                                    "is_synthetic": impl.is_synthetic,
+                                    "impl_signature": impl.impl_signature,
+                                    "stability_level": impl.stability_level,
+                                }
+                            }
+                            trait_impls_extracted += 1
+                            
+                    except Exception as e:
+                        logger.warning(f"Error extracting trait impl from {item_id}: {e}")
+                        
+                elif item_type == "trait":
+                    # Extract trait definitions with supertraits
+                    try:
+                        trait_def = trait_extractor.extract_trait_definition(
+                            item_data, item_id, crate_id, item_path
+                        )
+                        if trait_def:
+                            # Yield trait definition as separate data
+                            yield {
+                                "_trait_def": {
+                                    "trait_path": trait_def.trait_path,
+                                    "crate_id": trait_def.crate_id,
+                                    "item_id": trait_def.item_id,
+                                    "supertraits": trait_def.supertraits,
+                                    "associated_items": trait_def.associated_items,
+                                    "is_unsafe": trait_def.is_unsafe,
+                                    "generic_params": trait_def.generic_params,
+                                    "stability_level": trait_def.stability_level,
+                                }
+                            }
+                            trait_defs_extracted += 1
+                            
+                    except Exception as e:
+                        logger.warning(f"Error extracting trait def from {item_id}: {e}")
+                
                 yield item
                 items_processed += 1
                 
@@ -211,7 +305,11 @@ async def parse_rustdoc_items_streaming(
         # Yield module hierarchy as special marker at the end
         yield {"_modules": modules}
         
-        logger.info(f"Successfully parsed {items_processed} items from rustdoc JSON")
+        logger.info(
+            f"Successfully parsed {items_processed} items from rustdoc JSON "
+            f"({trait_impls_extracted} trait implementations, "
+            f"{trait_defs_extracted} trait definitions)"
+        )
         
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse rustdoc JSON: {e}")
@@ -364,11 +462,45 @@ def normalize_item_type(kind: dict | str) -> str:
         str: Normalized item type
     """
     if isinstance(kind, dict):
-        kind_str = list(kind.keys())[0] if kind else "unknown"
+        # Handle rustdoc JSON ItemEnum variants
+        # Impl blocks are represented as {"Impl": {...}}
+        if "Impl" in kind:
+            return "trait_impl"
+        elif "Function" in kind:
+            return "function"
+        elif "Struct" in kind:
+            return "struct"
+        elif "Trait" in kind:
+            return "trait"
+        elif "Enum" in kind:
+            return "enum"
+        elif "TypeAlias" in kind:
+            return "type"
+        elif "Constant" in kind:
+            return "const"
+        elif "Static" in kind:
+            return "static"
+        elif "Module" in kind:
+            return "module"
+        elif "Macro" in kind:
+            return "macro"
+        elif "Primitive" in kind:
+            return "primitive"
+        elif "Union" in kind:
+            return "union"
+        elif "AssocConst" in kind:
+            return "const"
+        elif "AssocType" in kind:
+            return "type"
+        elif "Method" in kind or "AssocMethod" in kind:
+            return "method"
+        else:
+            # Fallback to first key for unknown dict structures
+            kind_str = list(kind.keys())[0] if kind else "unknown"
     else:
         kind_str = str(kind).lower()
 
-    # Map rustdoc kinds to standard types
+    # Map legacy string kinds to standard types (for backwards compatibility)
     type_map = {
         "function": "function",
         "struct": "struct",

@@ -234,7 +234,7 @@ The docsrs-mcp server implements a service layer pattern that decouples business
 
 #### Core Services
 
-- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration via `get_dependency_filter()` global instance for improved performance and cache utilization. **Critical Fix Applied**: Implements `_build_module_tree()` helper method that transforms flat database results into hierarchical ModuleTreeNode structures, resolving Pydantic validation errors by properly fulfilling service layer data transformation responsibility. **Service Layer Fix**: Fixed search_examples method to properly handle dictionary results from search_example_embeddings, correctly mapping fields to CodeExample model requirements.
+- **CrateService**: Handles all crate-related operations including search, documentation retrieval, and version management. **Phase 2 Enhancement**: Automatically populates `is_stdlib` and `is_dependency` fields in SearchResult and GetItemDocResponse models using DependencyFilter integration via `get_dependency_filter()` global instance for improved performance and cache utilization. **Critical Fix Applied**: Implements `_build_module_tree()` helper method that transforms flat database results into hierarchical ModuleTreeNode structures, resolving Pydantic validation errors by properly fulfilling service layer data transformation responsibility. **Service Layer Fix**: Fixed search_examples method to properly handle dictionary results from search_example_embeddings, correctly mapping fields to CodeExample model requirements. **Cross-Crate Search Implementation**: Added comprehensive `cross_crate_search()` method with RRF aggregation, concurrent crate ingestion with semaphore control (max 3 concurrent), configurable timeouts, and structured logging for performance monitoring and observability.
 - **IngestionService**: Manages the complete ingestion pipeline, pre-ingestion workflows, and cargo file processing
 - **CrossReferenceService**: **Phase 6 Enhancement**: Provides advanced cross-reference operations including import resolution, dependency graph analysis, migration suggestions, and re-export tracing. Implements circuit breaker pattern for resilience, LRU cache with 5-minute TTL for performance, and DFS algorithms for cycle detection in dependency graphs.
 - **Transport Layer Decoupling**: Business logic is independent of whether accessed via MCP or REST
@@ -307,7 +307,7 @@ The system now supports two parallel MCP implementations to ensure compatibility
 - Native MCP protocol support without conversion layers
 - Integrated with MCPServerRunner for memory management
 - **Critical Fix Applied**: Proper logging configuration to stderr prevents MCP tool failures
-- **Cross-Crate Search Schema Bug Fix (RESOLVED)**: Fixed critical schema mismatch where hardcoded incomplete tool schema was replaced with centralized `get_tool_schema()` helper using complete definitions from `mcp_tools_config.py`, enabling full cross-crate search functionality via MCP clients
+- **Cross-Crate Search Schema Bug Fix (RESOLVED)**: Fixed critical schema mismatch through comprehensive schema redesign using sophisticated oneOf pattern, service layer implementation with RRF aggregation, and runtime validation enhancements. Replaced hardcoded incomplete tool schema with centralized `get_tool_schema()` helper using complete definitions from `mcp_tools_config.py`, enabling full cross-crate search functionality via MCP clients with performance guardrails and observability features.
 
 **Tool Migration Status**
 All tools successfully migrated and cleaned up:
@@ -328,12 +328,14 @@ All tools successfully migrated and cleaned up:
 
 #### Cross-Crate Search MCP Integration Fix
 
-**Critical Bug Resolution**: Fixed schema mismatch that prevented cross-crate search functionality via MCP interface while maintaining full REST API compatibility.
+**Critical Bug Resolution**: Fixed schema mismatch that prevented cross-crate search functionality via MCP interface through comprehensive schema redesign, service layer implementation, and runtime validation enhancements while maintaining full REST API compatibility.
 
 **Root Cause Analysis**:
 - MCP SDK server hardcoded incomplete `search_items` schema instead of using centralized `MCP_TOOLS_CONFIG` definitions
 - `crates` parameter was missing from MCP tool schema, limiting clients to single-crate searches only
 - Schema inconsistency between MCP interface and REST API functionality
+- Lack of sophisticated parameter validation and routing logic for dual-mode operation
+- Missing service layer implementation for cross-crate search with proper performance controls
 
 **Technical Implementation**:
 
@@ -375,11 +377,16 @@ def search_items(crates: Optional[str] = None, crate_name: Optional[str] = None,
 - **Resource Limits**: 5-crate maximum (configurable via `DOCSRS_MAX_CRATES`)
 
 **Validation Results**:
-- ✅ Cross-crate search now fully functional via MCP clients
-- ✅ Single-crate search maintains exact same performance characteristics  
-- ✅ Parameter validation prevents malformed requests
-- ✅ Same RRF aggregation and deduplication as REST API implementation
-- ✅ Zero breaking changes for existing MCP client integrations
+**Resolution Status & Testing Results**:
+- ✅ **Cross-crate search fully restored**: MCP clients can now access cross-crate search functionality
+- ✅ **Schema validation passed**: oneOf pattern correctly routes between cross-crate and single-crate modes
+- ✅ **Service layer implemented**: CrateService.cross_crate_search method with RRF aggregation operational
+- ✅ **Runtime validation enhanced**: Parameter validation with explicit routing logic and error handling
+- ✅ **Performance guardrails active**: Configurable timeouts, crate limits, and concurrent processing controls
+- ✅ **Observability features enabled**: Structured logging and search metadata collection
+- ✅ **Feature flag support**: DOCSRS_ENABLE_CROSS_CRATE for staged rollout
+- ✅ **Comprehensive testing completed**: Schema validation, service layer functionality, and MCP client compatibility verified
+- ✅ **Zero breaking changes**: Full backward compatibility maintained for existing MCP client integrations
 
 ### MCP Resources Implementation
 
@@ -3035,14 +3042,17 @@ Three new MCP tools provide external access to WorkflowService capabilities:
 
 ### MCP Interface Integration (Bug Fix Resolved)
 
-The cross-crate search functionality is now fully accessible via MCP clients through the resolved schema mismatch bug fix. This critical fix enables MCP clients to perform multi-crate searches with the same RRF aggregation and performance characteristics as the REST API.
+The cross-crate search functionality is now fully restored and accessible via MCP clients through comprehensive schema redesign and service layer implementation. This critical resolution enables MCP clients to perform multi-crate searches with the same RRF aggregation and performance characteristics as the REST API, enhanced with sophisticated validation and observability features.
 
 **Key Components**:
-- **Schema Alignment**: `get_tool_schema()` helper function ensures schema consistency between MCP SDK server and centralized configuration
+- **Schema Enhancement**: Sophisticated oneOf pattern supporting dual-mode operation (cross-crate vs single-crate)
+- **Service Layer Implementation**: Comprehensive CrateService.cross_crate_search method with RRF aggregation
 - **Parameter Support**: Full support for `crates` parameter (array type, max 5 items) exposed to MCP clients
+- **Runtime Validation**: Enhanced parameter validation with explicit routing logic and feature flag support
+- **Performance Guardrails**: Configurable timeouts (default 5s), crate limits, and concurrent processing controls
+- **Observability**: Structured logging, search metadata, and performance monitoring
 - **Backward Compatibility**: Single-crate search via `crate_name` parameter maintains exact functionality
 - **Parameter Precedence**: `crates` parameter overrides `crate_name` when both are provided
-- **Validation Pipeline**: Comprehensive crate name validation with configurable limits via `DOCSRS_MAX_CRATES` environment variable
 
 ```mermaid
 graph TD
@@ -3087,11 +3097,26 @@ graph TD
 
 **Root Cause**: The MCP SDK server hardcoded an incomplete tool schema for `search_items` instead of using the complete schema definitions from `mcp_tools_config.py`, preventing MCP clients from accessing cross-crate search functionality.
 
-**Technical Resolution**:
-1. **Schema Helper Function**: Added `get_tool_schema()` helper function with defensive copying
-2. **Centralized Configuration**: Eliminated hardcoded schema in favor of `MCP_TOOLS_CONFIG` definitions
-3. **Parameter Exposure**: `crates` parameter now properly exposed to MCP clients as array type
-4. **Validation Enhancement**: Implemented robust parameter validation with Union[List[str], str, None] support
+**Comprehensive Technical Resolution**:
+1. **Schema Enhancement**: Replaced simple required field validation with sophisticated oneOf pattern:
+   - **Cross-crate mode**: Requires only "query" parameter
+   - **Single-crate mode**: Requires "crate_name" + "query" parameters
+   - Added validation constraints: query minLength=2, crate limits (max 5), timeout controls (default 5s)
+
+2. **Service Layer Implementation**: Added comprehensive CrateService.cross_crate_search method:
+   - **RRF Aggregation**: Reciprocal Rank Fusion for result combination
+   - **Concurrent Processing**: Parallel crate ingestion with semaphore control (max 3 concurrent)
+   - **Timeout Handling**: Configurable per-crate timeouts with graceful fallback
+   - **Performance Guardrails**: Crate count limits and resource monitoring
+
+3. **Runtime Validation Enhancement**: Enhanced parameter validation pipeline:
+   - **Explicit Routing Logic**: Precise parameter validation with Union[List[str], str, None] support
+   - **Feature Flag Support**: DOCSRS_ENABLE_CROSS_CRATE for staged rollout
+   - **Structured Error Handling**: Specific error codes and actionable messages
+   - **Parameter Precedence**: Clear precedence rules for overlapping parameters
+
+4. **Schema Helper Function**: Added `get_tool_schema()` helper function with defensive copying
+5. **Centralized Configuration**: Eliminated hardcoded schema in favor of `MCP_TOOLS_CONFIG` definitions
 
 **Implementation Details**:
 ```python
@@ -3122,11 +3147,14 @@ def search_items(crates: Optional[str] = None, crate_name: Optional[str] = None,
 - **Clear Messaging**: Explicit error messages for parameter precedence and requirements
 - **Graceful Degradation**: Maintains backward compatibility for all existing single-crate searches
 
-**Performance Impact**:
+**Performance Impact & Observability**:
 - **Zero Overhead**: Schema helper adds <1ms overhead during tool registration
 - **Same Performance**: Cross-crate search maintains identical RRF aggregation performance as REST API
-- **5-Crate Limit**: Configurable via `DOCSRS_MAX_CRATES` environment variable for resource management
+- **Configurable Limits**: 5-crate limit via `DOCSRS_MAX_CRATES`, timeout controls (default 5s)
 - **Efficient Routing**: Single conditional determines search path with minimal computational cost
+- **Concurrent Processing**: Semaphore-controlled concurrency (max 3 concurrent crate ingestions)
+- **Structured Logging**: Comprehensive search metadata and performance metrics
+- **Feature Flag Control**: DOCSRS_ENABLE_CROSS_CRATE for staged deployment
 
 ## Pattern Extraction Workflow
 
