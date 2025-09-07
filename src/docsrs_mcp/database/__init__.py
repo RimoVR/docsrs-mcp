@@ -59,6 +59,7 @@ from .schema import (
 # Re-export from search module
 from .search import (
     _apply_mmr_diversification,
+    cross_crate_search,
     get_see_also_suggestions,
     search_embeddings,
     search_example_embeddings,
@@ -95,6 +96,7 @@ __all__ = [
     "store_reexports",
     # Search module
     "_apply_mmr_diversification",
+    "cross_crate_search",
     "get_see_also_suggestions",
     "search_embeddings",
     "search_example_embeddings",
