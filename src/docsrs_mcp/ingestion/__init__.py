@@ -37,6 +37,7 @@ from .rustdoc_parser import (
     build_module_hierarchy,
     parse_rustdoc_items,
     parse_rustdoc_items_streaming,
+    normalize_item_type,
     resolve_parent_id,
 )
 from .signature_extractor import (
@@ -97,6 +98,7 @@ __all__ = [
     "parse_rustdoc_items_streaming",
     "parse_rustdoc_items",
     "build_module_hierarchy",
+    "normalize_item_type",
     "resolve_parent_id",
     # Signature extraction
     "format_signature",

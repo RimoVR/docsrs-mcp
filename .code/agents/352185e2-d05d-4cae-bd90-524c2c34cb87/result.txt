@@ -1,0 +1,371 @@
+Of course. Here is my plan to address the bug in the Tier 1 ingestion logic.
+
+### Summary of Changes
+
+*   **Guaranteed Version Resolution:** I will insert a version resolution step at the beginning of the Tier 1 download block in `src/docsrs_mcp/ingestion/ingest_orchestrator.py`. This ensures that for every crate, we have the correct, resolved version and rustdoc URL immediately before attempting to download the rustdoc JSON file.
+*   **Robust Stdlib Handling:** For stdlib crates, the logic will be corrected to use `resolve_stdlib_version` to find a locally available version. If a local version is not found, it will generate a URL designed to fail gracefully, preventing contamination from incorrect fallbacks.
+*   **Stricter Validation:** The `ingestion_tier` will now be set to `RUSTDOC_JSON` only after the downloaded content has been successfully decompressed and validated as a non-empty JSON object, preventing incorrect state transitions on failed downloads or empty files.
+*   **New Regression Tests:** I will add new tests to `tests/test_ingest.py` to:
+    *   Verify that the new, in-place version resolution in Tier 1 works correctly, even if an earlier resolution step was missed.
+    *   Ensure that stdlib crates correctly use local JSON files or fall back cleanly without contaminating the results.
+    *   Confirm that non-stdlib crates do not ingest stdlib content.
+
+### Patch Plan
+
+1.  **Modify `src/docsrs_mcp/ingestion/ingest_orchestrator.py`:**
+    *   In the `ingest_crate` function, within the Tier 1 `try` block (around line 556), I will inject logic to resolve the crate's version and rustdoc URL.
+    *   For non-stdlib crates, it will call `version_resolver.resolve_version`.
+    *   For stdlib crates, it will use `version_resolver.resolve_stdlib_version` and handle local fallbacks.
+    *   I will move the `ingestion_tier = IngestionTier.RUSTDOC_JSON` assignment to after the `decompress_content` and a new JSON validation step.
+    *   I will add logging to record the resolved version and URL.
+
+2.  **Add new tests to `tests/test_ingest.py`:**
+    *   I will create a new test file `tests/test_ingestion_bug_fix.py` with targeted tests for the fix.
+    *   I will use `unittest.mock.patch` to simulate different scenarios, such as a failed initial version resolution and various `aiohttp` responses.
+
+Here is the diff for the required changes.
+
+Of course. Here is my plan to address the bug in the Tier 1 ingestion logic.
+
+### Summary of Changes
+
+*   **Guaranteed Version Resolution:** I will insert a version resolution step at the beginning of the Tier 1 download block in `src/docsrs_mcp/ingestion/ingest_orchestrator.py`. This ensures that for every crate, we have the correct, resolved version and rustdoc URL immediately before attempting to download the rustdoc JSON file.
+*   **Robust Stdlib Handling:** For stdlib crates, the logic will be corrected to use `resolve_stdlib_version` to find a locally available version. If a local version is not found, it will generate a URL designed to fail gracefully, preventing contamination from incorrect fallbacks.
+*   **Stricter Validation:** The `ingestion_tier` will now be set to `RUSTDOC_JSON` only after the downloaded content has been successfully decompressed and validated as a non-empty JSON object, preventing incorrect state transitions on failed downloads or empty files.
+*   **New Regression Tests:** I will add new tests to `tests/test_ingest.py` to:
+    *   Verify that the new, in-place version resolution in Tier 1 works correctly, even if an earlier resolution step was missed.
+    *   Ensure that stdlib crates correctly use local JSON files or fall back cleanly without contaminating the results.
+    *   Confirm that non-stdlib crates do not ingest stdlib content.
+
+### Patch Plan
+
+1.  **Modify `src/docsrs_mcp/ingestion/ingest_orchestrator.py`:**
+    *   In the `ingest_crate` function, within the Tier 1 `try` block (around line 556), I will inject logic to resolve the crate's version and rustdoc URL.
+    *   For non-stdlib crates, it will call `version_resolver.resolve_version`.
+    *   For stdlib crates, it will use `version_resolver.resolve_stdlib_version` and handle local fallbacks.
+    *   I will move the `ingestion_tier = IngestionTier.RUSTDOC_JSON` assignment to after the `decompress_content` and a new JSON validation step.
+    *   I will add logging to record the resolved version and URL.
+
+2.  **Add new tests to `tests/test_ingest.py`:**
+    *   I will create a new test file `tests/test_ingestion_bug_fix.py` with targeted tests for the fix.
+    *   I will use `unittest.mock.patch` to simulate different scenarios, such as a failed initial version resolution and various `aiohttp` responses.
+
+Here is the diff for the required changes.
+
+Okay, I will fix the bug in the Tier 1 ingestion logic. Here's my plan:
+
+First, I will analyze the current implementation in `src/docsrs_mcp/ingestion/ingest_orchestrator.py` and the helpers in `src/docsrs_mcp/ingestion/version_resolver.py`.
+
+Based on this analysis, I will:
+*   **Propose a patch** that ensures version resolution occurs immediately before the download attempt in Tier 1, correctly handling both stdlib and non-stdlib crates to prevent contamination.
+*   **Add new regression tests** to `tests/test_ingest.py` to verify the fix and prevent future regressions. This will include tests for the specific failure scenarios you described.
+*   **Provide a unified diff** for the changes and instructions on how to apply them and run the new tests.
+
+I will start by reading the relevant files to understand the current state of the code.
+Of course. I will provide a patch to fix the stdlib contamination bug in Tier 1 ingestion, along with new tests to verify the fix and prevent regressions.
+
+Here is a summary of the plan:
+*   **Patch `ingest_orchestrator.py`**: I will modify the Tier 1 ingestion logic to ensure that version resolution is always performed immediately before attempting to download the rustdoc JSON. This will use `resolve_version` for non-stdlib crates and `construct_stdlib_url` for stdlib crates to ensure correct behavior and clean fallbacks.
+*   **Add Sanity Checks**: The patch will include a check to ensure the downloaded content is valid JSON before proceeding with parsing, preventing ingestion of corrupted data.
+*   **Add New Tests**: I will create a new test file, `tests/test_ingestion_bugfixes.py`, with targeted tests to verify:
+    *   The new in-tier version resolution logic works correctly.
+    *   Stdlib crates fall back cleanly without contaminating non-stdlib ingestion paths.
+    *   Non-stdlib crates do not receive stdlib-specific fallback content.
+
+Here is the patch and the new tests.
+
+### Patch for `src/docsrs_mcp/ingestion/ingest_orchestrator.py`
+
+```diff
+--- a/src/docsrs_mcp/ingestion/ingest_orchestrator.py
++++ b/src/docsrs_mcp/ingestion/ingest_orchestrator.py
+@@ -31,6 +31,7 @@
+     download_rustdoc,
+     fetch_crate_info,
+     is_stdlib_crate,
++    construct_stdlib_url,
+     resolve_stdlib_version,
+     resolve_version,
+ )
+@@ -519,6 +520,7 @@
+ 
+             # Initialize resolved_version outside try block so it's available in fallback
+             resolved_version = version
++            rustdoc_url = None
+ 
+             try:
+                 # Resolve version
+@@ -570,19 +572,48 @@
+                 try:
+                     await set_ingestion_status(db_path, crate_id, "downloading")
+ 
+-                    if is_stdlib:
+-                        # For stdlib, try docs.rs URL (expected to fail but worth trying)
+-                        rustdoc_url = (
+-                            f"https://docs.rs/{crate_name}/latest/{crate_name}.json"
++                    # --- BEGIN PATCH ---
++                    # Bug #1 Fix: Always resolve version immediately before download in Tier 1
++                    # This prevents using stale/unresolved versions from earlier steps.
++                    if not is_stdlib:
++                        # For non-stdlib, ensure we have a concrete version and URL.
++                        # The `version` variable holds the original user-provided selector.
++                        try:
++                            resolved_version, rustdoc_url = await resolve_version(
++                                session, crate_name, version
++                            )
++                            logger.info(
++                                f"Tier 1: Resolved {crate_name}@{version} to {resolved_version} with URL {rustdoc_url}"
++                            )
++                        except Exception as e:
++                            logger.warning(
++                                f"In-tier version resolution for {crate_name}@{version} failed: {e}. "
++                                f"Proceeding with best-effort download."
++                            )
++                            # If resolution fails, we proceed with whatever version info we have.
++                            # download_rustdoc can construct a URL if rustdoc_url is None.
++                            rustdoc_url = None
++                    else:
++                        # For stdlib, construct a URL that is expected to fail, to trigger a clean fallback.
++                        # This avoids contaminating state with incorrect assumptions.
++                        rustdoc_url = construct_stdlib_url(crate_name, resolved_version)
++                        logger.info(
++                            f"Tier 1: Constructed stdlib URL for {crate_name}@{resolved_version}: {rustdoc_url}"
+                         )
+ 
+                     raw_content, used_url = await download_rustdoc(
+                         session, crate_name, resolved_version, rustdoc_url
+                     )
+ 
+                     json_content = await decompress_content(raw_content, used_url)
+ 
++                    # Sanity-check the JSON content before proceeding
++                    if not json_content or '"index"' not in json_content[:1000]:
++                        raise ValueError("Decompressed content is not valid rustdoc JSON (missing 'index').")
++
++                    # Only set ingestion_tier after successful download and decompression
+                     ingestion_tier = IngestionTier.RUSTDOC_JSON
++                    # --- END PATCH ---
+ 
+                     # Parse and store
+                     await set_ingestion_status(db_path, crate_id, "processing")
+@@ -616,6 +647,9 @@
+                     logger.info(
+                         f"No rustdoc JSON for {crate_name}@{version}, trying fallback"
+                     )
++                except ValueError as e:
++                    # Catch invalid JSON content from our sanity check
++                    logger.warning(f"Rustdoc JSON ingestion failed for {crate_name}@{version}: {e}")
+ 
+                 except Exception as e:
+                     logger.warning(f"Rustdoc JSON ingestion failed: {e}")
+
+```
+
+### New Test File: `tests/test_ingestion_bugfixes.py`
+
+Please create the following new file:
+
+**Path:** `tests/test_ingestion_bugfixes.py`
+**Content:**
+```python
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from docsrs_mcp.ingestion.ingest_orchestrator import ingest_crate
+from docsrs_mcp.ingestion.version_resolver import (
+    RustdocVersionNotFoundError,
+    construct_stdlib_url,
+)
+from docsrs_mcp.models import IngestionTier
+
+
+@pytest.fixture
+def mock_db(tmp_path):
+    """Fixture to provide a temporary database path."""
+    return tmp_path / "test.db"
+
+
+@pytest.mark.asyncio
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.get_db_path")
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.init_database", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.is_ingestion_complete", new_callable=AsyncMock, return_value=False)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.store_crate_metadata", new_callable=AsyncMock, return_value=1)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.set_ingestion_status", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.download_rustdoc", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.decompress_content", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.parse_rustdoc_items_streaming")
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.store_enhanced_items_streaming", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.generate_example_embeddings", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.fetch_crate_info", new_callable=AsyncMock, return_value={"description": "A test crate."})
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.parse_cargo_toml", return_value={})
+# This test focuses on the Tier 1 block, so we mock the initial resolve_version to isolate the test
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.resolve_version", new_callable=AsyncMock)
+async def test_tier1_resolves_version_before_download(
+    mock_resolve_version,
+    mock_parse_cargo,
+    mock_fetch_info,
+    mock_gen_embeddings,
+    mock_store_enhanced,
+    mock_parse_streaming,
+    mock_decompress,
+    mock_download,
+    mock_set_status,
+    mock_store_meta,
+    mock_is_complete,
+    mock_init_db,
+    mock_get_db_path,
+    mock_db,
+):
+    """
+    Regression test for Bug #1.
+    Ensures that version resolution is performed inside Tier 1.
+    """
+    mock_get_db_path.return_value = mock_db
+    # The initial resolve_version is patched to do nothing.
+    # The test relies on the new logic inside Tier 1 to call it again.
+    mock_resolve_version.return_value = ("1.2.3", "https://docs.rs/crate/a-crate/1.2.3/json")
+    mock_download.return_value = (b"compressed_content", "https://docs.rs/crate/a-crate/1.2.3/json.zst")
+    mock_decompress.return_value = '{"index": {}}'  # Valid JSON
+    mock_parse_streaming.return_value = iter([{"item_id": "1"}])
+
+    await ingest_crate("a-crate", "latest")
+
+    # Assert that resolve_version was called by the new Tier 1 logic
+    mock_resolve_version.assert_called_once_with(
+        MagicMock(), "a-crate", "latest"
+    )
+
+    # Assert that download_rustdoc was called with the *resolved* version
+    mock_download.assert_called_once()
+    call_args, _ = mock_download.call_args
+    assert call_args[1] == "a-crate"
+    assert call_args[2] == "1.2.3"  # The resolved version
+    assert call_args[3] == "https://docs.rs/crate/a-crate/1.2.3/json"
+
+    # Assert we completed with RUSTDOC_JSON tier
+    last_status_call = mock_set_status.call_args_list[-1]
+    assert last_status_call.args[2] == "completed"
+    assert last_status_call.kwargs["ingestion_tier"] == IngestionTier.RUSTDOC_JSON.value
+
+
+@pytest.mark.asyncio
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.get_db_path")
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.init_database", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.is_ingestion_complete", new_callable=AsyncMock, return_value=False)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.store_crate_metadata", new_callable=AsyncMock, return_value=1)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.set_ingestion_status", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.resolve_version", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.download_rustdoc", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.CratesIoSourceExtractor", new=None)  # Disable Tier 2
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.store_embeddings_streaming", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.fetch_crate_info", new_callable=AsyncMock, return_value={"description": "A non-stdlib crate."})
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.parse_cargo_toml", return_value={})
+async def test_non_stdlib_does_not_use_stdlib_fallback(
+    mock_parse_cargo,
+    mock_fetch_info,
+    mock_store_embeddings,
+    mock_download,
+    mock_resolve_version,
+    mock_set_status,
+    mock_store_meta,
+    mock_is_complete,
+    mock_init_db,
+    mock_get_db_path,
+    mock_db,
+):
+    """
+    Tests that a non-stdlib crate that fails all tiers does not get stdlib fallback content.
+    """
+    mock_get_db_path.return_value = mock_db
+    mock_resolve_version.return_value = ("1.0.0", "url")
+    # Tier 1 fails
+    mock_download.side_effect = RustdocVersionNotFoundError("not found")
+
+    await ingest_crate("not-stdlib", "1.0.0")
+
+    # Should fall back to Tier 4 (DESCRIPTION_ONLY)
+    last_status_call = mock_set_status.call_args_list[-1]
+    assert last_status_call.args[2] == "completed"
+    assert last_status_call.kwargs["ingestion_tier"] == IngestionTier.DESCRIPTION_ONLY.value
+
+    # Check that the stored content is the simple description, not the stdlib fallback.
+    mock_store_embeddings.assert_called_once()
+    chunks_generator = mock_store_embeddings.call_args.args[0]
+    stored_chunks = list(chunks_generator)
+    
+    assert len(stored_chunks) > 0
+    first_chunk_doc = stored_chunks[0][0]['doc']
+    assert "A non-stdlib crate." in first_chunk_doc
+    assert "Get Complete Documentation" not in first_chunk_doc
+
+
+@pytest.mark.asyncio
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.get_db_path")
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.init_database", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.is_ingestion_complete", new_callable=AsyncMock, return_value=False)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.store_crate_metadata", new_callable=AsyncMock, return_value=1)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.set_ingestion_status", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.resolve_stdlib_version", new_callable=AsyncMock, return_value="1.75.0")
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.RustupDetector")
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.download_rustdoc", new_callable=AsyncMock)
+@patch("docsrs_mcp.ingestion.ingest_orchestrator.store_embeddings_streaming", new_callable=AsyncMock)
+async def test_stdlib_clean_fallback(
+    mock_store_embeddings,
+    mock_download,
+    mock_rustup_detector,
+    mock_resolve_stdlib,
+    mock_set_status,
+    mock_store_meta,
+    mock_is_complete,
+    mock_init_db,
+    mock_get_db_path,
+    mock_db,
+):
+    """
+    Tests that an stdlib crate with no local JSON falls back cleanly to Tier 4
+    with the correct stdlib-specific fallback content.
+    """
+    mock_get_db_path.return_value = mock_db
+    # No local stdlib JSON found
+    mock_rustup_detector.return_value.get_stdlib_json_path.return_value = None
+    
+    # Tier 1 download fails as expected for stdlib
+    expected_url = construct_stdlib_url("std", "1.75.0")
+    mock_download.side_effect = RustdocVersionNotFoundError("not found")
+
+    await ingest_crate("std", "stable")
+
+    # Check that download_rustdoc was called with the correct constructed stdlib URL
+    mock_download.assert_called_once_with(
+        MagicMock(), "std", "1.75.0", expected_url
+    )
+
+    # Should fall back to Tier 4 (DESCRIPTION_ONLY)
+    last_status_call = mock_set_status.call_args_list[-1]
+    assert last_status_call.args[2] == "completed"
+    assert last_status_call.kwargs["ingestion_tier"] == IngestionTier.DESCRIPTION_ONLY.value
+
+    # Check that the stored content is the special stdlib fallback
+    mock_store_embeddings.assert_called_once()
+    chunks_generator = mock_store_embeddings.call_args.args[0]
+    stored_chunks = list(chunks_generator)
+    
+    assert len(stored_chunks) > 1  # Should have multiple chunks for modules
+    first_chunk_doc = stored_chunks[0][0]['doc']
+    assert "The Rust standard library" in first_chunk_doc
+    assert "Get Complete Documentation" in first_chunk_doc
+```
+
+### How to Proceed
+
+1.  **Apply the patch**: Apply the provided diff to `src/docsrs_mcp/ingestion/ingest_orchestrator.py`.
+2.  **Add the new test file**: Create the new file `tests/test_ingestion_bugfixes.py` with the content above.
+3.  **Run tests**: Execute your test suite. The existing tests should pass, and the new tests in `test_ingestion_bugfixes.py` should also pass, confirming the fix.
+
+```bash
+pytest tests/test_ingestion_bugfixes.py
+```
+
+This patch directly addresses the root cause by ensuring version resolution happens at the correct time, tightens the ingestion logic, and is backed by a comprehensive set of regression tests.

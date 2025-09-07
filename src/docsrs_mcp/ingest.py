@@ -20,6 +20,8 @@ from .ingestion import (
     batch_examples,
     # Rustdoc parsing
     build_module_hierarchy,
+    normalize_item_type,
+    resolve_parent_id,
     # Cache management
     calculate_cache_size,
     calculate_example_hash,
@@ -29,6 +31,8 @@ from .ingestion import (
     cleanup_embedding_model,
     # Version resolution
     construct_stdlib_url,
+    # Backward-compat alias expected by tests
+    construct_stdlib_url as get_stdlib_url,
     decompress_content,
     download_rustdoc,
     evict_cache_if_needed,
@@ -88,6 +92,8 @@ __all__ = [
     "download_rustdoc",
     "decompress_content",
     "construct_stdlib_url",
+    # Backward-compat alias
+    "get_stdlib_url",
     # Rustdoc parsing
     "parse_rustdoc_items_streaming",
     "parse_rustdoc_items",

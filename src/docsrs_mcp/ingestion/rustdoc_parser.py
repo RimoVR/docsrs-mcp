@@ -524,7 +524,8 @@ def normalize_item_type(kind: dict | str) -> str:
         if key in kind_str:
             return value
 
-    return "unknown"
+    # Preserve unknown string kinds as-is; use "unknown" for dicts or empty
+    return kind_str if not isinstance(kind, dict) else "unknown"
 
 
 def extract_item_path(item: dict) -> str:

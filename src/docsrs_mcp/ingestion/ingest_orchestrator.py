@@ -56,6 +56,7 @@ from .version_resolver import (
     download_rustdoc,
     fetch_crate_info,
     is_stdlib_crate,
+    construct_stdlib_url,
     resolve_stdlib_version,
     resolve_version,
 )
@@ -556,17 +557,63 @@ async def ingest_crate(crate_name: str, version: str | None = None) -> Path:
                 try:
                     await set_ingestion_status(db_path, crate_id, "downloading")
 
+                    # Always ensure we have a concrete version and URL right before download
+                    tier1_url: str | None = None
+
                     if is_stdlib:
-                        # For stdlib, try docs.rs URL (expected to fail but worth trying)
-                        rustdoc_url = (
-                            f"https://docs.rs/{crate_name}/latest/{crate_name}.json"
+                        # docs.rs generally doesn't host stdlib JSON; construct a throwaway URL
+                        # so that RustdocVersionNotFoundError can drive clean fallback without
+                        # contaminating state.
+                        try:
+                            tier1_url = construct_stdlib_url(crate_name, resolved_version)
+                        except Exception:
+                            tier1_url = None
+                    else:
+                        # Use any previously resolved URL if available; otherwise resolve now
+                        try:
+                            prior_url = rustdoc_url  # may be set earlier during initial resolve
+                        except NameError:
+                            prior_url = None
+
+                        needs_resolution = (
+                            not resolved_version
+                            or str(resolved_version).strip().lower() in ("", "latest")
+                            or not prior_url
                         )
 
+                        if needs_resolution:
+                            try:
+                                resolved_version, tier1_url = await resolve_version(
+                                    session, crate_name, version
+                                )
+                            except Exception as e:
+                                logger.info(
+                                    f"Tier1: resolve_version retry skipped/failed for {crate_name}@{version}: {e}"
+                                )
+                                tier1_url = prior_url
+                        else:
+                            tier1_url = prior_url
+
+                    # Final guards before attempting download
+                    if not isinstance(resolved_version, str) or not resolved_version:
+                        resolved_version = version or "latest"
+
+                    logger.info(
+                        f"Tier1: attempting rustdoc download crate={crate_name} resolved_version={resolved_version} url={tier1_url} stdlib={is_stdlib}"
+                    )
+
                     raw_content, used_url = await download_rustdoc(
-                        session, crate_name, resolved_version, rustdoc_url
+                        session, crate_name, resolved_version, tier1_url
                     )
 
                     json_content = await decompress_content(raw_content, used_url)
+
+                    # Sanity check before marking tier success to avoid contamination
+                    if not json_content or (
+                        isinstance(json_content, str)
+                        and ('"index"' not in json_content and '"paths"' not in json_content)
+                    ):
+                        raise Exception("Rustdoc JSON content appears invalid/empty")
 
                     ingestion_tier = IngestionTier.RUSTDOC_JSON
 
