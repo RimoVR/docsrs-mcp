@@ -1,0 +1,1057 @@
+Okay, I will begin by analyzing the provided files to diagnose the regression. Based on the context, the most likely culprits are `mcp_sdk_server.py` and `mcp_tools_config.py`. I will start by reading them.
+Excellent. The analysis confirms the primary issues are the tool name mismatch and the complex `oneOf` schema for `search_items`. The inconsistent schema sourcing in `handle_list_tools` is a significant contributing factor.
+
+Here is the diagnosis and the proposed plan to fix the regression.
+
+### Diagnosis Summary
+
+1.  **Root Cause: Tool Name Mismatch (camelCase vs. snake_case):**
+    *   **File:** `src/docsrs_mcp/mcp_tools_config.py`
+    *   **Issue:** Several tools (`getDocumentationDetail`, `extractUsagePatterns`, `generateLearningPath`) are defined with `camelCase` names. However, the corresponding handler functions in `src/docsrs_mcp/mcp_sdk_server.py` and the `handle_call_tool` dispatcher expect `snake_case` names (e.g., `get_documentation_detail`). This mismatch makes these tools undiscoverable or callable by clients.
+
+2.  **Root Cause: Incompatible `oneOf` Schema:**
+    *   **File:** `src/docsrs_mcp/mcp_tools_config.py`
+    *   **Issue:** The `search_items` tool uses a `oneOf` JSON schema to define two different modes (single-crate vs. cross-crate). As suspected, this complex structure is often poorly supported by MCP clients, likely causing them to fail schema validation and reject the entire tool list.
+
+3.  **Contributing Factor: Inconsistent Schema Sourcing:**
+    *   **File:** `src/docsrs_mcp/mcp_sdk_server.py`
+    *   **Issue:** The `handle_list_tools` function defines most tool schemas inline, but pulls the `search_items` schema from `mcp_tools_config.py`. This inconsistency is the direct cause of the `oneOf` problem being exposed to clients and makes the tool definitions difficult to manage.
+
+### Proposed Patch Set
+
+I will propose targeted changes to address these root causes while adhering to the design constraints. The goal is to centralize tool definitions, ensure name consistency, and simplify schemas for client compatibility.
+
+#### Change 1: Unify and Simplify `mcp_tools_config.py`
+
+I will modify `src/docsrs_mcp/mcp_tools_config.py` to be the single source of truth for all tool schemas.
+
+**A. Simplify `search_items` Schema:**
+Replace the `oneOf` structure with a single, unified schema that includes parameters for both single-crate and cross-crate search. The server-side logic already handles the distinction based on the presence of `crate_name` vs. `crates`.
+
+**B. Standardize Tool Names to `snake_case`:**
+Rename `getDocumentationDetail`, `extractUsagePatterns`, and `generateLearningPath` to `get_documentation_detail`, `extract_usage_patterns`, and `generate_learning_path` respectively.
+
+Here is the proposed diff for `src/docsrs_mcp/mcp_tools_config.py`:
+
+```diff
+--- a/src/docsrs_mcp/mcp_tools_config.py
++++ b/src/docsrs_mcp/mcp_tools_config.py
+@@ -23,183 +23,88 @@
+     {
+         "name": "search_items",
+         "description": "Search for items in crate documentation with advanced modes",
+         "input_schema": {
+-            "oneOf": [
+-                {
+-                    "type": "object",
+-                    "description": "Cross-crate search: search across multiple crates or all available crates",
+-                    "properties": {
+-                        "query": {
+-                            "type": "string",
+-                            "description": "Natural language search query (minimum 2 characters)",
+-                            "minLength": 2,
+-                            "maxLength": 500
+-                        },
+-                        "crates": {
+-                            "type": "array",
+-                            "items": {
+-                                "type": "string",
+-                                "pattern": r"^[a-zA-Z0-9_-]+$",
+-                                "minLength": 1,
+-                                "maxLength": 100
+-                            },
+-                            "description": "List of specific crates to search (max 5). If omitted, searches all available crates",
+-                            "maxItems": 5,
+-                            "minItems": 0,
+-                            "uniqueItems": True
+-                        },
+-                        "version": {
+-                            "type": "string",
+-                            "description": "Specific version or 'latest' (default: 'latest')",
+-                            "default": "latest"
+-                        },
+-                        "k": {
+-                            "type": "string",
+-                            "description": "Number of results to return (1-20, default: 5)",
+-                            "pattern": r"^([1-9]|1[0-9]|20)$",
+-                            "default": "5"
+-                        },
+-                        "type_filter": {
+-                            "type": "string",
+-                            "description": "Filter by item type (struct, trait, function, etc.)"
+-                        },
+-                        "module_path": {
+-                            "type": "string",
+-                            "description": "Filter results to specific module path"
+-                        },
+-                        "search_mode": {
+-                            "type": "string",
+-                            "description": "Search mode: 'vector' (default), 'fuzzy', 'regex', or 'hybrid'",
+-                            "enum": ["vector", "fuzzy", "regex", "hybrid"],
+-                            "default": "vector"
+-                        },
+-                        "fuzzy_tolerance": {
+-                            "type": "string",
+-                            "description": "Fuzzy match threshold (0.0-1.0, default: 0.7, as string)",
+-                            "pattern": r"^(0\.[0-9]+|1\.0)$",
+-                            "default": "0.7"
+-                        },
+-                        "regex_pattern": {
+-                            "type": "string",
+-                            "description": "Regex pattern for pattern matching mode"
+-                        },
+-                        "stability_filter": {
+-                            "type": "string",
+-                            "description": "Filter by stability: 'stable', 'unstable', 'experimental', or 'all'",
+-                            "enum": ["stable", "unstable", "experimental", "all"],
+-                            "default": "all"
+-                        },
+-                        "safety_filter": {
+-                            "type": "string",
+-                            "description": "Filter by safety: 'safe', 'unsafe', or 'all' (default: all)",
+-                            "enum": ["safe", "unsafe", "all"],
+-                            "default": "all"
+-                        },
+-                        "deprecated": {
+-                            "type": "string",
+-                            "description": "Include deprecated items in results (true/false, default: false)",
+-                            "enum": ["true", "false"],
+-                            "default": "False"
+-                        },
+-                        "has_examples": {
+-                            "type": "string",
+-                            "description": "Only return items with code examples (true/false, default: false)",
+-                            "enum": ["true", "false"],
+-                            "default": "False"
+-                        },
+-                        "has_errors": {
+-                            "type": "string",
+-                            "description": "Filter items that return error types (Result<T, E>) (true/false, default: false)",
+-                            "enum": ["true", "false"],
+-                            "default": "False"
+-                        },
+-                        "min_doc_length": {
+-                            "type": "string",
+-                            "description": "Minimum documentation length filter (numeric string, default: 0)",
+-                            "pattern": r"^[0-9]+$",
+-                            "default": "0"
+-                        },
+-                        "feature_filter": {
+-                            "type": "string",
+-                            "description": "Filter by required feature flag (e.g., 'async', 'std')"
+-                        }
+-                    },
+-                    "required": ["query"],
+-                    "additionalProperties": False
+-                },
+-                {
+-                    "type": "object",
+-                    "description": "Single-crate search: search within a specific crate",
+-                    "properties": {
+-                        "crate_name": {
+-                            "type": "string",
+-                            "description": "Name of the specific crate to search within",
+-                            "pattern": r"^[a-zA-Z0-9_-]+$",
+-                            "minLength": 1,
+-                            "maxLength": 100
+-                        },
+-                        "query": {
+-                            "type": "string",
+-                            "description": "Natural language search query (minimum 2 characters)",
+-                            "minLength": 2,
+-                            "maxLength": 500
+-                        },
+-                        "version": {
+-                            "type": "string",
+-                            "description": "Specific version or 'latest' (default: 'latest')",
+-                            "default": "latest"
+-                        },
+-                        "k": {
+-                            "type": "string",
+-                            "description": "Number of results to return (1-20, default: 5)",
+-                            "pattern": r"^([1-9]|1[0-9]|20)$",
+-                            "default": "5"
+-                        },
+-                        "type_filter": {
+-                            "type": "string",
+-                            "description": "Filter by item type (struct, trait, function, etc.)"
+-                        },
+-                        "module_path": {
+-                            "type": "string",
+-                            "description": "Filter results to specific module path"
+-                        },
+-                        "crate_filter": {
+-                            "type": "string",
+-                            "description": "Filter results to specific crate (should match crate_name)"
+-                        },
+-                        "visibility": {
+-                            "type": "string",
+-                            "description": "Filter by visibility (public, crate, private)",
+-                            "enum": ["public", "crate", "private"]
+-                        },
+-                        "search_mode": {
+-                            "type": "string",
+-                            "description": "Search mode: 'vector' (default), 'fuzzy', 'regex', or 'hybrid'",
+-                            "enum": ["vector", "fuzzy", "regex", "hybrid"],
+-                            "default": "vector"
+-                        },
+-                        "fuzzy_tolerance": {
+-                            "type": "string",
+-                            "description": "Fuzzy match threshold (0.0-1.0, default: 0.7, as string)",
+-                            "pattern": r"^(0\.[0-9]+|1\.0)$",
+-                            "default": "0.7"
+-                        },
+-                        "regex_pattern": {
+-                            "type": "string",
+-                            "description": "Regex pattern for pattern matching mode"
+-                        },
+-                        "stability_filter": {
+-                            "type": "string",
+-                            "description": "Filter by stability: 'stable', 'unstable', 'experimental', or 'all'",
+-                            "enum": ["stable", "unstable", "experimental", "all"],
+-                            "default": "all"
+-                        },
+-                        "safety_filter": {
+-                            "type": "string",
+-                            "description": "Filter by safety: 'safe', 'unsafe', or 'all' (default: all)",
+-                            "enum": ["safe", "unsafe", "all"],
+-                            "default": "all"
+-                        },
+-                        "deprecated": {
+-                            "type": "string",
+-                            "description": "Include deprecated items in results (true/false, default: false)",
+-                            "enum": ["true", "false"],
+-                            "default": "False"
+-                        },
+-                        "has_examples": {
+-                            "type": "string",
+-                            "description": "Only return items with code examples (true/false, default: false)",
+-                            "enum": ["true", "false"],
+-                            "default": "False"
+-                        },
+-                        "has_errors": {
+-                            "type": "string",
+-                            "description": "Filter items that return error types (Result<T, E>) (true/false, default: false)",
+-                            "enum": ["true", "false"],
+-                            "default": "False"
+-                        },
+-                        "min_doc_length": {
+-                            "type": "string",
+-                            "description": "Minimum documentation length filter (numeric string, default: 0)",
+-                            "pattern": r"^[0-9]+$",
+-                            "default": "0"
+-                        },
+-                        "feature_filter": {
+-                            "type": "string",
+-                            "description": "Filter by required feature flag (e.g., 'async', 'std')"
+-                        }
+-                    },
+-                    "required": ["crate_name", "query"],
+-                    "additionalProperties": False
+-                }
+-            ],
++            "type": "object",
++            "description": "Search for items in crate documentation. Supports single-crate (with crate_name) and cross-crate (with crates) search.",
++            "properties": {
++                "query": {
++                    "type": "string",
++                    "description": "Natural language search query.",
++                    "minLength": 2
++                },
++                "crate_name": {
++                    "type": "string",
++                    "description": "Name of a single crate to search within. Use 'crates' for multi-crate search."
++                },
++                "crates": {
++                    "type": "string",
++                    "description": "Comma-separated list of crates for cross-crate search (e.g., 'tokio,serde'). Takes precedence over crate_name."
++                },
++                "version": {
++                    "type": "string",
++                    "default": "latest",
++                    "description": "Specific version or 'latest'."
++                },
++                "k": {
++                    "type": "string",
++                    "default": "5",
++                    "description": "Number of results to return (1-50)."
++                },
++                "item_type": {
++                    "type": "string",
++                    "description": "Filter by item type (e.g., function, struct, trait)."
++                },
++                "module_path": {
++                    "type": "string",
++                    "description": "Filter to a specific module path (single-crate only)."
++                },
++                "has_examples": {
++                    "type": "string",
++                    "description": "Filter for items with code examples ('true'/'false')."
++                },
++                "min_doc_length": {
++                    "type": "string",
++                    "description": "Minimum documentation length in characters."
++                },
++                "visibility": {
++                    "type": "string",
++                    "description": "Filter by item visibility (public, private, crate)."
++                },
++                "deprecated": {
++                    "type": "string",
++                    "description": "Filter by deprecation status ('true'/'false')."
++                }
++            },
++            "required": ["query"],
+             "examples": [
+                 {
+                     "query": "deserialize",
+@@ -299,8 +204,8 @@
+         },
+     },
+     {
+-        "name": "getDocumentationDetail",
+-        "description": "Get documentation with progressive detail levels (summary/detailed/expert)",
++        "name": "get_documentation_detail",
++        "description": "Get documentation at specified detail level (summary/detailed/expert)",
+         "input_schema": {
+             "type": "object",
+             "properties": {
+@@ -322,7 +227,7 @@
+         },
+     },
+     {
+-        "name": "extractUsagePatterns",
++        "name": "extract_usage_patterns",
+         "description": "Extract common usage patterns from documentation and examples",
+         "input_schema": {
+             "type": "object",
+@@ -348,7 +253,7 @@
+         },
+     },
+     {
+-        "name": "generateLearningPath",
++        "name": "generate_learning_path",
+         "description": "Generate learning path for API migration or onboarding",
+         "input_schema": {
+             "type": "object",
+
+```
+
+#### Change 2: Refactor `mcp_sdk_server.py` to Use Centralized Schemas
+
+I will refactor `handle_list_tools` in `src/docsrs_mcp/mcp_sdk_server.py` to dynamically build the tool list from `MCP_TOOLS_CONFIG`. This eliminates the hardcoded schemas and ensures that any change in the config file is automatically reflected in the server's tool list.
+
+Here is the proposed diff for `src/docsrs_mcp/mcp_sdk_server.py`:
+
+```diff
+--- a/src/docsrs_mcp/mcp_sdk_server.py
++++ b/src/docsrs_mcp/mcp_sdk_server.py
+@@ -1100,263 +1100,15 @@
+ @server.list_tools()
+ async def handle_list_tools() -> list[types.Tool]:
+     """List all available tools."""
+-    return [
+-        types.Tool(
+-            name="get_crate_summary",
+-            description="Get summary information about a Rust crate including metadata and module structure",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate (e.g., 'tokio', 'serde')",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name"],
+-            },
+-        ),
+-        types.Tool(
+-            name="search_items",
+-            description="Search for items in crate documentation with advanced modes",
+-            inputSchema=get_tool_schema("search_items"),
+-        ),
+-        types.Tool(
+-            name="get_item_doc",
+-            description="Get complete documentation for a specific item in a crate",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the crate containing the item",
+-                    },
+-                    "item_path": {
+-                        "type": "string",
+-                        "description": "Full path to the item (e.g., 'tokio::spawn', 'std::vec::Vec')",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name", "item_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="get_module_tree",
+-            description="Get the module hierarchy tree for a Rust crate",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate to get module tree for",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name"],
+-            },
+-        ),
+-        types.Tool(
+-            name="search_examples",
+-            description="Search for code examples in a crate's documentation",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the crate to search within",
+-                    },
+-                    "query": {
+-                        "type": "string",
+-                        "description": "Search query for finding relevant code examples",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version to search",
+-                    },
+-                    "k": {
+-                        "type": "string",
+-                        "default": "5",
+-                        "description": "Number of examples to return (1-20)",
+-                    },
+-                    "language": {
+-                        "type": "string",
+-                        "description": "Filter examples by programming language (e.g., 'rust', 'bash', 'toml')",
+-                    },
+-                },
+-                "required": ["crate_name", "query"],
+-            },
+-        ),
+-        types.Tool(
+-            name="list_versions",
+-            description="List all locally cached versions of a crate",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate to query",
+-                    },
+-                },
+-                "required": ["crate_name"],
+-            },
+-        ),
+-        types.Tool(
+-            name="start_pre_ingestion",
+-            description="Start background pre-ingestion of popular Rust crates",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "count": {
+-                        "type": "string",
+-                        "default": "100",
+-                        "description": "Number of crates to pre-ingest (10-500)",
+-                    },
+-                    "concurrency": {
+-                        "type": "string",
+-                        "default": "3",
+-                        "description": "Number of parallel download workers (1-10)",
+-                    },
+-                    "force": {
+-                        "type": "string",
+-                        "default": "false",
+-                        "description": "Force restart if pre-ingestion is already running ('true'/'false')",
+-                    },
+-                },
+-                "required": [],
+-            },
+-        ),
+-        types.Tool(
+-            name="control_pre_ingestion",
+-            description="Control the pre-ingestion worker (pause/resume/stop)",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "action": {
+-                        "type": "string",
+-                        "description": "Control action to perform (pause/resume/stop)",
+-                    },
+-                },
+-                "required": ["action"],
+-            },
+-        ),
+-        types.Tool(
+-            name="ingest_cargo_file",
+-            description="Ingest crates from a Cargo.toml or Cargo.lock file",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "file_path": {
+-                        "type": "string",
+-                        "description": "Path to Cargo.toml or Cargo.lock file",
+-                    },
+-                    "concurrency": {
+-                        "type": "string",
+-                        "default": "3",
+-                        "description": "Number of parallel download workers (1-10)",
+-                    },
+-                    "skip_existing": {
+-                        "type": "string",
+-                        "default": "true",
+-                        "description": "Skip already ingested crates ('true'/'false')",
+-                    },
+-                    "resolve_versions": {
+-                        "type": "string",
+-                        "default": "false",
+-                        "description": "Resolve version specifications to concrete versions ('true'/'false')",
+-                    },
+-                },
+-                "required": ["file_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="get_trait_implementors",
+-            description="Find all types that implement a specific trait",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "trait_path": {
+-                        "type": "string",
+-                        "description": "Full path to the trait (e.g., 'std::fmt::Debug')",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name", "trait_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="get_type_traits",
+-            description="Get all traits implemented by a specific type",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "type_path": {
+-                        "type": "string",
+-                        "description": "Full path to the type (e.g., 'std::vec::Vec')",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name", "type_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="resolve_method",
+-            description="Resolve method calls to find the correct implementation",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "type_path": {
+-                        "type": "string",
+-                        "description": "Full path to the type",
+-                    },
+-                    "method_name": {
+-                        "type": "string",
+-                        "description": "Name of the method to resolve",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name", "type_path", "method_name"],
+-            },
+-        ),
+-        types.Tool(
+-            name="get_associated_items",
+-            description="Get associated items (types, constants, functions) for a trait or type",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "container_path": {
+-                        "type": "string",
+-                        "description": "Path to the containing trait/type",
+-                    },
+-                    "item_kind": {
+-                        "type": "string",
+-                        "description": "Optional filter by item kind ('type', 'const', 'function')",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name", "container_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="get_generic_constraints",
+-            description="Get generic constraints (type bounds, lifetime parameters) for an item",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "item_path": {
+-                        "type": "string",
+-                        "description": "Path to the item",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name", "item_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="compare_versions",
+-            description="Compare two versions of a crate for API changes",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "version_a": {
+-                        "type": "string",
+-                        "description": "First version to compare",
+-                    },
+-                    "version_b": {
+-                        "type": "string",
+-                        "description": "Second version to compare",
+-                    },
+-                    "categories": {
+-                        "type": "string",
+-                        "description": "Comma-separated categories of changes (breaking,deprecated,added,removed,modified)",
+-                    },
+-                    "include_unchanged": {
+-                        "type": "string",
+-                        "default": "false",
+-                        "description": "Include unchanged items in response ('true'/'false')",
+-                    },
+-                    "max_results": {
+-                        "type": "string",
+-                        "default": "1000",
+-                        "description": "Maximum number of changes to return (1-5000)",
+-                    },
+-                },
+-                "required": ["crate_name", "version_a", "version_b"],
+-            },
+-        ),
+-        # Phase 7: Workflow Enhancement Tools
+-        types.Tool(
+-            name="get_documentation_detail",
+-            description="Get documentation at specified detail level (summary/detailed/expert)",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "item_path": {
+-                        "type": "string",
+-                        "description": "Path to the item",
+-                    },
+-                    "detail_level": {
+-                        "type": "string",
+-                        "default": "summary",
+-                        "description": "Level of detail ('summary', 'detailed', 'expert')",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name", "item_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="extract_usage_patterns",
+-            description="Extract common usage patterns from documentation and examples",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                    "limit": {
+-                        "type": "string",
+-                        "default": "10",
+-                        "description": "Maximum patterns to return (1-50)",
+-                    },
+-                    "min_frequency": {
+-                        "type": "string",
+-                        "default": "2",
+-                        "description": "Minimum pattern frequency (1-100)",
+-                    },
+-                },
+-                "required": ["crate_name"],
+-            },
+-        ),
+-        types.Tool(
+-            name="generate_learning_path",
+-            description="Generate learning path for API migration or onboarding",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "from_version": {
+-                        "type": "string",
+-                        "default": "",
+-                        "description": "Starting version (empty for new users)",
+-                    },
+-                    "to_version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Target version",
+-                    },
+-                    "focus_areas": {
+-                        "type": "string",
+-                        "default": "",
+-                        "description": "Comma-separated focus areas",
+-                    },
+-                },
+-                "required": ["crate_name"],
+-            },
+-        ),
+-        # Phase 6: Cross-References Tools
+-        types.Tool(
+-            name="resolve_import",
+-            description="Resolve import paths and suggest alternatives",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "import_path": {
+-                        "type": "string",
+-                        "description": "Import path to resolve (e.g., 'Result', 'io::Error')",
+-                    },
+-                    "include_alternatives": {
+-                        "type": "string",
+-                        "default": "false",
+-                        "description": "Include alternative import paths ('true'/'false')",
+-                    },
+-                },
+-                "required": ["crate_name", "import_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="get_dependency_graph",
+-            description="Get dependency graph with version constraints",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "max_depth": {
+-                        "type": "string",
+-                        "default": "3",
+-                        "description": "Maximum depth to traverse (1-10)",
+-                    },
+-                    "include_versions": {
+-                        "type": "string",
+-                        "default": "true",
+-                        "description": "Include version information ('true'/'false')",
+-                    },
+-                },
+-                "required": ["crate_name"],
+-            },
+-        ),
+-        types.Tool(
+-            name="suggest_migrations",
+-            description="Suggest migration paths for breaking changes between versions",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "from_version": {
+-                        "type": "string",
+-                        "description": "Starting version (e.g., '1.0.0')",
+-                    },
+-                    "to_version": {
+-                        "type": "string",
+-                        "description": "Target version (e.g., '2.0.0')",
+-                    },
+-                },
+-                "required": ["crate_name", "from_version", "to_version"],
+-            },
+-        ),
+-        types.Tool(
+-            name="trace_reexports",
+-            description="Trace re-exported items to their original source",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "item_path": {
+-                        "type": "string",
+-                        "description": "Path of the item to trace (e.g., 'Result', 'io::Error')",
+-                    },
+-                },
+-                "required": ["crate_name", "item_path"],
+-            },
+-        ),
+-        # Phase 5: Code Intelligence Tools
+-        types.Tool(
+-            name="get_code_intelligence",
+-            description="Get comprehensive code intelligence for a specific item including safety info, error types, and feature requirements",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "item_path": {
+-                        "type": "string",
+-                        "description": "Full path to the item (e.g., 'tokio::spawn')",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name", "item_path"],
+-            },
+-        ),
+-        types.Tool(
+-            name="get_error_types",
+-            description="List all error types in a crate or matching a pattern",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "pattern": {
+-                        "type": "string",
+-                        "description": "Optional pattern to filter error types",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name"],
+-            },
+-        ),
+-        types.Tool(
+-            name="get_unsafe_items",
+-            description="List all unsafe items in a crate with optional safety documentation",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "crate_name": {
+-                        "type": "string",
+-                        "description": "Name of the Rust crate",
+-                    },
+-                    "include_reasons": {
+-                        "type": "string",
+-                        "default": "false",
+-                        "description": "Include detailed unsafe reasons and safety documentation ('true'/'false')",
+-                    },
+-                    "version": {
+-                        "type": "string",
+-                        "default": "latest",
+-                        "description": "Specific version or 'latest'",
+-                    },
+-                },
+-                "required": ["crate_name"],
+-            },
+-        ),
+-        # Health Monitoring Tools
+-        types.Tool(
+-            name="server_health",
+-            description="Get comprehensive server health status including subsystems",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "include_subsystems": {
+-                        "type": "string",
+-                        "default": "true",
+-                        "description": "Include detailed subsystem status",
+-                    },
+-                    "include_metrics": {
+-                        "type": "string",
+-                        "default": "false",
+-                        "description": "Include performance metrics",
+-                    },
+-                },
+-            },
+-        ),
+-        types.Tool(
+-            name="get_ingestion_status",
+-            description="Get detailed pre-ingestion progress and statistics",
+-            inputSchema={
+-                "type": "object",
+-                "properties": {
+-                    "include_progress": {
+-                        "type": "string",
+-                        "default": "true",
+-                        "description": "Include detailed progress breakdown",
+-                    },
+-                },
+-            },
+-        ),
+-    ]
++    tool_list = []
++    for tool_config in MCP_TOOLS_CONFIG:
++        tool_list.append(
++            types.Tool(
++                name=tool_config["name"],
++                description=tool_config["description"],
++                inputSchema=tool_config["input_schema"],
++            )
++        )
++    return tool_list
+ 
+ 
+ @server.call_tool()
+
+```
+
+### Risks and Compatibility
+
+*   **Low Risk:** These changes are low-risk. The `search_items` handler in `mcp_sdk_server.py` is already written to handle a unified set of parameters, so simplifying the schema to match the existing implementation logic is safe.
+*   **Improved Compatibility:** Simplifying the `search_items` schema from `oneOf` to a simple object will significantly improve compatibility with a wider range of MCP clients, which is the primary goal.
+*   **Improved Maintainability:** Centralizing all tool schemas in `mcp_tools_config.py` and loading them dynamically makes the system much easier to maintain and reduces the chance of future regressions caused by inconsistent definitions.
+
+### Local Verification Plan
+
+Since `pytest` is unavailable, you can perform a focused, local validation using a Python REPL.
+
+1.  **Start a Python REPL** in your project's virtual environment:
+    ```sh
+    source .venv/bin/activate
+    python
+    ```
+
+2.  **Run the following verification script:** This script will import the `handle_list_tools` function, call it, and perform assertions to verify the fix.
+
+    ```python
+    import asyncio
+    
+    # It's important to apply the proposed patches before running this
+    
+    async def verify_mcp_tools():
+        print("--- Verifying MCP Tool Listing ---")
+        try:
+            # Adjust the import path based on your project structure
+            from src.docsrs_mcp.mcp_sdk_server import handle_list_tools
+            
+            tool_list = await handle_list_tools()
+            
+            assert tool_list, "Verification Failed: Tool list is empty!"
+            print(f"Successfully retrieved {len(tool_list)} tools.")
+            
+            tool_names = {tool.name for tool in tool_list}
+            
+            # 1. Verify that camelCase names are gone and snake_case names are present
+            assert "getDocumentationDetail" not in tool_names, "Verification Failed: Found old camelCase name 'getDocumentationDetail'"
+            assert "get_documentation_detail" in tool_names, "Verification Failed: 'get_documentation_detail' is missing!"
+            assert "extract_usage_patterns" in tool_names, "Verification Failed: 'extract_usage_patterns' is missing!"
+            assert "generate_learning_path" in tool_names, "Verification Failed: 'generate_learning_path' is missing!"
+            print("Successfully verified tool name standardization (snake_case).")
+            
+            # 2. Verify the search_items schema is simplified (no 'oneOf')
+            search_items_tool = next((t for t in tool_list if t.name == "search_items"), None)
+            assert search_items_tool, "Verification Failed: 'search_items' tool not found!"
+            
+            input_schema = search_items_tool.inputSchema
+            assert "oneOf" not in input_schema, "Verification Failed: 'search_items' schema still contains 'oneOf'!"
+            assert input_schema.get("type") == "object", "Verification Failed: 'search_items' schema is not an object."
+            assert "crate_name" in input_schema.get("properties", {}), "Verification Failed: 'crate_name' missing from search_items schema."
+            assert "crates" in input_schema.get("properties", {}), "Verification Failed: 'crates' missing from search_items schema."
+            print("Successfully verified 'search_items' schema simplification.")
+            
+            print("\n--- Verification Summary ---")
+            print("✅ All local verification checks passed.")
+            print("The tool list should now be correctly exposed to MCP clients.")
+            
+        except (ImportError, AssertionError) as e:
+            print(f"\n❌ Verification Failed: {e}")
+        except Exception as e:
+            print(f"\nAn unexpected error occurred during verification: {e}")
+
+    # Run the async verification function
+    asyncio.run(verify_mcp_tools())
+    ```
+
+This verification script provides a high degree of confidence that the proposed patches have fixed the regression by directly checking for the presence of the identified root causes.

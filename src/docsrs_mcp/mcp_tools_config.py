@@ -26,235 +26,77 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
         "name": "search_items",
         "description": "Search for items in crate documentation with advanced modes",
         "input_schema": {
-            "oneOf": [
-                {
-                    "type": "object",
-                    "description": "Cross-crate search: search across multiple crates or all available crates",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language search query (minimum 2 characters)",
-                            "minLength": 2,
-                            "maxLength": 500
-                        },
-                        "crates": {
-                            "type": "array",
-                            "items": {
-                                "type": "string",
-                                "pattern": r"^[a-zA-Z0-9_-]+$",
-                                "minLength": 1,
-                                "maxLength": 100
-                            },
-                            "description": "List of specific crates to search (max 5). If omitted, searches all available crates",
-                            "maxItems": 5,
-                            "minItems": 0,
-                            "uniqueItems": True
-                        },
-                        "version": {
-                            "type": "string",
-                            "description": "Specific version or 'latest' (default: 'latest')",
-                            "default": "latest"
-                        },
-                        "k": {
-                            "type": "string",
-                            "description": "Number of results to return (1-20, default: 5)",
-                            "pattern": r"^([1-9]|1[0-9]|20)$",
-                            "default": "5"
-                        },
-                        "type_filter": {
-                            "type": "string",
-                            "description": "Filter by item type (struct, trait, function, etc.)"
-                        },
-                        "module_path": {
-                            "type": "string",
-                            "description": "Filter results to specific module path"
-                        },
-                        "search_mode": {
-                            "type": "string",
-                            "description": "Search mode: 'vector' (default), 'fuzzy', 'regex', or 'hybrid'",
-                            "enum": ["vector", "fuzzy", "regex", "hybrid"],
-                            "default": "vector"
-                        },
-                        "fuzzy_tolerance": {
-                            "type": "string",
-                            "description": "Fuzzy match threshold (0.0-1.0, default: 0.7, as string)",
-                            "pattern": r"^(0\.[0-9]+|1\.0)$",
-                            "default": "0.7"
-                        },
-                        "regex_pattern": {
-                            "type": "string",
-                            "description": "Regex pattern for pattern matching mode"
-                        },
-                        "stability_filter": {
-                            "type": "string",
-                            "description": "Filter by stability: 'stable', 'unstable', 'experimental', or 'all'",
-                            "enum": ["stable", "unstable", "experimental", "all"],
-                            "default": "all"
-                        },
-                        "safety_filter": {
-                            "type": "string",
-                            "description": "Filter by safety: 'safe', 'unsafe', or 'all' (default: all)",
-                            "enum": ["safe", "unsafe", "all"],
-                            "default": "all"
-                        },
-                        "deprecated": {
-                            "type": "string",
-                            "description": "Include deprecated items in results (true/false, default: false)",
-                            "enum": ["true", "false"],
-                            "default": "False"
-                        },
-                        "has_examples": {
-                            "type": "string",
-                            "description": "Only return items with code examples (true/false, default: false)",
-                            "enum": ["true", "false"],
-                            "default": "False"
-                        },
-                        "has_errors": {
-                            "type": "string",
-                            "description": "Filter items that return error types (Result<T, E>) (true/false, default: false)",
-                            "enum": ["true", "false"],
-                            "default": "False"
-                        },
-                        "min_doc_length": {
-                            "type": "string",
-                            "description": "Minimum documentation length filter (numeric string, default: 0)",
-                            "pattern": r"^[0-9]+$",
-                            "default": "0"
-                        },
-                        "feature_filter": {
-                            "type": "string",
-                            "description": "Filter by required feature flag (e.g., 'async', 'std')"
-                        }
-                    },
-                    "required": ["query"],
-                    "additionalProperties": False
+            "type": "object",
+            "description": "Search within a single crate (crate_name) or across crates (crates). All parameters are strings for MCP compatibility.",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language query (min 2 chars)"
                 },
-                {
-                    "type": "object",
-                    "description": "Single-crate search: search within a specific crate",
-                    "properties": {
-                        "crate_name": {
-                            "type": "string",
-                            "description": "Name of the specific crate to search within",
-                            "pattern": r"^[a-zA-Z0-9_-]+$",
-                            "minLength": 1,
-                            "maxLength": 100
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "Natural language search query (minimum 2 characters)",
-                            "minLength": 2,
-                            "maxLength": 500
-                        },
-                        "version": {
-                            "type": "string",
-                            "description": "Specific version or 'latest' (default: 'latest')",
-                            "default": "latest"
-                        },
-                        "k": {
-                            "type": "string",
-                            "description": "Number of results to return (1-20, default: 5)",
-                            "pattern": r"^([1-9]|1[0-9]|20)$",
-                            "default": "5"
-                        },
-                        "type_filter": {
-                            "type": "string",
-                            "description": "Filter by item type (struct, trait, function, etc.)"
-                        },
-                        "module_path": {
-                            "type": "string",
-                            "description": "Filter results to specific module path"
-                        },
-                        "crate_filter": {
-                            "type": "string",
-                            "description": "Filter results to specific crate (should match crate_name)"
-                        },
-                        "visibility": {
-                            "type": "string",
-                            "description": "Filter by visibility (public, crate, private)",
-                            "enum": ["public", "crate", "private"]
-                        },
-                        "search_mode": {
-                            "type": "string",
-                            "description": "Search mode: 'vector' (default), 'fuzzy', 'regex', or 'hybrid'",
-                            "enum": ["vector", "fuzzy", "regex", "hybrid"],
-                            "default": "vector"
-                        },
-                        "fuzzy_tolerance": {
-                            "type": "string",
-                            "description": "Fuzzy match threshold (0.0-1.0, default: 0.7, as string)",
-                            "pattern": r"^(0\.[0-9]+|1\.0)$",
-                            "default": "0.7"
-                        },
-                        "regex_pattern": {
-                            "type": "string",
-                            "description": "Regex pattern for pattern matching mode"
-                        },
-                        "stability_filter": {
-                            "type": "string",
-                            "description": "Filter by stability: 'stable', 'unstable', 'experimental', or 'all'",
-                            "enum": ["stable", "unstable", "experimental", "all"],
-                            "default": "all"
-                        },
-                        "safety_filter": {
-                            "type": "string",
-                            "description": "Filter by safety: 'safe', 'unsafe', or 'all' (default: all)",
-                            "enum": ["safe", "unsafe", "all"],
-                            "default": "all"
-                        },
-                        "deprecated": {
-                            "type": "string",
-                            "description": "Include deprecated items in results (true/false, default: false)",
-                            "enum": ["true", "false"],
-                            "default": "False"
-                        },
-                        "has_examples": {
-                            "type": "string",
-                            "description": "Only return items with code examples (true/false, default: false)",
-                            "enum": ["true", "false"],
-                            "default": "False"
-                        },
-                        "has_errors": {
-                            "type": "string",
-                            "description": "Filter items that return error types (Result<T, E>) (true/false, default: false)",
-                            "enum": ["true", "false"],
-                            "default": "False"
-                        },
-                        "min_doc_length": {
-                            "type": "string",
-                            "description": "Minimum documentation length filter (numeric string, default: 0)",
-                            "pattern": r"^[0-9]+$",
-                            "default": "0"
-                        },
-                        "feature_filter": {
-                            "type": "string",
-                            "description": "Filter by required feature flag (e.g., 'async', 'std')"
-                        }
-                    },
-                    "required": ["crate_name", "query"],
-                    "additionalProperties": False
+                "crate_name": {
+                    "type": "string",
+                    "description": "Single crate to search"
+                },
+                "crates": {
+                    "type": "string",
+                    "description": "Comma-separated crates for cross-crate search"
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Specific version or 'latest'",
+                    "default": "latest"
+                },
+                "k": {
+                    "type": "string",
+                    "description": "Number of results (1-50)",
+                    "default": "5"
+                },
+                "item_type": {
+                    "type": "string",
+                    "description": "Filter by item type"
+                },
+                "module_path": {
+                    "type": "string",
+                    "description": "Filter to module path (single-crate only)"
+                },
+                "has_examples": {
+                    "type": "string",
+                    "description": "Only items with examples (true/false)"
+                },
+                "min_doc_length": {
+                    "type": "string",
+                    "description": "Minimum documentation length"
+                },
+                "visibility": {
+                    "type": "string",
+                    "description": "public | private | crate"
+                },
+                "deprecated": {
+                    "type": "string",
+                    "description": "Include deprecated (true/false)"
                 }
-            ],
-            "examples": [
-                {
-                    "query": "deserialize",
-                    "k": "10",
-                    "description": "Cross-crate search for deserialize functionality across all crates"
-                },
-                {
-                    "query": "async",
-                    "crates": ["tokio", "async-std"],
-                    "k": "5",
-                    "description": "Cross-crate search for async functionality in specific crates"
-                },
-                {
-                    "crate_name": "serde",
-                    "query": "serialize",
-                    "k": "10",
-                    "description": "Single-crate search within serde crate"
-                }
-            ]
+            },
+            "required": ["query"]
         },
+        "examples": [
+            {
+                "query": "deserialize",
+                "k": "10",
+                "description": "Cross-crate search for deserialize functionality across all crates"
+            },
+            {
+                "query": "async",
+                "crates": ["tokio", "async-std"],
+                "k": "5",
+                "description": "Cross-crate search for async functionality in specific crates"
+            },
+            {
+                "crate_name": "serde",
+                "query": "serialize",
+                "k": "10",
+                "description": "Single-crate search within serde crate"
+            }
+        ]
     },
     {
         "name": "get_item_doc",
@@ -420,7 +262,7 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "getDocumentationDetail",
+        "name": "get_documentation_detail",
         "description": "Get documentation with progressive detail levels (summary/detailed/expert)",
         "input_schema": {
             "type": "object",
@@ -446,7 +288,7 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "extractUsagePatterns",
+        "name": "extract_usage_patterns",
         "description": "Extract common usage patterns from documentation and examples",
         "input_schema": {
             "type": "object",
@@ -472,7 +314,7 @@ MCP_TOOLS_CONFIG: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "generateLearningPath",
+        "name": "generate_learning_path",
         "description": "Generate learning path for API migration or onboarding",
         "input_schema": {
             "type": "object",
