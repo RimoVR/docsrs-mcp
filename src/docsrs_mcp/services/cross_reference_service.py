@@ -402,7 +402,7 @@ class CrossReferenceService:
 
     async def suggest_migrations(
         self, crate_name: str, from_version: str, to_version: str
-    ) -> MigrationSuggestionsResponse:
+    ) -> list[dict]:
         """Suggest migration paths between versions.
         
         Args:
@@ -411,7 +411,7 @@ class CrossReferenceService:
             to_version: Target version
             
         Returns:
-            Migration suggestions with confidence scores
+            List of suggestion dictionaries with keys: old_path, new_path, change_type, confidence, notes
         """
         suggestions = []
         
@@ -483,14 +483,14 @@ class CrossReferenceService:
                 rows = await cursor.fetchall()
                 
                 for old_path, new_path, change_type, confidence in rows:
-                    suggestion = MigrationSuggestion(
-                        old_path=old_path,
-                        new_path=new_path,
-                        change_type=change_type,
-                        confidence=confidence,
-                        notes=self._generate_migration_notes(change_type, old_path, new_path)
-                    )
-                    suggestions.append(suggestion)
+                    suggestion_dict = {
+                        "old_path": old_path,
+                        "new_path": new_path,
+                        "change_type": change_type,
+                        "confidence": confidence,
+                        "notes": self._generate_migration_notes(change_type, old_path, new_path)
+                    }
+                    suggestions.append(suggestion_dict)
                     
             except Exception as e:
                 logger.warning(f"Database query failed, using pattern-based fallback: {e}")
@@ -499,12 +499,7 @@ class CrossReferenceService:
                     crate_name, from_version, to_version
                 )
         
-        return MigrationSuggestionsResponse(
-            crate_name=crate_name,
-            from_version=from_version,
-            to_version=to_version,
-            suggestions=suggestions
-        )
+        return suggestions
 
     def _pattern_based_migrations(
         self, crate_name: str, from_version: str, to_version: str
@@ -551,6 +546,39 @@ class CrossReferenceService:
                     suggestions.extend(pattern_info["suggestions"])
 
         return suggestions
+
+    def _generate_migration_notes(
+        self, change_type: str, old_path: str | None, new_path: str | None
+    ) -> str:
+        """Generate helpful notes for a migration suggestion.
+
+        Keeps guidance concise and safe for display in clients.
+        """
+        try:
+            if change_type == "removed":
+                return (
+                    f"The item '{old_path}' was removed. Remove usages or find an alternative."
+                )
+            if change_type == "added":
+                return f"A new item '{new_path}' was added. Consider adopting it if needed."
+            if change_type in {"renamed", "moved"}:
+                return (
+                    f"The item '{old_path}' was {change_type} to '{new_path}'. Update imports and references."
+                )
+            if change_type == "modified":
+                return f"The API of '{old_path}' changed. Review and update call sites."
+        except Exception:
+            pass
+        return "A change was detected. Review migration guidance."
+
+    async def _get_pattern_based_suggestions(
+        self, crate_name: str, from_version: str, to_version: str
+    ) -> list[dict]:
+        """Async wrapper to provide pattern-based suggestions as dicts.
+
+        This matches the tests' expectation that suggest_migrations returns a list.
+        """
+        return self._pattern_based_migrations(crate_name, from_version, to_version)
 
     async def trace_reexports(self, crate_name: str, item_path: str) -> dict:
         """Trace re-exported items to original source.
@@ -613,3 +641,65 @@ class CrossReferenceService:
             "original_source": original_source,
             "original_crate": original_crate,
         }
+
+    def _generate_migration_notes(
+        self, change_type: str, old_path: str | None, new_path: str | None
+    ) -> str:
+        """Generate helpful migration notes for a suggestion.
+
+        Args:
+            change_type: Type of change (renamed, moved, removed, added)
+            old_path: Path in old version (may be None for additions)
+            new_path: Path in new version (may be None for removals)
+
+        Returns:
+            Helpful migration guidance text
+        """
+        if change_type == "removed" and old_path:
+            return f"The item '{old_path}' has been removed. Check release notes for alternatives or deprecation notices."
+        elif change_type == "added" and new_path:
+            return f"New item '{new_path}' was added. Consider using it if it replaces deprecated functionality."
+        elif change_type == "moved" and old_path and new_path:
+            return f"Item was moved from '{old_path}' to '{new_path}'. Update your imports accordingly."
+        elif change_type == "renamed" and old_path and new_path:
+            return f"Item was renamed from '{old_path}' to '{new_path}'. Update all references."
+        elif change_type == "modified" and old_path and new_path:
+            return f"The signature of '{old_path}' has changed. Review the new API at '{new_path}' for compatibility."
+        else:
+            return f"Change detected: {change_type}. Review documentation for migration guidance."
+
+    async def _get_pattern_based_suggestions(
+        self, crate_name: str, from_version: str, to_version: str
+    ) -> list[dict]:
+        """Get pattern-based migration suggestions as dict list.
+
+        Args:
+            crate_name: Name of the crate
+            from_version: Starting version
+            to_version: Target version
+
+        Returns:
+            List of suggestion dictionaries with required keys
+        """
+        pattern_suggestions = self._pattern_based_migrations(
+            crate_name, from_version, to_version
+        )
+        
+        # Convert to dict format with notes
+        result = []
+        for suggestion in pattern_suggestions:
+            suggestion_dict = {
+                "old_path": suggestion["old_path"],
+                "new_path": suggestion["new_path"],
+                "change_type": suggestion["change_type"],
+                "confidence": suggestion["confidence"],
+            }
+            # Add notes using our generator
+            suggestion_dict["notes"] = self._generate_migration_notes(
+                suggestion["change_type"],
+                suggestion["old_path"],
+                suggestion["new_path"]
+            )
+            result.append(suggestion_dict)
+        
+        return result

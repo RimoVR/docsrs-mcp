@@ -17,7 +17,13 @@ class ImportAlternative(BaseModel):
 
     path: str = Field(..., description="Alternative import path")
     confidence: float = Field(..., description="Confidence score (0.0-1.0)")
-    link_type: str = Field(..., validation_alias=AliasChoices("link_type", "type"), serialization_alias="link_type", description="Type of link (reexport, crossref, etc.)")
+    link_type: str = Field(
+        ...,
+        validation_alias=AliasChoices("link_type", "type"),
+        serialization_alias="link_type",
+        description="Type of link (reexport, crossref, etc.)",
+    )
+    alias: str | None = Field(None, description="Alias path if re-exported")
 
     model_config = strict_config
 
@@ -65,12 +71,13 @@ class DependencyGraphResponse(BaseModel):
 class MigrationSuggestion(BaseModel):
     """Suggestion for migrating between versions."""
 
-    old_path: str = Field(..., description="Path in old version")
-    new_path: str = Field(..., description="Path in new version")
+    old_path: str | None = Field(..., description="Path in old version")
+    new_path: str | None = Field(..., description="Path in new version")
     change_type: str = Field(
         ..., description="Type of change (renamed, moved, removed, added)"
     )
     confidence: float = Field(..., description="Suggestion confidence (0.0-1.0)")
+    notes: str | None = Field(None, description="Additional migration guidance")
 
     model_config = strict_config
 
