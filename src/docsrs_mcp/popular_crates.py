@@ -515,6 +515,7 @@ class PreIngestionWorker:
         self.stats = {"success": 0, "failed": 0, "skipped": 0, "total": 0}
         self._workers: list[asyncio.Task] = []
         self._monitor_task: asyncio.Task | None = None
+        self._runner_task: asyncio.Task | None = None
         self._start_time: datetime | None = None
         self._processed_crates: set[str] = set()  # For duplicate detection
         self._memory_monitor_task: asyncio.Task | None = None
@@ -533,6 +534,7 @@ class PreIngestionWorker:
         self._task_refs = (
             set()
         )  # Strong references to prevent GC  # Currently processing crate name
+        self._semaphore_lock = asyncio.Lock()
 
     async def start(self):
         """Start pre-ingestion in background (non-blocking)."""
@@ -540,7 +542,12 @@ class PreIngestionWorker:
         self._start_time = datetime.now()
 
         # Create background task for the main runner
-        asyncio.create_task(self._run())
+        if self._runner_task and not self._runner_task.done():
+            logger.warning("Pre-ingestion runner task already running.")
+            return
+        self._runner_task = asyncio.create_task(self._run())
+        self._task_refs.add(self._runner_task)
+        self._runner_task.add_done_callback(self._task_refs.discard)
 
     async def pause(self) -> bool:
         """Pause the worker."""
@@ -559,6 +566,19 @@ class PreIngestionWorker:
             logger.info("Pre-ingestion worker resumed")
             return True
         return False
+
+    def _spawn_workers(self):
+        """Spawn worker tasks up to the current adaptive concurrency."""
+        # Clear finished worker tasks
+        self._workers = [w for w in self._workers if not w.done()]
+
+        # Spawn new workers if needed
+        for i in range(len(self._workers), self._adaptive_concurrency):
+            worker = asyncio.create_task(self._ingest_worker(i))
+            self._workers.append(worker)
+            # Store strong reference to prevent GC
+            self._task_refs.add(worker)
+            worker.add_done_callback(self._task_refs.discard)
 
     async def stop(self) -> bool:
         """Stop the worker gracefully."""
@@ -610,12 +630,7 @@ class PreIngestionWorker:
                 await self.queue.put((priority, crate.name))
 
             # Start worker tasks with adaptive concurrency
-            for i in range(self._adaptive_concurrency):
-                worker = asyncio.create_task(self._ingest_worker(i))
-                self._workers.append(worker)
-                # Store strong reference to prevent GC
-                self._task_refs.add(worker)
-                worker.add_done_callback(self._task_refs.discard)
+            self._spawn_workers()
 
             # Start progress monitor
             self._monitor_task = asyncio.create_task(self._monitor_progress())
@@ -663,28 +678,35 @@ class PreIngestionWorker:
 
                 # Get next crate from priority queue (with timeout for graceful shutdown)
                 try:
-                    priority, crate_name = await asyncio.wait_for(
-                        self.queue.get(), timeout=1.0
+                    # Use a short timeout so STOPPING state is honored promptly
+                    priority, crate_spec = await asyncio.wait_for(
+                        self.queue.get(), timeout=0.1
                     )
                 except asyncio.TimeoutError:
-                    # Check if queue is empty and we should exit
-                    if self.queue.empty():
+                    # Do not exit if queue is temporarily empty. The scheduler or callers
+                    # might add more items; only exit on STOPPING.
+                    if self._state == WorkerState.STOPPING:
                         break
                     continue
 
                 # Skip if already processed (double-check for duplicates)
-                if crate_name in self._processed_crates:
-                    logger.debug(f"Worker {worker_id}: skipping duplicate {crate_name}")
+                name_for_dupe = parse_crate_spec(crate_spec)[0] if "@" in crate_spec else crate_spec
+                if name_for_dupe in self._processed_crates:
+                    logger.debug(f"Worker {worker_id}: skipping duplicate {name_for_dupe}")
                     self.stats["skipped"] += 1
                     self.queue.task_done()
                     continue
 
                 # Mark as processed to prevent duplicates
-                self._processed_crates.add(crate_name)
+                self._processed_crates.add(name_for_dupe)
 
                 # Process the crate with semaphore control
-                async with self.semaphore:
-                    await self._ingest_single_crate(crate_name)
+                # Safely snapshot semaphore under lock to avoid races on reassignment
+                async with self._semaphore_lock:
+                    semaphore = self.semaphore
+
+                async with semaphore:
+                    await self._ingest_single_crate(crate_spec)
 
                 # Mark task as done
                 self.queue.task_done()
@@ -693,12 +715,20 @@ class PreIngestionWorker:
                 break
             except Exception as e:
                 logger.error(f"Worker {worker_id} error: {e}")
-                # Still mark as done to avoid hanging
-                self.queue.task_done()
+                # Still mark as done to avoid hanging when we had dequeued
+                if 'crate_spec' in locals():
+                    self.queue.task_done()
 
-    async def _ingest_single_crate(self, crate_name: str):
+    async def _ingest_single_crate(self, crate_spec: str):
         """Ingest a single crate with error handling and progress tracking."""
         start_time = time.time()
+        try:
+            crate_name, version_spec = parse_crate_spec(crate_spec)
+        except Exception as e:
+            self.stats["failed"] += 1
+            logger.debug(f"Invalid crate spec '{crate_spec}': {e}")
+            return
+
         self.current_crate = crate_name
 
         # Initialize progress tracking for this crate
@@ -709,8 +739,10 @@ class PreIngestionWorker:
         }
 
         try:
-            # Get the latest stable version (0-10% progress)
-            version = await fetch_current_stable_version(crate_name)
+            # Get the version (0-10% progress)
+            version = version_spec if version_spec and version_spec != "latest" else None
+            if not version:
+                version = await fetch_current_stable_version(crate_name)
             if not version:
                 logger.debug(f"No stable version found for {crate_name}, skipping")
                 self.stats["skipped"] += 1
@@ -842,28 +874,28 @@ class PreIngestionWorker:
 
                     # Reduce concurrency if needed
                     if self._adaptive_concurrency > 1:
-                        self._adaptive_concurrency = max(
-                            1, self._adaptive_concurrency - 1
-                        )
-                        logger.info(
-                            f"Reduced concurrency to {self._adaptive_concurrency}"
-                        )
-
-                        # Update semaphore
-                        self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)
+                        new_cc = max(1, self._adaptive_concurrency - 1)
+                    else:
+                        new_cc = self._adaptive_concurrency
 
                 elif (
                     memory_mb < 600
                     and self._adaptive_concurrency < config.PRE_INGEST_CONCURRENCY
                 ):
                     # Increase concurrency if memory allows
-                    self._adaptive_concurrency = min(
+                    new_cc = min(
                         config.PRE_INGEST_CONCURRENCY, self._adaptive_concurrency + 1
                     )
-                    logger.debug(
-                        f"Increased concurrency to {self._adaptive_concurrency}"
+                else:
+                    new_cc = self._adaptive_concurrency
+
+                if new_cc != self._adaptive_concurrency:
+                    logger.info(
+                        f"Adjusting concurrency from {self._adaptive_concurrency} to {new_cc}"
                     )
-                    self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)
+                    async with self._semaphore_lock:
+                        self._adaptive_concurrency = new_cc
+                        self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)
 
             except asyncio.CancelledError:
                 break
@@ -1060,6 +1092,12 @@ class IngestionScheduler:
         self._last_run = datetime.now()
 
         try:
+            # Ensure workers are running for the scheduled job
+            if not self.worker._workers or all(t.done() for t in self.worker._workers):
+                logger.info(
+                    "Workers are not running. Spawning workers for scheduled run."
+                )
+                self.worker._spawn_workers()
             # Check memory before scheduling
             if not await self._should_schedule():
                 logger.warning(
@@ -1088,7 +1126,10 @@ class IngestionScheduler:
                     await self.worker.queue.put((priority, crate.name))
 
             # Process the queue (reuse existing worker logic)
-            await self.worker.queue.join()
+            if self.worker.queue.empty():
+                logger.info("Queue is empty, nothing to process for this scheduled run.")
+            else:
+                await self.worker.queue.join()
 
             self._runs_completed += 1
             logger.info(

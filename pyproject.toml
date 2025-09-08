@@ -64,6 +64,7 @@ build-backend = "hatchling.build"
 dev-dependencies = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21.2",
+    "pytest-timeout>=2.3.1",
     "pytest-cov>=4.0",
     "httpx>=0.24",
     "ruff>=0.1.0",
@@ -116,6 +117,11 @@ addopts = "-ra -q --strict-markers"
 testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+timeout = 60
+timeout_method = "thread"
+markers = [
+    "benchmark: performance benchmarks",
+]
 
 [tool.coverage.run]
 source = ["docsrs_mcp"]
