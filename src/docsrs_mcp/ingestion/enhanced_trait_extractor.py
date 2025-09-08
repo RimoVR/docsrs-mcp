@@ -58,6 +58,7 @@ class EnhancedTraitExtractor:
         self.extracted_impls: List[TraitImplementation] = []
         self.extracted_traits: List[TraitDefinition] = []
         self.type_fingerprints: Dict[str, str] = {}
+        self.paths_cache: Dict[str, Any] = {}
     
     def extract_impl_blocks(self, item_data: Dict[str, Any], item_id: str, 
                            crate_id: str, paths: Dict[str, Any]) -> List[TraitImplementation]:
@@ -72,7 +73,15 @@ class EnhancedTraitExtractor:
         Returns:
             List of extracted trait implementations
         """
+        # Cache the paths for FQN resolution
+        self.paths_cache = paths or {}
         implementations = []
+        # Cache paths for use by _extract_trait_path
+        try:
+            if paths:
+                self.paths_cache = paths
+        except Exception:
+            pass
         
         try:
             inner = item_data.get("inner", {})
@@ -182,7 +191,7 @@ class EnhancedTraitExtractor:
         return implementations
     
     def extract_trait_definition(self, item_data: Dict[str, Any], item_id: str,
-                                crate_id: str, item_path: str) -> Optional[TraitDefinition]:
+                                crate_id: str, item_path: str, paths: Dict[str, Any] = None) -> Optional[TraitDefinition]:
         """Extract trait definition with supertraits.
         
         Args:
@@ -190,10 +199,14 @@ class EnhancedTraitExtractor:
             item_id: Unique item identifier  
             crate_id: Crate identifier
             item_path: Full path to the trait
+            paths: Path information mapping for FQN resolution
             
         Returns:
             Extracted trait definition or None
         """
+        # Cache the paths for FQN resolution
+        if paths:
+            self.paths_cache = paths
         try:
             inner = item_data.get("inner", {})
             if not isinstance(inner, dict):
@@ -242,37 +255,149 @@ class EnhancedTraitExtractor:
             return None
     
     def _extract_trait_path(self, trait_info: Any) -> Optional[str]:
-        """Extract trait path from trait reference.
+        """Extract fully qualified trait path from trait reference.
         
         Args:
             trait_info: Trait reference from rustdoc JSON
             
         Returns:
-            Formatted trait path or None
+            Fully qualified trait path or None
         """
         if not isinstance(trait_info, dict):
             return None
-            
+        
+        # Try to resolve using path ID first (most reliable for FQN)
+        trait_id = None
+        if "id" in trait_info:
+            trait_id = trait_info["id"]
+        elif "resolved_path" in trait_info and isinstance(trait_info["resolved_path"], dict):
+            trait_id = trait_info["resolved_path"].get("id")
+        elif "path" in trait_info and isinstance(trait_info["path"], dict):
+            trait_id = trait_info["path"].get("id")
+        
+        # Look up in paths cache for FQN
+        cache = getattr(self, "paths_cache", {})
+        if trait_id and trait_id in cache:
+            path_entry = cache[trait_id]
+            if isinstance(path_entry, dict):
+                # Try to construct FQN from path segments
+                if "path" in path_entry:
+                    path_segments = path_entry["path"]
+                    if isinstance(path_segments, list) and path_segments:
+                        return "::".join(path_segments)
+                
+                # Fallback to name field in path entry
+                if "name" in path_entry:
+                    return path_entry["name"]
+        
+        # Fallback to direct extraction (may not be fully qualified)
         # Handle resolved_path format
         if "resolved_path" in trait_info:
             resolved = trait_info["resolved_path"]
             if isinstance(resolved, dict) and "name" in resolved:
-                return resolved["name"]
+                name = resolved["name"]
+                logger.debug(f"Using resolved_path name (may not be FQN): {name}")
+                return name
         
         # Handle path format
         if "path" in trait_info:
             path_info = trait_info["path"]
             if isinstance(path_info, dict) and "name" in path_info:
-                return path_info["name"]
+                name = path_info["name"]
+                logger.debug(f"Using path name (may not be FQN): {name}")
+                return name
             elif isinstance(path_info, str):
+                logger.debug(f"Using string path (may not be FQN): {path_info}")
                 return path_info
         
-        # Handle direct name
+        # Handle direct name with enhanced fallback for external traits
         if "name" in trait_info:
-            return trait_info["name"]
+            name = trait_info["name"]
+            # Try to infer FQN for common standard library traits
+            fqn = self._infer_trait_fqn(name)
+            if fqn != name:
+                logger.debug(f"Inferred FQN for '{name}': {fqn}")
+                return fqn
+            else:
+                logger.debug(f"Using direct name (external trait): {name}")
+                return name
             
         logger.debug(f"Could not extract trait path from: {trait_info}")
         return None
+    
+    def _infer_trait_fqn(self, trait_name: str) -> str:
+        """Infer fully qualified name for common standard library traits.
+        
+        Args:
+            trait_name: Bare trait name (e.g., "Display", "Debug")
+            
+        Returns:
+            Inferred FQN or the original name if no mapping exists
+        """
+        # Common std traits mapping - based on actual Rust std library
+        std_trait_mapping = {
+            # core::fmt traits
+            "Display": "core::fmt::Display",
+            "Debug": "core::fmt::Debug", 
+            "Write": "core::fmt::Write",
+            "Formatter": "core::fmt::Formatter",
+            
+            # core::clone and copy
+            "Clone": "core::clone::Clone",
+            "Copy": "core::marker::Copy",
+            
+            # core::cmp traits
+            "PartialEq": "core::cmp::PartialEq",
+            "Eq": "core::cmp::Eq",
+            "PartialOrd": "core::cmp::PartialOrd",
+            "Ord": "core::cmp::Ord",
+            
+            # core::hash
+            "Hash": "core::hash::Hash",
+            "Hasher": "core::hash::Hasher",
+            
+            # core::convert traits
+            "From": "core::convert::From",
+            "Into": "core::convert::Into",
+            "TryFrom": "core::convert::TryFrom",
+            "TryInto": "core::convert::TryInto",
+            "AsRef": "core::convert::AsRef",
+            "AsMut": "core::convert::AsMut",
+            
+            # core::ops traits
+            "Add": "core::ops::Add",
+            "Sub": "core::ops::Sub",
+            "Mul": "core::ops::Mul",
+            "Div": "core::ops::Div",
+            "Rem": "core::ops::Rem",
+            "Deref": "core::ops::Deref",
+            "DerefMut": "core::ops::DerefMut",
+            "Index": "core::ops::Index",
+            "IndexMut": "core::ops::IndexMut",
+            "Drop": "core::ops::Drop",
+            
+            # core::iter traits
+            "Iterator": "core::iter::Iterator",
+            "IntoIterator": "core::iter::IntoIterator",
+            "Extend": "core::iter::Extend",
+            "FromIterator": "core::iter::FromIterator",
+            
+            # core::marker traits
+            "Send": "core::marker::Send",
+            "Sync": "core::marker::Sync",
+            "Sized": "core::marker::Sized",
+            "Unpin": "core::marker::Unpin",
+            
+            # core::default
+            "Default": "core::default::Default",
+            
+            # alloc and std specific
+            "ToString": "alloc::string::ToString",
+            "Vec": "alloc::vec::Vec",
+            "String": "alloc::string::String",
+        }
+        
+        return std_trait_mapping.get(trait_name, trait_name)
     
     def _extract_type_path(self, type_info: Any) -> Optional[str]:
         """Extract type path from type reference.
@@ -286,12 +411,43 @@ class EnhancedTraitExtractor:
         if not isinstance(type_info, dict):
             return str(type_info) if type_info else None
         
-        # Handle different type formats
+        # Handle resolved_path format (most common in stored data)
         if "resolved_path" in type_info:
             resolved = type_info["resolved_path"]
-            if isinstance(resolved, dict) and "name" in resolved:
-                return resolved["name"]
+            if isinstance(resolved, dict):
+                # Extract base path
+                base_path = resolved.get("path", resolved.get("name", ""))
+                
+                # Handle generic arguments
+                if "args" in resolved:
+                    args_info = resolved["args"]
+                    if isinstance(args_info, dict) and "angle_bracketed" in args_info:
+                        angle_args = args_info["angle_bracketed"]
+                        if isinstance(angle_args, dict) and "args" in angle_args:
+                            arg_list = angle_args["args"]
+                            if isinstance(arg_list, list) and arg_list:
+                                # Extract generic argument types
+                                generic_args = []
+                                for arg in arg_list:
+                                    if isinstance(arg, dict) and "type" in arg:
+                                        arg_type = arg["type"]
+                                        if isinstance(arg_type, dict):
+                                            if "generic" in arg_type:
+                                                generic_args.append(arg_type["generic"])
+                                            elif "primitive" in arg_type:
+                                                generic_args.append(arg_type["primitive"])
+                                            else:
+                                                # Recursively extract nested type
+                                                nested = self._extract_type_path(arg_type)
+                                                if nested:
+                                                    generic_args.append(nested)
+                                
+                                if generic_args:
+                                    return f"{base_path}<{', '.join(generic_args)}>"
+                
+                return base_path
         
+        # Handle direct path format
         if "path" in type_info:
             path_info = type_info["path"]
             if isinstance(path_info, dict) and "name" in path_info:
@@ -299,16 +455,84 @@ class EnhancedTraitExtractor:
             elif isinstance(path_info, str):
                 return path_info
         
+        # Handle tuple types
+        if "tuple" in type_info:
+            tuple_elements = type_info["tuple"]
+            if isinstance(tuple_elements, list):
+                element_types = []
+                for element in tuple_elements:
+                    if isinstance(element, dict):
+                        if "generic" in element:
+                            element_types.append(element["generic"])
+                        elif "primitive" in element:
+                            element_types.append(element["primitive"])
+                        else:
+                            # Recursively extract nested type
+                            nested = self._extract_type_path(element)
+                            if nested:
+                                element_types.append(nested)
+                
+                if element_types:
+                    if len(element_types) == 1:
+                        return f"({element_types[0]},)"  # Single-element tuple
+                    else:
+                        return f"({', '.join(element_types)})"
+        
         # Handle generic types
         if "generic" in type_info:
-            return f"Generic[{type_info['generic']}]"
+            return type_info["generic"]
         
         # Handle primitive types
         if "primitive" in type_info:
             return type_info["primitive"]
         
-        # Fallback to string representation
-        return str(type_info)
+        # Handle array types
+        if "array" in type_info:
+            array_info = type_info["array"]
+            if isinstance(array_info, dict):
+                element_type = array_info.get("type")
+                length = array_info.get("len", "N")
+                if element_type:
+                    element_path = self._extract_type_path(element_type)
+                    if element_path:
+                        return f"[{element_path}; {length}]"
+        
+        # Handle slice types  
+        if "slice" in type_info:
+            slice_type = type_info["slice"]
+            if slice_type:
+                element_path = self._extract_type_path(slice_type)
+                if element_path:
+                    return f"[{element_path}]"
+        
+        # Handle reference types
+        if "borrowed_ref" in type_info:
+            ref_info = type_info["borrowed_ref"]
+            if isinstance(ref_info, dict):
+                ref_type = ref_info.get("type")
+                lifetime = ref_info.get("lifetime", "")
+                is_mutable = ref_info.get("mutable", False)
+                
+                if ref_type:
+                    type_path = self._extract_type_path(ref_type)
+                    if type_path:
+                        lifetime_str = f"'{lifetime} " if lifetime else ""
+                        mut_str = "mut " if is_mutable else ""
+                        return f"&{lifetime_str}{mut_str}{type_path}"
+        
+        # Handle function pointer types
+        if "function_pointer" in type_info:
+            return "fn(...)"  # Simplified representation
+        
+        # Last resort: try to extract any meaningful name
+        if isinstance(type_info, dict):
+            # Look for any name field
+            for key in ["name", "id"]:
+                if key in type_info and isinstance(type_info[key], str):
+                    return type_info[key]
+        
+        # Ultimate fallback - at least don't return the entire JSON
+        return "UnknownType"
     
     def _generate_type_fingerprint(self, type_info: Any) -> str:
         """Generate stable fingerprint for type identity.

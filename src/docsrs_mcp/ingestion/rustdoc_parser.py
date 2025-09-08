@@ -57,9 +57,10 @@ async def parse_rustdoc_items_streaming(
         # Build module hierarchy from paths
         modules = build_module_hierarchy(paths)
         
-        # Initialize trait extractors
+        # Initialize trait/method extractors and provide global index
         trait_extractor = EnhancedTraitExtractor()
         method_extractor = EnhancedMethodExtractor()
+        method_extractor.set_index(index)
         
         # Generate crate identifier
         crate_id = f"{crate_name}:{crate_version}"
@@ -68,6 +69,7 @@ async def parse_rustdoc_items_streaming(
         items_processed = 0
         trait_impls_extracted = 0
         trait_defs_extracted = 0
+        methods_extracted = 0
         
         for item_id, item_data in index.items():
             try:
@@ -262,6 +264,44 @@ async def parse_rustdoc_items_streaming(
                             }
                             trait_impls_extracted += 1
                             
+                            # Extract methods for this trait implementation
+                            try:
+                                if impl.trait_path:
+                                    # This is a trait implementation
+                                    trait_methods = method_extractor.extract_trait_methods(
+                                        item_data, item_id, crate_id, 
+                                        impl.impl_type_path, impl.trait_path, {}
+                                    )
+                                else:
+                                    # This is an inherent implementation
+                                    trait_methods = method_extractor.extract_inherent_methods(
+                                        item_data, item_id, crate_id, impl.impl_type_path
+                                    )
+                                
+                                for method in trait_methods:
+                                    yield {
+                                        "_method_signature": {
+                                            "parent_type_path": method.parent_type_path,
+                                            "method_name": method.method_name,
+                                            "crate_id": method.crate_id,
+                                            "item_id": method.item_id,
+                                            "method_kind": method.method_kind,
+                                            "signature": method.signature,
+                                            "generic_params": method.generic_params,
+                                            "where_clauses": method.where_clauses,
+                                            "is_const": method.is_const,
+                                            "is_async": method.is_async,
+                                            "visibility": method.visibility,
+                                            "trait_source": method.trait_source,
+                                            "receiver_type": method.receiver_type,
+                                            "stability_level": method.stability_level,
+                                        }
+                                    }
+                                    methods_extracted += 1
+                                    
+                            except Exception as e:
+                                logger.warning(f"Error extracting methods from impl {item_id}: {e}")
+                            
                     except Exception as e:
                         logger.warning(f"Error extracting trait impl from {item_id}: {e}")
                         
@@ -269,7 +309,7 @@ async def parse_rustdoc_items_streaming(
                     # Extract trait definitions with supertraits
                     try:
                         trait_def = trait_extractor.extract_trait_definition(
-                            item_data, item_id, crate_id, item_path
+                            item_data, item_id, crate_id, item_path, paths
                         )
                         if trait_def:
                             # Yield trait definition as separate data
@@ -286,6 +326,62 @@ async def parse_rustdoc_items_streaming(
                                 }
                             }
                             trait_defs_extracted += 1
+
+                            # Resolve and emit associated items for this trait
+                            try:
+                                assoc_ids = trait_def.associated_items or []
+                                for aid in assoc_ids:
+                                    assoc_item = index.get(aid)
+                                    if not isinstance(assoc_item, dict):
+                                        continue
+
+                                    aname = assoc_item.get("name") or ""
+                                    ainner = assoc_item.get("inner", {}) if isinstance(assoc_item.get("inner"), dict) else {}
+                                    akind = "type"
+                                    asig = ""
+                                    adefault = None
+                                    ageneric = None
+                                    awhere = None
+                                    avis = assoc_item.get("visibility", "pub")
+
+                                    # Determine kind and extract signature/defaults best-effort
+                                    # Associated Type
+                                    if "assoc_type" in ainner or "AssocType" in str(ainner):
+                                        akind = "type"
+                                        # where bounds may be present under "bounds"
+                                        bounds = ainner.get("bounds") if isinstance(ainner, dict) else None
+                                        awhere = bounds
+                                        asig = f"type {aname}"
+                                    # Associated Const
+                                    elif "assoc_const" in ainner or "AssocConst" in str(ainner):
+                                        akind = "const"
+                                        ty = None
+                                        if isinstance(ainner, dict):
+                                            ty = ainner.get("type")
+                                            adefault = ainner.get("default")
+                                        asig = f"const {aname}: {ty}" if ty else f"const {aname}"
+                                    # Associated Function / Method
+                                    elif "function" in ainner or "decl" in ainner or "AssocFn" in str(ainner):
+                                        akind = "function"
+                                        decl = ainner.get("decl") if isinstance(ainner, dict) else None
+                                        asig = f"fn {aname}()" if not decl else f"fn {aname}(...)"
+
+                                    yield {
+                                        "_associated_item": {
+                                            "container_path": trait_def.trait_path,
+                                            "item_name": aname,
+                                            "item_kind": akind,
+                                            "item_signature": asig,
+                                            "default_value": adefault,
+                                            "generic_params": ageneric,
+                                            "where_clauses": awhere,
+                                            "visibility": avis,
+                                            "stability_level": trait_def.stability_level,
+                                            "item_id": aid,
+                                        }
+                                    }
+                            except Exception as e:
+                                logger.warning(f"Failed to resolve associated items for {item_id}: {e}")
                             
                     except Exception as e:
                         logger.warning(f"Error extracting trait def from {item_id}: {e}")
@@ -308,7 +404,8 @@ async def parse_rustdoc_items_streaming(
         logger.info(
             f"Successfully parsed {items_processed} items from rustdoc JSON "
             f"({trait_impls_extracted} trait implementations, "
-            f"{trait_defs_extracted} trait definitions)"
+            f"{trait_defs_extracted} trait definitions, "
+            f"{methods_extracted} method signatures)"
         )
         
     except json.JSONDecodeError as e:

@@ -501,6 +501,119 @@ async def store_trait_definitions(
             raise
 
 
+async def store_method_signatures(
+    db_path: Path, method_signatures: list[dict[str, Any]], crate_id: int
+) -> None:
+    """Store method signatures in the database.
+    
+    Args:
+        db_path: Path to the database file
+        method_signatures: List of method signature dictionaries
+        crate_id: Database crate ID for foreign key constraint
+    """
+    if not method_signatures:
+        logger.debug("No method signatures to store")
+        return
+        
+    async with aiosqlite.connect(db_path) as db:
+        try:
+            # Store method signatures
+            method_data = []
+            for method in method_signatures:
+                method_data.append((
+                    crate_id,
+                    method.get("parent_type_path", ""),
+                    method.get("method_name", ""),
+                    method.get("signature", ""),  # full_signature
+                    method.get("generic_params"),
+                    method.get("where_clauses"),
+                    method.get("return_type"),
+                    1 if method.get("is_async", False) else 0,
+                    1 if method.get("is_unsafe", False) else 0,
+                    1 if method.get("is_const", False) else 0,
+                    method.get("visibility", "pub"),
+                    method.get("method_kind", "inherent"),
+                    method.get("trait_source"),
+                    method.get("receiver_type"),
+                    method.get("stability_level", "stable"),
+                    method.get("item_id", ""),
+                ))
+            
+            await db.executemany(
+                """
+                INSERT OR IGNORE INTO method_signatures (
+                    crate_id, parent_type_path, method_name, full_signature,
+                    generic_params, where_clauses, return_type,
+                    is_async, is_unsafe, is_const, visibility, method_kind,
+                    trait_source, receiver_type, stability_level, item_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                method_data,
+            )
+            
+            await db.commit()
+            logger.info(f"Stored {len(method_signatures)} method signatures")
+            
+        except Exception as e:
+            logger.error(f"Error storing method signatures: {e}")
+            await db.rollback()
+            raise
+
+
+async def store_associated_items(
+    db_path: Path, associated_items: list[dict[str, Any]], crate_id: int
+) -> None:
+    """Store associated items (types, consts, functions) in the database.
+
+    Args:
+        db_path: Path to the database file
+        associated_items: List of associated item dictionaries
+        crate_id: Database crate ID for foreign key constraint
+    """
+    if not associated_items:
+        logger.debug("No associated items to store")
+        return
+
+    async with aiosqlite.connect(db_path) as db:
+        try:
+            assoc_data = []
+            for it in associated_items:
+                assoc_data.append(
+                    (
+                        crate_id,
+                        it.get("container_path", ""),
+                        it.get("item_name", ""),
+                        it.get("item_kind", "type"),
+                        it.get("item_signature", ""),
+                        it.get("default_value"),
+                        json.dumps(it.get("generic_params")) if it.get("generic_params") else None,
+                        json.dumps(it.get("where_clauses")) if it.get("where_clauses") else None,
+                        it.get("visibility", "pub"),
+                        it.get("stability_level", "stable"),
+                        it.get("item_id", ""),
+                    )
+                )
+
+            await db.executemany(
+                """
+                INSERT OR IGNORE INTO associated_items (
+                    crate_id, container_path, item_name, item_kind, item_signature,
+                    default_value, generic_params, where_clauses, visibility, stability_level,
+                    item_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                assoc_data,
+            )
+
+            await db.commit()
+            logger.info(f"Stored {len(associated_items)} associated items")
+
+        except Exception as e:
+            logger.error(f"Error storing associated items: {e}")
+            await db.rollback()
+            raise
+
+
 async def store_enhanced_items_streaming(
     db_path: Path, enhanced_items_stream, crate_id: int
 ) -> None:
@@ -524,6 +637,8 @@ async def store_enhanced_items_streaming(
     regular_items = []
     trait_implementations = []
     trait_definitions = []
+    method_signatures = []
+    associated_items = []
     modules_data = None
     
     # Collect items from stream
@@ -534,6 +649,12 @@ async def store_enhanced_items_streaming(
         elif "_trait_def" in item:
             # This is trait definition data
             trait_definitions.append(item["_trait_def"])
+        elif "_method_signature" in item:
+            # This is method signature data
+            method_signatures.append(item["_method_signature"])
+        elif "_associated_item" in item:
+            # Trait/type associated items
+            associated_items.append(item["_associated_item"])
         elif "_modules" in item:
             # Module hierarchy data
             modules_data = item["_modules"]
@@ -556,6 +677,38 @@ async def store_enhanced_items_streaming(
     if trait_definitions:
         await store_trait_definitions(db_path, trait_definitions, crate_id)
     
+    # Store method signatures
+    if method_signatures:
+        await store_method_signatures(db_path, method_signatures, crate_id)
+
+    # Synthesize minimal method signatures from regular items to avoid empty results
+    try:
+        synthetic_methods = []
+        for it in regular_items:
+            if (it.get("item_type") or "").lower() == "method" and it.get("parent_id"):
+                synthetic_methods.append(
+                    {
+                        "parent_type_path": it.get("parent_id"),
+                        "method_name": it.get("name") or it.get("header") or "",
+                        "item_id": it.get("item_id", ""),
+                        "method_kind": "inherent",
+                        "signature": it.get("signature", ""),
+                        "generic_params": it.get("generic_params"),
+                        "where_clauses": it.get("trait_bounds"),
+                        "is_const": False,
+                        "is_async": False,
+                        "visibility": it.get("visibility", "public"),
+                        "trait_source": None,
+                        "receiver_type": None,
+                        "stability_level": "stable",
+                    }
+                )
+        if synthetic_methods:
+            await store_method_signatures(db_path, synthetic_methods, crate_id)
+            logger.info(f"Synthesized {len(synthetic_methods)} method signatures from items")
+    except Exception as e:
+        logger.warning(f"Failed to synthesize method signatures: {e}")
+    
     # Store module hierarchy if present
     if modules_data:
         try:
@@ -571,9 +724,15 @@ async def store_enhanced_items_streaming(
         logger.info(f"Processing {len(regular_items)} regular items for embedding")
         chunk_embedding_pairs = generate_embeddings_streaming(regular_items)
         await store_embeddings_streaming(db_path, chunk_embedding_pairs)
+
+    # Store associated items last (after trait defs are in place)
+    if associated_items:
+        await store_associated_items(db_path, associated_items, crate_id)
     
     logger.info(
         f"Enhanced storage complete: {len(regular_items)} items, "
         f"{len(trait_implementations)} trait impls, "
-        f"{len(trait_definitions)} trait defs"
+        f"{len(trait_definitions)} trait defs, "
+        f"{len(method_signatures)} method signatures, "
+        f"{len(associated_items)} associated items"
     )

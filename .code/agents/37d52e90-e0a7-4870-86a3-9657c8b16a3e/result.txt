@@ -1,0 +1,422 @@
+This is a complex multi-part fix. I will proceed step-by-step, starting with the most impactful and self-contained changes. I'll begin by reading the key files to get the necessary context for the fixes.
+Of course. Based on your detailed analysis, I will propose a series of patches to address the empty results from MCP tools. The fixes are grouped by area as you requested.
+
+### A) Code Intelligence Fixes
+
+These changes address path normalization issues and implement the missing `get_error_catalog` method.
+
+#### 1. Fix `get_item_intelligence` Path Handling
+
+**File:** `src/docsrs_mcp/services/type_navigation_service.py`
+
+I'll modify `get_item_intelligence` to correctly handle both fully-qualified and partial `item_path` inputs, with fallbacks.
+
+I am currently in read-only mode and cannot apply file modifications directly. I will provide the necessary patches as a series of code replacements that you can apply.
+
+Here are the proposed fixes based on your analysis.
+
+### A) Code Intelligence Fixes
+
+#### 1. Fix `get_item_intelligence` Path Handling
+
+This change normalizes `item_path` handling in `get_item_intelligence` to prevent empty results from path mismatches. It tries fully-qualified paths, partial paths, and a fuzzy fallback search.
+
+**File:** `src/docsrs_mcp/services/type_navigation_service.py`
+
+```python
+# --- Old Code ---
+        # Query database for intelligence data
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            cursor = await db.execute(
+                """
+                SELECT 
+                    item_path,
+                    signature,
+                    safety_info,
+                    error_types,
+                    feature_requirements,
+                    is_safe,
+                    generic_params,
+                    trait_bounds,
+                    visibility,
+                    deprecated,
+                    content
+                FROM embeddings
+                WHERE item_path = ?
+                LIMIT 1
+                """,
+                (f"{crate_name}::{item_path}",),
+            )
+
+            row = await cursor.fetchone()
+```
+```python
+# +++ New Code +++
+        # Query database for intelligence data
+        async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            # Try different path variations to find the item
+            search_paths = []
+            if item_path.startswith(f"{crate_name}::"):
+                search_paths.append(item_path)
+                search_paths.append(item_path.replace(f"{crate_name}::", "", 1))
+            else:
+                search_paths.append(f"{crate_name}::{item_path}")
+                search_paths.append(item_path)
+
+            row = None
+            for path in search_paths:
+                cursor = await db.execute(
+                    """
+                    SELECT 
+                        item_path, signature, safety_info, error_types, feature_requirements,
+                        is_safe, generic_params, trait_bounds, visibility, deprecated, content
+                    FROM embeddings
+                    WHERE item_path = ?
+                    LIMIT 1
+                    """,
+                    (path,),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    break
+            
+            # Fallback: fuzzy match on the last segment if no exact match found
+            if not row:
+                last_segment = item_path.split("::")[-1]
+                cursor = await db.execute(
+                    """
+                    SELECT
+                        item_path, signature, safety_info, error_types, feature_requirements,
+                        is_safe, generic_params, trait_bounds, visibility, deprecated, content
+                    FROM embeddings
+                    WHERE item_path LIKE ? AND item_path LIKE ?
+                    LIMIT 1
+                    """,
+                    (f"{crate_name}::%", f"%::{last_segment}"),
+                )
+                row = await cursor.fetchone()
+```
+
+#### 2. Implement `get_error_catalog`
+Based on the file contents, `get_error_catalog` is already implemented in `src/docsrs_mcp/services/type_navigation_service.py` and correctly called by the `get_error_types` tool handler. No changes are needed here.
+
+### B) Trait and Method Tools Fixes
+
+#### 3. Fix `EnhancedTraitExtractor` to Use Fully-Qualified Paths
+
+To ensure trait lookups succeed, I'll modify the trait extractor to resolve and store fully-qualified trait paths using the `paths` map from the rustdoc JSON.
+
+**File:** `src/docsrs_mcp/ingestion/enhanced_trait_extractor.py`
+
+First, I'll update the `_extract_trait_path` method to accept the `paths` mapping and use it to resolve the trait's ID to a full path.
+
+```python
+# --- Old Code ---
+    def _extract_trait_path(self, trait_info: Any) -> Optional[str]:
+        """Extract trait path from trait reference.
+        
+        Args:
+            trait_info: Trait reference from rustdoc JSON
+            
+        Returns:
+            Formatted trait path or None
+        """
+        if not isinstance(trait_info, dict):
+            return None
+            
+        # Handle resolved_path format
+        if "resolved_path" in trait_info:
+            resolved = trait_info["resolved_path"]
+            if isinstance(resolved, dict) and "name" in resolved:
+                return resolved["name"]
+        
+        # Handle path format
+        if "path" in trait_info:
+            path_info = trait_info["path"]
+            if isinstance(path_info, dict) and "name" in path_info:
+                return path_info["name"]
+            elif isinstance(path_info, str):
+                return path_info
+        
+        # Handle direct name
+        if "name" in trait_info:
+            return trait_info["name"]
+            
+        logger.debug(f"Could not extract trait path from: {trait_info}")
+        return None
+```
+```python
+# +++ New Code +++
+    def _extract_trait_path(self, trait_info: Any, paths: Dict[str, Any]) -> Optional[str]:
+        """Extract fully-qualified trait path from trait reference.
+        
+        Args:
+            trait_info: Trait reference from rustdoc JSON
+            paths: The 'paths' dictionary from the rustdoc JSON for resolving IDs.
+            
+        Returns:
+            Formatted FQN trait path or None
+        """
+        if not isinstance(trait_info, dict):
+            return None
+
+        # Prefer resolving the ID for a fully qualified path
+        trait_id = trait_info.get("id")
+        if trait_id and trait_id in paths:
+            path_info = paths[trait_id]
+            return "::".join(path_info.get("path", []))
+
+        # Fallback to existing logic for short names if ID resolution fails
+        if "resolved_path" in trait_info:
+            resolved = trait_info["resolved_path"]
+            if isinstance(resolved, dict) and "name" in resolved:
+                return resolved["name"]
+        
+        if "path" in trait_info:
+            path_info = trait_info["path"]
+            if isinstance(path_info, dict) and "name" in path_info:
+                return path_info["name"]
+            elif isinstance(path_info, str):
+                return path_info
+        
+        if "name" in trait_info:
+            return trait_info["name"]
+            
+        logger.debug(f"Could not extract trait path from: {trait_info}")
+        return None
+```
+
+Next, I'll update the call sites in `extract_impl_blocks` and `extract_trait_definition` to pass the `paths` map.
+
+**File:** `src/docsrs_mcp/ingestion/enhanced_trait_extractor.py`
+
+In `extract_impl_blocks`:
+```python
+# --- Old Code ---
+                trait_path = self._extract_trait_path(trait_info)
+```
+```python
+# +++ New Code +++
+                trait_path = self._extract_trait_path(trait_info, paths)
+```
+
+In `extract_trait_definition` (and its signature):
+```python
+# --- Old Code ---
+    def extract_trait_definition(self, item_data: Dict[str, Any], item_id: str,
+                                crate_id: str, item_path: str) -> Optional[TraitDefinition]:
+...
+            for bound in bounds:
+                supertrait_path = self._extract_trait_path(bound)
+```
+```python
+# +++ New Code +++
+    def extract_trait_definition(self, item_data: Dict[str, Any], item_id: str,
+                                crate_id: str, item_path: str, paths: Dict[str, Any]) -> Optional[TraitDefinition]:
+...
+            for bound in bounds:
+                supertrait_path = self._extract_trait_path(bound, paths)
+```
+**Note:** The call to `extract_trait_definition` in `rustdoc_parser.py` will also need to be updated to pass the `paths` argument.
+
+#### 4 & 5. Integrate Method and Associated Item Extraction
+
+To populate the `method_signatures` and `associated_items` tables, I'll propose changes to the ingestion pipeline. This involves adding new storage functions and updating `store_enhanced_items_streaming` to orchestrate the new extraction steps.
+
+First, I'll add the new storage functions to `storage_manager.py`.
+
+**File:** `src/docsrs_mcp/ingestion/storage_manager.py` (add these new functions to the file)
+
+```python
+async def store_method_signatures(
+    db_path: Path, method_signatures: list[dict[str, Any]], crate_id: int
+) -> None:
+    """Store method signatures in the database."""
+    if not method_signatures:
+        return
+    
+    async with aiosqlite.connect(db_path) as db:
+        batch_data = [
+            (
+                crate_id,
+                sig.get("parent_type_path"),
+                sig.get("method_name"),
+                sig.get("full_signature"),
+                json.dumps(sig.get("generic_params")) if sig.get("generic_params") else None,
+                json.dumps(sig.get("where_clauses")) if sig.get("where_clauses") else None,
+                sig.get("return_type"),
+                sig.get("is_async", False),
+                sig.get("is_unsafe", False),
+                sig.get("is_const", False),
+                sig.get("visibility", "public"),
+                sig.get("method_kind"),
+                sig.get("trait_source"),
+                sig.get("receiver_type"),
+                sig.get("stability_level", "stable"),
+            )
+            for sig in method_signatures
+        ]
+        await db.executemany(
+            """
+            INSERT OR IGNORE INTO method_signatures (
+                crate_id, parent_type_path, method_name, full_signature, generic_params,
+                where_clauses, return_type, is_async, is_unsafe, is_const, visibility,
+                method_kind, trait_source, receiver_type, stability_level
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            batch_data,
+        )
+        await db.commit()
+        logger.info(f"Stored {len(method_signatures)} method signatures.")
+
+async def store_associated_items(
+    db_path: Path, associated_items: list[dict[str, Any]], crate_id: int
+) -> None:
+    """Store associated items in the database."""
+    if not associated_items:
+        return
+
+    async with aiosqlite.connect(db_path) as db:
+        batch_data = [
+            (
+                crate_id,
+                item.get("container_path"),
+                item.get("item_name"),
+                item.get("item_kind"),
+                item.get("item_signature"),
+                item.get("default_value"),
+                json.dumps(item.get("generic_params")) if item.get("generic_params") else None,
+                json.dumps(item.get("where_clauses")) if item.get("where_clauses") else None,
+                item.get("visibility", "public"),
+                item.get("stability_level", "stable"),
+            )
+            for item in associated_items
+        ]
+        await db.executemany(
+            """
+            INSERT OR IGNORE INTO associated_items (
+                crate_id, container_path, item_name, item_kind, item_signature,
+                default_value, generic_params, where_clauses, visibility, stability_level
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            batch_data,
+        )
+        await db.commit()
+        logger.info(f"Stored {len(associated_items)} associated items.")
+```
+
+Next, I'll modify `store_enhanced_items_streaming` to drive the extraction and storage. This requires a conceptual change to `rustdoc_parser.py` to yield richer item types.
+
+**File:** `src/docsrs_mcp/ingestion/storage_manager.py`
+
+```python
+# --- Old Code ---
+async def store_enhanced_items_streaming(
+    db_path: Path, enhanced_items_stream, crate_id: int
+) -> None:
+...
+    regular_items = []
+    trait_implementations = []
+    trait_definitions = []
+    modules_data = None
+    
+    # Collect items from stream
+    async for item in enhanced_items_stream:
+        if "_trait_impl" in item:
+            # This is trait implementation data
+            trait_implementations.append(item["_trait_impl"])
+        elif "_trait_def" in item:
+            # This is trait definition data
+            trait_definitions.append(item["_trait_def"])
+        elif "_modules" in item:
+            # Module hierarchy data
+            modules_data = item["_modules"]
+        else:
+            # Regular item for embedding storage - enhance with metadata
+            try:
+                item["signature"] = extract_signature(item)
+                item["deprecated"] = extract_deprecated(item)
+                item["visibility"] = extract_visibility(item)
+                item["examples"] = extract_code_examples(item.get("doc", ""))
+                regular_items.append(item)
+            except Exception as e:
+                logger.warning(f"Error enhancing item metadata: {e}")
+                regular_items.append(item)  # Store anyway
+    
+    # Store trait implementations and definitions first
+    if trait_implementations:
+        await store_trait_implementations(db_path, trait_implementations, crate_id)
+        
+    if trait_definitions:
+        await store_trait_definitions(db_path, trait_definitions, crate_id)
+...
+```
+```python
+# +++ New Code +++
+async def store_enhanced_items_streaming(
+    db_path: Path, enhanced_items_stream, crate_id: int
+) -> None:
+...
+    regular_items = []
+    trait_implementations = []
+    trait_definitions = []
+    method_signatures = []
+    associated_items = []
+    modules_data = None
+    
+    # Collect items from stream
+    async for item in enhanced_items_stream:
+        if "_trait_impl" in item:
+            trait_implementations.append(item["_trait_impl"])
+        elif "_trait_def" in item:
+            trait_definitions.append(item["_trait_def"])
+        elif "_method_signature" in item:
+            method_signatures.append(item["_method_signature"])
+        elif "_associated_item" in item:
+            associated_items.append(item["_associated_item"])
+        elif "_modules" in item:
+            modules_data = item["_modules"]
+        else:
+            # Regular item for embedding storage - enhance with metadata
+            try:
+                item["signature"] = extract_signature(item)
+                item["deprecated"] = extract_deprecated(item)
+                item["visibility"] = extract_visibility(item)
+                item["examples"] = extract_code_examples(item.get("doc", ""))
+                regular_items.append(item)
+            except Exception as e:
+                logger.warning(f"Error enhancing item metadata: {e}")
+                regular_items.append(item)  # Store anyway
+    
+    # Store all extracted data
+    if trait_implementations:
+        await store_trait_implementations(db_path, trait_implementations, crate_id)
+    if trait_definitions:
+        await store_trait_definitions(db_path, trait_definitions, crate_id)
+    if method_signatures:
+        await store_method_signatures(db_path, method_signatures, crate_id)
+    if associated_items:
+        await store_associated_items(db_path, associated_items, crate_id)
+...
+```
+**Note:** For this to work, `rustdoc_parser.py` must be updated to use `EnhancedMethodExtractor` and an enhanced `EnhancedTraitExtractor` to yield `_method_signature` and `_associated_item` dictionaries, similar to how it yields `_trait_impl`.
+
+### Validation Plan
+
+After applying these patches and updating the `rustdoc_parser`, you can validate the fixes with the following steps:
+
+1.  **Re-ingest a crate with complex traits**, like `serde` or `tokio`.
+    ```bash
+    # (Assuming a CLI or test script to trigger ingestion)
+    python -m your_project.ingest serde 1.0.193
+    ```
+2.  **Test Code Intelligence:**
+    *   `get_code_intelligence("serde", "de::Deserialize", "1.0.193")` -> Should return data.
+    *   `get_code_intelligence("serde", "serde::de::Deserialize", "1.0.193")` -> Should also return data.
+    *   `get_error_types("serde", pattern="Error")` -> Should return a non-empty list.
+3.  **Test Trait Tools:**
+    *   `get_trait_implementors("serde", "serde::Deserialize")` -> Should return a list of implementors.
+    *   `resolve_method("serde", "serde::de::Deserializer", "deserialize_any")` -> Should return candidates.
+    *   `get_associated_items("serde", "serde::de::Deserialize")` -> Should return associated types like `Error`.
+
+These changes should resolve the empty results and make the MCP tools significantly more reliable.

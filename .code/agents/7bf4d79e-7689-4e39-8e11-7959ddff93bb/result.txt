@@ -1,0 +1,1004 @@
+[2025-09-07T19:22:09] Code v0.2.80
+--------
+workdir: /Users/peterkloiber/docsrs-mcp
+model: gpt-5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: auto
+--------
+[2025-09-07T19:22:09] User instructions:
+Bug #2: Background Ingestion Stall — Background processing system
+
+Goal: Diagnose and fully fix a stall in background ingestion so that both pre-ingestion (popular crates) and bulk loading (e.g., ingesting from Cargo.toml/lock) reliably process queued crates concurrently and continuously, without hanging. Ensure robust scheduler state and semaphore handling. Deliver production-safe, tested changes.
+
+Observed Impact (from repo context):
+- Pre-ingestion and bulk loading don’t progress; worker tasks appear to start but no crates are processed, or processing stops after first run.
+- Symptoms are consistent with: workers exiting after initial queue drain; subsequent schedules enqueue items but no workers are alive to service the queue; manual queueing of crate specs may enqueue values that aren’t parsed correctly ("crate@version").
+
+Likely Root Causes (code-level hypotheses):
+1) Worker lifecycle exit condition allows premature termination.
+   - File: src/docsrs_mcp/popular_crates.py, class PreIngestionWorker, method _ingest_worker.
+   - Pattern: loop calls `await asyncio.wait_for(self.queue.get(), timeout=1.0)` and then on timeout checks `if self.queue.empty(): break`.
+   - If the queue is momentarily empty, workers exit; later the scheduler enqueues items but no workers remain, causing `queue.join()` hang. This matches “Worker threads start but don’t process crates.”
+
+2) Scheduler doesn’t ensure workers are running for each scheduled batch.
+   - File: src/docsrs_mcp/popular_crates.py, class IngestionScheduler._schedule_ingestion.
+   - It enqueues crates and immediately awaits `self.worker.queue.join()` but doesn’t (re)spawn workers if they exited after the previous run.
+
+3) Manual bulk ingestion enqueues crate specs like "serde@1.0.219" without parsing.
+   - File: src/docsrs_mcp/popular_crates.py, function queue_for_ingestion(). It enqueues the raw crate_spec. Workers treat the queue item as a `crate_name` and then call fetch_current_stable_version(crate_name), which will fail for names like "serde@1.0.219" and get skipped, appearing as “workers not processing”.
+   - A helper parse_crate_spec(crate_spec) exists but _ingest_single_crate() doesn’t utilize it.
+
+4) Semaphore resizing swaps the semaphore object live.
+   - File: src/docsrs_mcp/popular_crates.py, method _monitor_memory(). It reassigns `self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)`.
+   - While generally safe for new acquires, this can be racy and leave tasks waiting on old semaphore instances. This isn’t likely the primary stall but can amplify instability.
+
+Environment context and where the system is wired:
+- src/docsrs_mcp/middleware.py -> startup_event(): if PRE_INGEST_ENABLED, awaits start_pre_ingestion(). Pre-ingestion uses the manager/worker/scheduler from popular_crates.py.
+- src/docsrs_mcp/endpoints_tools.py provides MCP tool endpoints that can start pre-ingest, control it, and bulk ingest from Cargo files via queue_for_ingestion().
+- src/docsrs_mcp/config.py: PRE_INGEST_CONCURRENCY (alias of CONCURRENCY) defaults=3; SCHEDULER_ENABLED defaults=true; SCHEDULER_INTERVAL_HOURS=6, jitter=10%; POPULAR_CRATES_COUNT clamped 100–500; cache locations; HTTP timeouts.
+- src/docsrs_mcp/models/responses.py defines PopularCrate (used by manager/worker priority queue), with validation.
+
+Relevant files (full paths and contents excerpted for agent context):
+
+---- FILE: src/docsrs_mcp/popular_crates.py (EXCERPT: key classes and methods) ----
+[BEGIN]
+"""Popular crates pre-ingestion module for docsrs-mcp.
+...
+class WorkerState(Enum):
+    IDLE = "idle"; RUNNING = "running"; PAUSED = "paused"; STOPPING = "stopping"; STOPPED = "stopped"; ERROR = "error"
+...
+class PopularCratesManager: ...
+    async def get_popular_crates(self, count: int = None) -> list[str]:
+        ... caches and multi-tier fetch (API/msgpack/disk/fallback) ...
+
+class PreIngestionWorker:
+    def __init__(...):
+        self.semaphore = asyncio.Semaphore(config.PRE_INGEST_CONCURRENCY)
+        self.queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+        self._workers: list[asyncio.Task] = []
+        self._monitor_task: asyncio.Task | None = None
+        self._task_refs = set()  # Strong refs
+        self._state = WorkerState.IDLE
+        self._pause_event = asyncio.Event(); self._pause_event.set()
+        self._adaptive_concurrency = config.PRE_INGEST_CONCURRENCY
+
+    async def start(self):
+        logger.info("Starting background pre-ingestion of popular crates")
+        self._start_time = datetime.now()
+        asyncio.create_task(self._run())  # NOTE: no strong ref retained here
+
+    async def _run(self):
+        self._state = WorkerState.RUNNING
+        crates_with_metadata = await self.manager.get_popular_crates_with_metadata()
+        self.stats["total"] = len(crates_with_metadata)
+        for crate in crates_with_metadata:
+            # enqueue priority tuples
+            await self.queue.put((priority, crate.name))
+
+        # spawn workers (N = self._adaptive_concurrency)
+        for i in range(self._adaptive_concurrency):
+            worker = asyncio.create_task(self._ingest_worker(i))
+            self._workers.append(worker)
+            self._task_refs.add(worker); worker.add_done_callback(self._task_refs.discard)
+
+        # monitors
+        self._monitor_task = asyncio.create_task(self._monitor_progress()); ...
+        self._memory_monitor_task = asyncio.create_task(self._monitor_memory()); ...
+
+        await self.queue.join()
+        # cancel monitors; log stats; cleanup
+
+    async def _ingest_worker(self, worker_id: int):
+        while True:
+            await self._pause_event.wait()
+            if self._state == WorkerState.STOPPING:
+                break
+            try:
+                priority, crate_name = await asyncio.wait_for(self.queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                if self.queue.empty():
+                    break   # <-- Likely cause: workers exit when queue temporarily empty
+                continue
+            # dedupe check, mark processed, then
+            async with self.semaphore:
+                await self._ingest_single_crate(crate_name)
+            self.queue.task_done()
+
+    async def _ingest_single_crate(self, crate_name: str):
+        # uses fetch_current_stable_version(crate_name) then ingest_crate(crate_name, version)
+        # BUG: crate_name may actually be "serde@1.0.219" when queued via queue_for_ingestion()
+        ...
+
+class IngestionScheduler:
+    async def start(self):
+        if not self.enabled: return
+        task = asyncio.create_task(self._run()); self.background_tasks.add(task); task.add_done_callback(self.background_tasks.discard)
+        self._scheduler_task = task
+
+    async def _run(self):
+        while True:
+            self._next_run = now + interval
+            await self._schedule_ingestion()
+            await asyncio.sleep(interval_with_jitter)
+
+    async def _schedule_ingestion(self):
+        self._is_running = True; self._last_run = now
+        if not await self._should_schedule(): return
+        crates = await self.manager.get_popular_crates_with_metadata()
+        self.worker.stats = { ... total=len(crates) }
+        self.worker._processed_crates.clear()
+        for crate in crates:
+            await self.worker.queue.put((priority, crate.name))
+        await self.worker.queue.join()  # blocks but does not ensure workers running
+        self._runs_completed += 1
+[END]
+
+---- FILE: src/docsrs_mcp/middleware.py (EXCERPT: startup) ----
+[BEGIN]
+async def startup_event():
+    if config.PRE_INGEST_ENABLED:
+        logger.info("Starting background pre-ingestion of popular crates")
+        from .popular_crates import start_pre_ingestion
+        await start_pre_ingestion()
+    if config.EMBEDDINGS_WARMUP_ENABLED:
+        from .ingest import warmup_embedding_model
+        await warmup_embedding_model()
+[END]
+
+---- FILE: src/docsrs_mcp/config.py (EXCERPT: concurrency/scheduler) ----
+[BEGIN]
+CONCURRENCY = int(os.getenv("DOCSRS_CONCURRENCY", os.getenv("DOCSRS_PRE_INGEST_CONCURRENCY", "3")))
+if not 1 <= CONCURRENCY <= 10: ...; CONCURRENCY = 3
+PRE_INGEST_CONCURRENCY = CONCURRENCY  # alias
+SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+SCHEDULER_INTERVAL_HOURS = int(os.getenv("SCHEDULER_INTERVAL_HOURS", "6"))
+SCHEDULER_JITTER_PERCENT = int(os.getenv("SCHEDULER_JITTER_PERCENT", "10"))
+[END]
+
+---- FILE: src/docsrs_mcp/models/responses.py (EXCERPT: PopularCrate) ----
+[BEGIN]
+class PopularCrate(BaseModel):
+    name: str; downloads: int; description: str|None; version: str|None; last_updated: float
+[END]
+
+---- FILE: src/docsrs_mcp/endpoints_tools.py (EXCERPT: bulk ingestion entry) ----
+[BEGIN]
+from .popular_crates import check_crate_exists, queue_for_ingestion
+...
+crates = extract_crates_from_cargo(file_path)
+... if params.resolve_versions: crates = await resolve_cargo_versions(...)
+... await queue_for_ingestion(crates, concurrency=params.concurrency or 3)
+[END]
+
+---- REPRO STEPS (for proposed validation after fix) ----
+1) Pre-ingestion path:
+   - Set env: DOCSRS_PRE_INGEST_ENABLED=true; SCHEDULER_ENABLED=true (default); DOCSRS_CONCURRENCY=3.
+   - Start server or call start_pre_ingestion(force_start=True) via `/mcp/tools/start_pre_ingestion`.
+   - Observe in logs: workers remain alive; crates move from queued to processed; stats progress; subsequent scheduler runs (every interval) also process items.
+
+2) Bulk ingestion path:
+   - Call `/mcp/tools/ingest_cargo_file` with a Cargo.lock including crates; use resolve_versions=true.
+   - Items are enqueued as "crate@version" and properly parsed by workers; ingestion proceeds with dedupe and semaphore limiting.
+
+3) Memory-driven concurrency adjustment:
+   - If memory > 900MB, concurrency is reduced; when memory < 600MB, it increases back; semaphore adjustments don’t deadlock or orphan permits.
+
+Proposed Fixes (concrete changes):
+A) Keep workers alive until explicit STOPPING: change _ingest_worker timeout branch to `continue` instead of `break`, and only break when `self._state == STOPPING`.
+   - This ensures workers service future queued items (from scheduler or manual queueing) instead of exiting prematurely.
+
+B) Ensure worker run task is strongly referenced: in start(), capture the task in `self._runner_task` and add to `_task_refs` to prevent GC and for introspection.
+
+C) Make scheduler tolerant by re-spawning workers if none are running before `queue.join()`.
+   - E.g., check `if not self.worker._workers or all(t.done() for t in self.worker._workers): self.worker._spawn_workers()` (implement a helper to (re)spawn N workers based on current adaptive concurrency).
+
+D) Parse crate specs in worker: support "crate@version" in `_ingest_single_crate()`.
+   - Use `parse_crate_spec()` to separate name/version.
+   - If version == "latest" or None → fetch; else use provided version.
+
+E) Safer semaphore updates: instead of replacing the Semaphore instance in `_monitor_memory()`, implement a small gate to serialize concurrency changes and avoid races; acceptable minimal change is okay if A–D solve the stall.
+
+F) Tests:
+   - Add async tests that simulate: enqueue manual items then enqueue later again, verifying workers still alive and queue drains.
+   - Unit test parse_crate_spec handling inside `_ingest_single_crate()`.
+   - Integration-style test for IngestionScheduler: inject a small interval and mock manager to enqueue a few items across two runs; assert both runs complete without hang.
+
+Acceptance Criteria:
+- Pre-ingestion processes N popular crates at startup and in subsequent scheduler runs without stall; progress stats increase; no indefinite waits on `queue.join()`.
+- Bulk ingestion of Cargo files enqueues `crate@version` items that are parsed and processed.
+- No deadlocks due to semaphore changes; workers do not exit unless STOPPING; pause/resume/stop continue to function.
+- All relevant tests pass locally; no regressions in existing test_ingest/test_batch_processor suites.
+
+Please propose minimal, targeted code changes grounded in the files above, with diffs and reasoning, and note any caveats.
+
+
+[Running in read-only mode - no modifications allowed]
+
+[2025-09-07T19:22:14] thinking
+
+**Proposing code changes**
+
+I need to suggest minimal and targeted code changes, including the reasoning behind them and a test plan. Since this environment is read-only, I can't modify files directly, but I can present patch diffs as proposals. The user provided detailed hypotheses and excerpts from files. I'll suggest edits to src/docsrs_mcp/popular_crates.py and maybe endpoints_tools. I should consider aspects like worker cancellation and memory monitoring, delivering production-safe, tested changes with proposed async tests. I'll provide diffs and guidance for a minimal patch.
+**Formatting final suggestions**
+
+I need to follow developer instructions for the final message format, which includes using bullets and section headers. It’s important to provide reasoning based on observed symptoms and include suggestions for migration and deployment without external citations. I want to maintain a consistent style with the existing codebase while drafting specific changes in Python.
+
+For popular_crates.py, I’ll add an optional runner task, update the start method to properly reference the task, implement a method to spawn workers while checking existing tasks, and ensure everything runs smoothly in the `_run` method.
+**Addressing worker management**
+
+I want to keep workers alive while waiting for the queue, but I need to be cautious about how queue.join() behaves. If it returns when the queue is empty and _run ends, that might stop the monitors. The start() function is triggered only once, so I have to ensure _run doesn’t exit and allows idle workers to stay ready for future items. 
+
+I could implement a while loop that consumes initial crates and waits for an event, but instead, I’ll adjust _run() to be long-lived. I won’t await queue.join() permanently. Instead, I’ll keep the _run() loop running, allowing monitors to maintain while keeping workers busy without unnecessary spinning.
+**Ensuring robust worker management**
+
+I need to think about what happens if _run exits; it could cause start() to finish and set the state to stopped. I want to maintain the task for the monitors, but if _run returns and cancels them, the workers will still be alive due to tasks. To keep _run alive for the monitors, I could await 'self._stop_event', but that adds complexity.
+
+Alternatively, I could keep _run as it is and not cancel workers when done. The monitors can be canceled after joining, which should be fine since the scheduler is running. I want the memory monitor to adjust concurrency over time, but if it cancels, adaptive concurrency won't happen. It’s not critical to fix that stall, but I need to ensure the scheduler's state and semaphore handling are robust.
+**Proposing semaphore adjustments**
+
+I’m considering a small change in _monitor_memory. Instead of replacing self.semaphore, I can manage permits with a custom AsyncBoundedLimiter or adjust using asyncio.Semaphore. I can track target concurrency and dynamically release or acquire permits without blocking.
+
+I aim to keep the same semaphore object and adjust permits using non-blocking paths. This involves incrementing or decrementing permits based on current needs while maintaining a reserved count. I’ll also implement methods for resizing concurrency and ensuring the scheduler keeps workers running before queue.join(). It’s essential to avoid errors with mixed types in the priority queue.
+**Drafting queue handling improvements**
+
+I’m focusing on ensuring the PriorityQueue handles items correctly. Since mixing strings and tuples may trigger TypeErrors, it’s safer to standardize items as (priority, spec). I intend to handle both formats in the worker by checking the type before unpacking. If it’s a string, I’ll treat it as a spec directly.
+
+I’ll implement a method called `_ingest_single_crate`, using a helper function `parse_crate_spec`, to manage how versions are processed. I’ll also update the worker and scheduler to ensure they maintain proper references while enqueuing items. Alongside that, I’ll add asynchronous tests to check for proper functionality and edge cases, particularly with concurrency adjustments. Finally, I need to draft the code changes and document any necessary patches or instructions for validation.
+**Preparing for patch implementation**
+
+I'm planning to implement a local helper function, `parse_crate_spec`, to ensure no dependencies are broken, provided we avoid name collisions. I’ll use a `try` block to import it if it's already defined; otherwise, I’ll define it locally.
+
+Next, I aim to draft patches for the `popular_crates.py` file. These will include changes to worker attributes, methods for spawning workers, and concurrency management. I’ll update the queue handling in the `_ingest_single_crate` method and modify the processing logic for consistency. Lastly, I’ll design tests for both worker functionality and queue processing to ensure reliability and performance.
+[2025-09-07T19:23:35] codex
+**Formatting final suggestions**
+
+I need to follow developer instructions for the final message format, which includes using bullets and section headers. It’s important to provide reasoning based on observed symptoms and include suggestions for migration and deployment without external citations. I want to maintain a consistent style with the existing codebase while drafting specific changes in Python.
+
+For popular_crates.py, I’ll add an optional runner task, update the start method to properly reference the task, implement a method to spawn workers while checking existing tasks, and ensure everything runs smoothly in the `_run` method.
+[2025-09-07T19:23:35] codex
+**Addressing worker management**
+
+I want to keep workers alive while waiting for the queue, but I need to be cautious about how queue.join() behaves. If it returns when the queue is empty and _run ends, that might stop the monitors. The start() function is triggered only once, so I have to ensure _run doesn’t exit and allows idle workers to stay ready for future items. 
+
+I could implement a while loop that consumes initial crates and waits for an event, but instead, I’ll adjust _run() to be long-lived. I won’t await queue.join() permanently. Instead, I’ll keep the _run() loop running, allowing monitors to maintain while keeping workers busy without unnecessary spinning.
+[2025-09-07T19:23:35] codex
+**Ensuring robust worker management**
+
+I need to think about what happens if _run exits; it could cause start() to finish and set the state to stopped. I want to maintain the task for the monitors, but if _run returns and cancels them, the workers will still be alive due to tasks. To keep _run alive for the monitors, I could await 'self._stop_event', but that adds complexity.
+
+Alternatively, I could keep _run as it is and not cancel workers when done. The monitors can be canceled after joining, which should be fine since the scheduler is running. I want the memory monitor to adjust concurrency over time, but if it cancels, adaptive concurrency won't happen. It’s not critical to fix that stall, but I need to ensure the scheduler's state and semaphore handling are robust.
+[2025-09-07T19:23:35] codex
+**Proposing semaphore adjustments**
+
+I’m considering a small change in _monitor_memory. Instead of replacing self.semaphore, I can manage permits with a custom AsyncBoundedLimiter or adjust using asyncio.Semaphore. I can track target concurrency and dynamically release or acquire permits without blocking.
+
+I aim to keep the same semaphore object and adjust permits using non-blocking paths. This involves incrementing or decrementing permits based on current needs while maintaining a reserved count. I’ll also implement methods for resizing concurrency and ensuring the scheduler keeps workers running before queue.join(). It’s essential to avoid errors with mixed types in the priority queue.
+[2025-09-07T19:23:35] codex
+**Drafting queue handling improvements**
+
+I’m focusing on ensuring the PriorityQueue handles items correctly. Since mixing strings and tuples may trigger TypeErrors, it’s safer to standardize items as (priority, spec). I intend to handle both formats in the worker by checking the type before unpacking. If it’s a string, I’ll treat it as a spec directly.
+
+I’ll implement a method called `_ingest_single_crate`, using a helper function `parse_crate_spec`, to manage how versions are processed. I’ll also update the worker and scheduler to ensure they maintain proper references while enqueuing items. Alongside that, I’ll add asynchronous tests to check for proper functionality and edge cases, particularly with concurrency adjustments. Finally, I need to draft the code changes and document any necessary patches or instructions for validation.
+[2025-09-07T19:23:35] codex
+**Preparing for patch implementation**
+
+I'm planning to implement a local helper function, `parse_crate_spec`, to ensure no dependencies are broken, provided we avoid name collisions. I’ll use a `try` block to import it if it's already defined; otherwise, I’ll define it locally.
+
+Next, I aim to draft patches for the `popular_crates.py` file. These will include changes to worker attributes, methods for spawning workers, and concurrency management. I’ll update the queue handling in the `_ingest_single_crate` method and modify the processing logic for consistency. Lastly, I’ll design tests for both worker functionality and queue processing to ensure reliability and performance.
+[2025-09-07T19:23:35] codex
+
+I’m going to fix the worker lifecycle, make the scheduler robust to empty queues and exited workers, parse “crate@version”, and make semaphore resizing safe. Below are minimal, targeted diffs plus tests and a quick validation plan.
+
+**Why these changes**
+- Workers were exiting on transient empty queues and never coming back.
+- Scheduler awaited `queue.join()` without ensuring workers existed.
+- Manual/bulk items like “serde@1.0.219” were not parsed inside the worker.
+- Live semaphore replacement risks orphaning waiters; resizing should keep a stable semaphore object.
+
+**What’s in this patch**
+- Keep workers alive until explicit STOPPING.
+- Hold a strong ref to the runner task.
+- Allow scheduler and bulk-queue code to (re)spawn workers if needed.
+- Parse “crate@version” in the worker path.
+- Safely resize concurrency without swapping semaphore objects.
+- Tests for lifecycle, spec parsing, scheduler robustness.
+
+---
+
+### Patches
+
+Apply patch 1: lifecycle, parsing, scheduler, semaphore resizing.
+
+```diff
+*** Begin Patch
+*** Update File: src/docsrs_mcp/popular_crates.py
+@@
+-"""Popular crates pre-ingestion module for docsrs-mcp.
++"""Popular crates pre-ingestion module for docsrs-mcp.
+ ...
+ from enum import Enum
++from typing import Any, Optional, Tuple
+ import asyncio
+ import logging
+ from datetime import datetime, timedelta
+@@
+ class WorkerState(Enum):
+     IDLE = "idle"; RUNNING = "running"; PAUSED = "paused"; STOPPING = "stopping"; STOPPED = "stopped"; ERROR = "error"
+@@
++# --- Helpers ---
++def _parse_crate_spec(spec: str) -> Tuple[str, Optional[str]]:
++    """
++    Accepts forms:
++      - "crate" -> (crate, None)
++      - "crate@1.2.3" -> (crate, "1.2.3")
++      - "crate@latest" -> (crate, "latest")
++    Whitespace tolerated.
++    """
++    s = (spec or "").strip()
++    if "@" in s:
++        name, ver = s.split("@", 1)
++        name = name.strip()
++        ver = ver.strip() or None
++        return name, ver
++    return s, None
++
+@@
+ class PreIngestionWorker:
+     def __init__(...):
+-        self.semaphore = asyncio.Semaphore(config.PRE_INGEST_CONCURRENCY)
++        self.semaphore = asyncio.Semaphore(config.PRE_INGEST_CONCURRENCY)
+         self.queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+         self._workers: list[asyncio.Task] = []
+         self._monitor_task: asyncio.Task | None = None
++        self._runner_task: asyncio.Task | None = None
+         self._task_refs = set()  # Strong refs
+         self._state = WorkerState.IDLE
+         self._pause_event = asyncio.Event(); self._pause_event.set()
+         self._adaptive_concurrency = config.PRE_INGEST_CONCURRENCY
++        # Semaphore resizing state (keep one stable semaphore object)
++        self._semaphore_max = int(self._adaptive_concurrency)
++        self._reserved_permits = 0  # permits we acquired to reduce capacity
++        self._semaphore_resize_lock = asyncio.Lock()
+ 
+     async def start(self):
+         logger.info("Starting background pre-ingestion of popular crates")
+         self._start_time = datetime.now()
+-        asyncio.create_task(self._run())  # NOTE: no strong ref retained here
++        task = asyncio.create_task(self._run(), name="pre_ingestion_runner")
++        self._runner_task = task
++        self._task_refs.add(task)
++        task.add_done_callback(self._task_refs.discard)
+ 
+     async def _run(self):
+         self._state = WorkerState.RUNNING
+         crates_with_metadata = await self.manager.get_popular_crates_with_metadata()
+         self.stats["total"] = len(crates_with_metadata)
+         for crate in crates_with_metadata:
+             # enqueue priority tuples
+             await self.queue.put((priority, crate.name))
+ 
+-        # spawn workers (N = self._adaptive_concurrency)
+-        for i in range(self._adaptive_concurrency):
+-            worker = asyncio.create_task(self._ingest_worker(i))
+-            self._workers.append(worker)
+-            self._task_refs.add(worker); worker.add_done_callback(self._task_refs.discard)
++        # spawn/re-spawn workers (N = self._adaptive_concurrency)
++        self.spawn_workers_if_needed()
+ 
+         # monitors
+-        self._monitor_task = asyncio.create_task(self._monitor_progress()); ...
+-        self._memory_monitor_task = asyncio.create_task(self._monitor_memory()); ...
++        if not getattr(self, "_monitor_task", None) or self._monitor_task.done():
++            self._monitor_task = asyncio.create_task(self._monitor_progress())
++        if not getattr(self, "_memory_monitor_task", None) or self._memory_monitor_task.done():
++            self._memory_monitor_task = asyncio.create_task(self._monitor_memory())
+ 
+         await self.queue.join()
+-        # cancel monitors; log stats; cleanup
++        # Do not cancel workers here; they stay alive for future queueing.
++        # Monitors also remain active so adaptive concurrency continues.
+ 
++    def spawn_workers_if_needed(self):
++        """Ensure we have up to `_adaptive_concurrency` live workers."""
++        # prune finished
++        alive = []
++        for t in self._workers:
++            if not t.done():
++                alive.append(t)
++        self._workers = alive
++
++        running = len(self._workers)
++        to_spawn = max(0, int(self._adaptive_concurrency) - running)
++        for i in range(to_spawn):
++            worker = asyncio.create_task(self._ingest_worker(running + i))
++            self._workers.append(worker)
++            self._task_refs.add(worker)
++            worker.add_done_callback(self._task_refs.discard)
++
+     async def _ingest_worker(self, worker_id: int):
+         while True:
+             await self._pause_event.wait()
+             if self._state == WorkerState.STOPPING:
+                 break
+             try:
+-                priority, crate_name = await asyncio.wait_for(self.queue.get(), timeout=1.0)
++                item = await asyncio.wait_for(self.queue.get(), timeout=1.0)
+             except asyncio.TimeoutError:
+-                if self.queue.empty():
+-                    break   # <-- Likely cause: workers exit when queue temporarily empty
+-                continue
+-            # dedupe check, mark processed, then
++                # Keep workers alive to service future items.
++                continue
++            # Normalize queue item shape
++            if isinstance(item, tuple) and len(item) == 2:
++                _, crate_spec = item
++            else:
++                crate_spec = item
++            # dedupe check, mark processed, then
+             async with self.semaphore:
+-                await self._ingest_single_crate(crate_name)
++                await self._ingest_single_crate(crate_spec)
+             self.queue.task_done()
+ 
+-    async def _ingest_single_crate(self, crate_name: str):
+-        # uses fetch_current_stable_version(crate_name) then ingest_crate(crate_name, version)
+-        # BUG: crate_name may actually be "serde@1.0.219" when queued via queue_for_ingestion()
+-        ...
++    async def _ingest_single_crate(self, crate_spec: str):
++        # Accept "name" or "name@version"
++        name, version = _parse_crate_spec(crate_spec)
++        if not name:
++            return
++        if version in (None, "", "latest"):
++            version = await fetch_current_stable_version(name)
++            if not version:
++                return
++        # Ingest the specific version
++        await ingest_crate(name, version)
++
++    async def _resize_concurrency(self, target: int):
++        """
++        Safely adjust effective concurrency without swapping semaphore objects.
++        If decreasing, acquire and hold 'extra' permits; if increasing, release held permits first,
++        then release additional permits to raise the ceiling.
++        """
++        target = max(1, min(10, int(target)))
++        async with self._semaphore_resize_lock:
++            current_max = self._semaphore_max
++            if target == current_max:
++                return
++            if target > current_max:
++                delta = target - current_max
++                # First unreserve any held permits
++                to_release = min(delta, self._reserved_permits)
++                for _ in range(to_release):
++                    self.semaphore.release()
++                self._reserved_permits -= to_release
++                # If still below target, increase by releasing more permits
++                extra = delta - to_release
++                for _ in range(extra):
++                    self.semaphore.release()
++                self._semaphore_max = target
++                self._adaptive_concurrency = target
++                return
++            # target < current_max: acquire extra permits and keep them reserved
++            delta = current_max - target
++            for _ in range(delta):
++                # This waits until a permit becomes available, ensuring a smooth ramp-down
++                await self.semaphore.acquire()
++                self._reserved_permits += 1
++            self._semaphore_max = target
++            self._adaptive_concurrency = target
+ 
+ class IngestionScheduler:
+@@
+     async def _schedule_ingestion(self):
+         self._is_running = True; self._last_run = now
+         if not await self._should_schedule(): return
+         crates = await self.manager.get_popular_crates_with_metadata()
+         self.worker.stats = { ... total=len(crates) }
+         self.worker._processed_crates.clear()
+         for crate in crates:
+             await self.worker.queue.put((priority, crate.name))
++        # Ensure workers are running for this batch
++        self.worker.spawn_workers_if_needed()
+         await self.worker.queue.join()  # blocks but does not ensure workers running
+         self._runs_completed += 1
++
++    # (rest of the class unchanged)
++
++# --- Public helper for bulk/manual queueing ---
++async def queue_for_ingestion(crate_specs: list[str], concurrency: int | None = None, priority: int = 0):
++    """
++    Accepts crate specs like ["serde", "serde@1.0.219"] and enqueues them uniformly.
++    Optionally nudges concurrency and (re)spawns workers if needed.
++    """
++    worker = get_global_pre_ingestion_worker()  # existing accessor in this module
++    if not worker:
++        return
++    if concurrency and concurrency != worker._adaptive_concurrency:
++        await worker._resize_concurrency(concurrency)
++    worker.spawn_workers_if_needed()
++    for spec in crate_specs or []:
++        await worker.queue.put((priority, spec))
+ 
+@@
+-    async def _monitor_memory(self): ...
++    async def _monitor_memory(self):
++        """
++        Adjust concurrency based on memory without swapping the semaphore object.
++        """
++        try:
++            while self._state in (WorkerState.RUNNING, WorkerState.PAUSED, WorkerState.IDLE):
++                mem = get_process_memory_mb()
++                target = self._adaptive_concurrency
++                if mem > 900:
++                    target = max(1, self._adaptive_concurrency - 1)
++                elif mem < 600:
++                    target = min(10, self._adaptive_concurrency + 1)
++                if target != self._adaptive_concurrency:
++                    await self._resize_concurrency(target)
++                await asyncio.sleep(5.0)
++        except asyncio.CancelledError:
++            pass
+*** End Patch
+```
+
+Notes:
+- `get_global_pre_ingestion_worker()` is assumed to already exist (there’s typically a singleton used by middleware). If not present, replace with the appropriate reference used by your startup wiring.
+- Replace `...` placeholders with the existing code in your file (unchanged).
+
+Apply patch 2: scheduler import sites don’t change; endpoint tool already imports `queue_for_ingestion`. No code changes needed there beyond the function strengthened above.
+
+---
+
+### Tests
+
+Add async tests to validate worker persistence, spec parsing, and scheduler resilience.
+
+```diff
+*** Begin Patch
+*** Add File: tests/test_pre_ingestion_worker.py
++import asyncio
++import types
++import pytest
++
++pytestmark = pytest.mark.asyncio
++
++# Lightweight fakes
++class FakeCrate:
++    def __init__(self, name): self.name = name
++
++class FakeManager:
++    def __init__(self, names):
++        self._names = names
++    async def get_popular_crates_with_metadata(self):
++        return [FakeCrate(n) for n in self._names]
++
++@pytest.fixture
++def monkeypatch_ingest(monkeypatch):
++    processed = []
++    async def fake_ingest(name, ver):
++        await asyncio.sleep(0.01)
++        processed.append((name, ver))
++    async def fake_fetch(name):
++        return "9.9.9"
++    import src.docsrs_mcp.popular_crates as pc
++    monkeypatch.setattr(pc, "ingest_crate", fake_ingest, raising=False)
++    monkeypatch.setattr(pc, "fetch_current_stable_version", fake_fetch, raising=False)
++    return processed
++
++async def test_workers_do_not_exit_on_empty_queue(monkeypatch_ingest):
++    from src.docsrs_mcp.popular_crates import PreIngestionWorker
++    mgr = FakeManager(names=[])
++    worker = PreIngestionWorker(manager=mgr)  # use correct signature from your code
++    await worker.start()
++    # Give runner time to spawn workers
++    await asyncio.sleep(0.05)
++    # Enqueue later and ensure it is processed
++    await worker.queue.put((0, "foo@1.2.3"))
++    await asyncio.wait_for(worker.queue.join(), timeout=2)
++    assert ("foo", "1.2.3") in monkeypatch_ingest
++
++async def test_parses_crate_spec_forms(monkeypatch_ingest):
++    from src.docsrs_mcp.popular_crates import PreIngestionWorker
++    mgr = FakeManager(names=[])
++    worker = PreIngestionWorker(manager=mgr)
++    await worker.start()
++    await asyncio.sleep(0.05)
++    # explicit version
++    await worker.queue.put((0, "serde@1.0.219"))
++    # latest
++    await worker.queue.put((0, "tokio@latest"))
++    # name only -> fetches current
++    await worker.queue.put((0, "regex"))
++    await asyncio.wait_for(worker.queue.join(), timeout=2)
++    seen = set(monkeypatch_ingest)
++    assert ("serde", "1.0.219") in seen
++    assert ("tokio", "9.9.9") in seen
++    assert ("regex", "9.9.9") in seen
+*** End Patch
+```
+
+```diff
+*** Begin Patch
+*** Add File: tests/test_scheduler_resilience.py
++import asyncio
++import pytest
++
++pytestmark = pytest.mark.asyncio
++
++class FakeCrate:
++    def __init__(self, name): self.name = name
++
++class FakeManager:
++    def __init__(self, batches):
++        self._batches = batches
++        self._i = 0
++    async def get_popular_crates_with_metadata(self):
++        batch = self._batches[self._i % len(self._batches)]
++        self._i += 1
++        return [FakeCrate(n) for n in batch]
++
++@pytest.fixture
++def monkeypatch_ingest(monkeypatch):
++    processed = []
++    async def fake_ingest(name, ver):
++        await asyncio.sleep(0.01)
++        processed.append((name, ver))
++    async def fake_fetch(name):
++        return "1.0.0"
++    import src.docsrs_mcp.popular_crates as pc
++    monkeypatch.setattr(pc, "ingest_crate", fake_ingest, raising=False)
++    monkeypatch.setattr(pc, "fetch_current_stable_version", fake_fetch, raising=False)
++    return processed
++
++async def test_scheduler_respawns_workers_and_drains(monkeypatch_ingest):
++    import src.docsrs_mcp.popular_crates as pc
++    mgr = FakeManager(batches=[["a","b"], ["c","d","e"]])
++    worker = pc.PreIngestionWorker(manager=mgr)
++    sched = pc.IngestionScheduler(manager=mgr, worker=worker, enabled=True)
++    # First run
++    await sched._schedule_ingestion()
++    # Second run should not hang and should process items too
++    await sched._schedule_ingestion()
++    names = {n for (n, _) in monkeypatch_ingest}
++    assert {"a","b","c","d","e"}.issubset(names)
+*** End Patch
+```
+
+---
+
+### Validation
+
+- Pre-ingestion
+  - Set env: `DOCSRS_PRE_INGEST_ENABLED=true`, `SCHEDULER_ENABLED=true`, `DOCSRS_CONCURRENCY=3`.
+  - Start server or call `/mcp/tools/start_pre_ingestion` (force true).
+  - Expect: workers stay RUNNING; stats progress; subsequent scheduler cycles also process newly enqueued crates without stall.
+
+- Bulk ingestion
+  - Call `/mcp/tools/ingest_cargo_file` with `resolve_versions=true`.
+  - Items like `serde@1.0.219` parse and ingest; queue drains.
+
+- Adaptive concurrency
+  - Under memory pressure, logs show concurrency step-down; when pressure lifts, step-up; no deadlocks and no semaphore swapping.
+
+- Tests
+  - Run: `pytest -q tests/test_pre_ingestion_worker.py::test_workers_do_not_exit_on_empty_queue`
+  - Run: `pytest -q tests/test_pre_ingestion_worker.py::[2025-09-07T19:24:41] ERROR: stream error: stream disconnected before completion: Transport error: error decoding response body; retrying 1/5 in 193ms…
+I’m going to propose targeted patches to keep workers alive, ensure the scheduler respawns them as needed, and parse crate specs like crate@version during ingestion. I’ll also include focused tests to validate both pre-ingest and bulk paths.
+
+*** Begin Patch
+*** Update File: src/docsrs_mcp/popular_crates.py
+@@
+-"""Popular crates pre-ingestion module for docsrs-mcp.
++"""Popular crates pre-ingestion module for docsrs-mcp.
+@@
+-from enum import Enum
++from enum import Enum
++from typing import Tuple, Optional
+@@
+ class WorkerState(Enum):
+     IDLE = "idle"; RUNNING = "running"; PAUSED = "paused"; STOPPING = "stopping"; STOPPED = "stopped"; ERROR = "error"
+@@
+ class PopularCratesManager: ...
+@@
+-class PreIngestionWorker:
++def parse_crate_spec(crate_spec: str) -> Tuple[str, Optional[str]]:
++    """
++    Accepts 'crate' or 'crate@version' (version may be 'latest'/'stable').
++    Returns (name, version_or_none).
++    """
++    spec = (crate_spec or "").strip()
++    if not spec:
++        return "", None
++    if "@" not in spec:
++        return spec, None
++    name, ver = spec.split("@", 1)
++    name = name.strip()
++    ver = ver.strip()
++    if ver.lower() in ("", "latest", "stable"):
++        ver = None
++    return name, ver
++
++
++class PreIngestionWorker:
+     def __init__(...):
+         self.semaphore = asyncio.Semaphore(config.PRE_INGEST_CONCURRENCY)
+         self.queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+         self._workers: list[asyncio.Task] = []
+         self._monitor_task: asyncio.Task | None = None
+         self._task_refs = set()  # Strong refs
+         self._state = WorkerState.IDLE
+         self._pause_event = asyncio.Event(); self._pause_event.set()
+         self._adaptive_concurrency = config.PRE_INGEST_CONCURRENCY
++        self._runner_task: asyncio.Task | None = None
+@@
+-    async def start(self):
++    async def start(self):
+         logger.info("Starting background pre-ingestion of popular crates")
+         self._start_time = datetime.now()
+-        asyncio.create_task(self._run())  # NOTE: no strong ref retained here
++        task = asyncio.create_task(self._run())
++        self._runner_task = task
++        self._task_refs.add(task)
++        task.add_done_callback(self._task_refs.discard)
+ 
+     async def _run(self):
+         self._state = WorkerState.RUNNING
+         crates_with_metadata = await self.manager.get_popular_crates_with_metadata()
+         self.stats["total"] = len(crates_with_metadata)
+         for crate in crates_with_metadata:
+             # enqueue priority tuples
+             await self.queue.put((priority, crate.name))
+ 
+-        # spawn workers (N = self._adaptive_concurrency)
+-        for i in range(self._adaptive_concurrency):
+-            worker = asyncio.create_task(self._ingest_worker(i))
+-            self._workers.append(worker)
+-            self._task_refs.add(worker); worker.add_done_callback(self._task_refs.discard)
++        # spawn or ensure workers (N = self._adaptive_concurrency)
++        self._ensure_workers(self._adaptive_concurrency)
+ 
+         # monitors
+         self._monitor_task = asyncio.create_task(self._monitor_progress()); ...
+         self._memory_monitor_task = asyncio.create_task(self._monitor_memory()); ...
+ 
+         await self.queue.join()
+         # cancel monitors; log stats; cleanup
+@@
+-    async def _ingest_worker(self, worker_id: int):
+-        while True:
+-            await self._pause_event.wait()
+-            if self._state == WorkerState.STOPPING:
+-                break
+-            try:
+-                priority, crate_name = await asyncio.wait_for(self.queue.get(), timeout=1.0)
+-            except asyncio.TimeoutError:
+-                if self.queue.empty():
+-                    break   # <-- Likely cause: workers exit when queue temporarily empty
+-                continue
+-            # dedupe check, mark processed, then
+-            async with self.semaphore:
+-                await self._ingest_single_crate(crate_name)
+-            self.queue.task_done()
++    async def _ingest_worker(self, worker_id: int):
++        while True:
++            await self._pause_event.wait()
++            if self._state in (WorkerState.STOPPING, WorkerState.STOPPED):
++                break
++            try:
++                priority, crate_spec = await asyncio.wait_for(self.queue.get(), timeout=1.0)
++            except asyncio.TimeoutError:
++                # Keep workers alive; scheduler or tools may enqueue later
++                continue
++            # dedupe check, mark processed, then
++            async with self.semaphore:
++                await self._ingest_single_crate(crate_spec)
++            self.queue.task_done()
+@@
+-    async def _ingest_single_crate(self, crate_name: str):
+-        # uses fetch_current_stable_version(crate_name) then ingest_crate(crate_name, version)
+-        # BUG: crate_name may actually be "serde@1.0.219" when queued via queue_for_ingestion()
+-        ...
++    async def _ingest_single_crate(self, crate_name_or_spec: str):
++        # Accept 'crate' or 'crate@version'
++        name, version = parse_crate_spec(crate_name_or_spec)
++        if not name:
++            logger.warning("Skipping empty crate spec: %r", crate_name_or_spec)
++            return
++        try:
++            if not version:
++                version = await fetch_current_stable_version(name)
++            if not version:
++                logger.warning("No version resolved for crate %s; skipping", name)
++                return
++            await ingest_crate(name, version)
++            self.stats["processed"] = self.stats.get("processed", 0) + 1
++        except Exception as e:
++            logger.exception("Failed to ingest %s: %s", crate_name_or_spec, e)
++            self.stats["errors"] = self.stats.get("errors", 0) + 1
++
++    def _ensure_workers(self, count: Optional[int] = None):
++        """
++        Ensure there are 'count' live worker tasks. Replace finished ones and spawn missing.
++        """
++        target = int(count or self._adaptive_concurrency)
++        # Drop finished tasks
++        alive = []
++        for t in self._workers:
++            if not t.done():
++                alive.append(t)
++        self._workers = alive
++        missing = max(0, target - len(self._workers))
++        for i in range(missing):
++            worker = asyncio.create_task(self._ingest_worker(len(self._workers) + i))
++            self._workers.append(worker)
++            self._task_refs.add(worker)
++            worker.add_done_callback(self._task_refs.discard)
+ 
+ class IngestionScheduler:
+@@
+     async def _schedule_ingestion(self):
+         self._is_running = True; self._last_run = now
+         if not await self._should_schedule(): return
+         crates = await self.manager.get_popular_crates_with_metadata()
+         self.worker.stats = { ... total=len(crates) }
+         self.worker._processed_crates.clear()
+         for crate in crates:
+             await self.worker.queue.put((priority, crate.name))
+-        await self.worker.queue.join()  # blocks but does not ensure workers running
++        # Ensure workers are alive before waiting for queue to drain
++        self.worker._state = WorkerState.RUNNING
++        self.worker._ensure_workers(self.worker._adaptive_concurrency)
++        await self.worker.queue.join()  # now drains as workers are active
+         self._runs_completed += 1
+*** End Patch
+
+
+*** Begin Patch
+*** Add File: tests/test_pre_ingestion_worker.py
++import asyncio
++import types
++import pytest
++
++# These tests assume pytest-asyncio is configured.
++
++class DummyManager:
++    def __init__(self, names=None):
++        self._names = names or []
++    async def get_popular_crates_with_metadata(self):
++        # Minimal shape: objects with .name and .downloads/others not used for the test
++        return [types.SimpleNamespace(name=n, downloads=0, description=None, version=None, last_updated=0.0) for n in self._names]
++
++
++@pytest.mark.asyncio
++async def test_workers_do_not_exit_on_empty_queue(event_loop):
++    from src.docsrs_mcp import popular_crates as pc
++    worker = pc.PreIngestionWorker(manager=DummyManager([]))
++
++    processed = []
++    async def fake_ingest(name, ver):
++        await asyncio.sleep(0.01)
++        processed.append((name, ver))
++    # Patch ingest function used by worker
++    pc.ingest_crate = fake_ingest
++    async def fake_resolve(name):
++        return "1.0.0"
++    pc.fetch_current_stable_version = fake_resolve
++
++    await worker.start()
++    # Wait a tick so workers spawn and idle
++    await asyncio.sleep(0.05)
++    # Enqueue after idle gap: previously caused workers to have exited
++    await worker.queue.put((100, "serde"))
++    # Give time to process
++    await asyncio.wait_for(worker.queue.join(), timeout=2.0)
++    assert ("serde", "1.0.0") in processed
++
++
++@pytest.mark.asyncio
++async def test_ingest_parses_crate_spec(event_loop):
++    from src.docsrs_mcp import popular_crates as pc
++    worker = pc.PreIngestionWorker(manager=DummyManager([]))
++
++    captured = []
++    async def fake_ingest(name, ver):
++        captured.append((name, ver))
++    pc.ingest_crate = fake_ingest
++    async def fake_resolve(name):
++        return "9.9.9"
++    pc.fetch_current_stable_version = fake_resolve
++
++    # Direct call to single-crate ingest to validate parsing
++    await worker._ingest_single_crate("serde@1.2.3")
++    await worker._ingest_single_crate("tokio@latest")
++    await worker._ingest_single_crate("anyhow")
++
++    assert ("serde", "1.2.3") in captured
++    assert ("tokio", "9.9.9") in captured
++    assert ("anyhow", "9.9.9") in captured
+*** End Patch
+
+
+*** Begin Patch
+*** Add File: tests/test_ingestion_scheduler.py
++import asyncio
++import types
++import pytest
++
++class DummyManager:
++    def __init__(self, runs):
++        # runs is a list of lists; each schedule returns next list
++        self._runs = list(runs)
++    async def get_popular_crates_with_metadata(self):
++        if not self._runs:
++            return []
++        names = self._runs.pop(0)
++        return [types.SimpleNamespace(name=n, downloads=0, description=None, version=None, last_updated=0.0) for n in names]
++
++@pytest.mark.asyncio
++async def test_scheduler_respawns_workers(event_loop):
++    from src.docsrs_mcp import popular_crates as pc
++    manager = DummyManager([["a", "b"], ["c"]])
++    worker = pc.PreIngestionWorker(manager=manager)
++    scheduler = pc.IngestionScheduler(manager=manager, worker=worker, enabled=True)
++
++    async def fake_ingest(name, ver):
++        await asyncio.sleep(0.01)
++    pc.ingest_crate = fake_ingest
++    async def fake_resolve(name):
++        return "1.0.0"
++    pc.fetch_current_stable_version = fake_resolve
++
++    # First run: ensure spawn and drain
++    await scheduler._schedule_ingestion()
++    # Simulate workers all being done/finished (e.g., GC or ended)
++    worker._workers = []
++    # Second run should ensure workers are (re)spawned and queue drains
++    await scheduler._schedule_ingestion()
++    # If we reach here without timeout, join() did not hang and respawn worked
+*** End Patch
+
+
+Why these changes
+
+- Worker exit fix: Workers used to break when the queue was momentarily empty (timeout + empty check). Replacing break with continue keeps workers alive to service future enqueues from the scheduler or manual bulk ingestion. This is the primary stall fix.
+- Strong task reference: start() now retains a strong reference to the runner task to avoid premature GC and to aid observability.
+- Respawn in scheduler: Before awaiting queue.join(), the scheduler now ensures workers exist and are RUNNING, so subsequent scheduled batches won’t hang if earlier workers exited.
+- Parse crate specs: _ingest_single_crate now accepts crate@version. It uses a simple, local parse_crate_spec and resolves version when omitted or “latest”. This unblocks bulk ingestion that enqueues fixed versions.
+- Tests: Targeted async tests verify that workers don’t die on empty queues, that crate@version is parsed, and that the scheduler respawns workers between runs.
+
+Notes on semaphore/concurrency
+
+- Minimal safe change: This patch keeps existing semaphore behavior. If your _monitor_memory() currently swaps semaphore instances, it remains safe for new acquires; existing tasks complete against the old instance. Given the worker-liveness fixes above, this shouldn’t deadlock. If you want a safer approach later, consider:
+  - Keep a single semaphore instance and adjust concurrency by acquiring “reserve permits” internally to throttle, or
+  - Gate changes behind a small lock and only swap when there are no waiters.
+- Acceptance criteria do not require altering runtime concurrency beyond preventing stalls; this patch keeps scope tight and production-safe.
+
+Validation
+
+- Pre-ingestion
+  - Env: DOCSRS_PRE_INGEST_ENABLED=true, SCHEDULER_ENABLED=true, DOCSRS_CONCURRENCY=3.
+  - Start server or call /mcp/tools/start_pre_ingestion.
+  - Expect: workers remain RUNNING; queue drains; subsequent scheduler cycles process newly enqueued crates without stalls.
+- Bulk ingestion
+  - Use /mcp/tools/ingest_cargo_file with resolve_versions=true.
+  - Items like serde@1.0.219 parse and ingest; queue fully drains.
+- Scheduler resilience
+  - Trigger two consecutive scheduler runs; verify no hang at queue.join() and that logs show workers active both times.
+
+Caveats
+
+- If there’s a separate parse_crate_spec elsewhere, our local function is intentionally simple and compatible. If you prefer centralizing, replace the local definition with an import and keep the usage in _ingest_single_crate.
+- If your logging or stats keys differ, adjust the minor counters (processed/errors) to match your metrics.
+
+Next steps
+
+- Want me to adapt the semaphore update logic to avoid instance swapping under memory pressure?
+- If you share your exact popular_crates.py around the changed regions, I can align context lines precisely to your codebase.
+[2025-09-07T19:25:41] tokens used: 5766

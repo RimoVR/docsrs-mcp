@@ -47,6 +47,7 @@ class TypeNavigationService:
 
         # Query trait implementations
         async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
+            # Try exact match first
             cursor = await db.execute(
                 """
                 SELECT 
@@ -62,9 +63,31 @@ class TypeNavigationService:
                 """,
                 (crate_id, trait_path),
             )
+            
+            results = await cursor.fetchall()
+            
+            # If no results with FQN, try with bare name (last segment after "::")
+            if not results and "::" in trait_path:
+                bare_name = trait_path.split("::")[-1]
+                cursor = await db.execute(
+                    """
+                    SELECT 
+                        impl_type_path,
+                        generic_params,
+                        where_clauses,
+                        is_blanket,
+                        impl_signature,
+                        stability_level
+                    FROM trait_implementations
+                    WHERE crate_id = ? AND trait_path = ?
+                    ORDER BY is_blanket ASC, impl_type_path ASC
+                    """,
+                    (crate_id, bare_name),
+                )
+                results = await cursor.fetchall()
 
             implementations = []
-            async for row in cursor:
+            for row in results:
                 implementations.append(
                     {
                         "type_path": row[0],
@@ -449,34 +472,83 @@ class TypeNavigationService:
         # Ensure crate is ingested
         db_path = await ingest_crate(crate_name, version)
 
-        # Query database for intelligence data
+        # Query database for intelligence data with fallback path resolution
         async with aiosqlite.connect(db_path, timeout=DB_TIMEOUT) as db:
-            cursor = await db.execute(
-                """
-                SELECT 
-                    item_path,
-                    signature,
-                    safety_info,
-                    error_types,
-                    feature_requirements,
-                    is_safe,
-                    generic_params,
-                    trait_bounds,
-                    visibility,
-                    deprecated,
-                    content
-                FROM embeddings
-                WHERE item_path = ?
-                LIMIT 1
-                """,
-                (f"{crate_name}::{item_path}",),
-            )
-
-            row = await cursor.fetchone()
+            # Try different path formats to handle various input types
+            search_paths = []
+            
+            # If item_path already includes crate prefix, use as-is
+            if item_path.startswith(f"{crate_name}::"):
+                search_paths.append(item_path)
+                # Also try without prefix in case of storage inconsistency
+                search_paths.append(item_path[len(f"{crate_name}::"):])
+            else:
+                # Try with crate prefix first
+                search_paths.append(f"{crate_name}::{item_path}")
+                # Then try without prefix
+                search_paths.append(item_path)
+            
+            row = None
+            found_path = None
+            
+            for search_path in search_paths:
+                cursor = await db.execute(
+                    """
+                    SELECT 
+                        item_path,
+                        signature,
+                        safety_info,
+                        error_types,
+                        feature_requirements,
+                        is_safe,
+                        generic_params,
+                        trait_bounds,
+                        visibility,
+                        deprecated,
+                        content
+                    FROM embeddings
+                    WHERE item_path = ?
+                    LIMIT 1
+                    """,
+                    (search_path,),
+                )
+                
+                row = await cursor.fetchone()
+                if row:
+                    found_path = search_path
+                    break
+            
+            if not row:
+                # Try a final fallback with LIKE pattern for partial matches
+                cursor = await db.execute(
+                    """
+                    SELECT 
+                        item_path,
+                        signature,
+                        safety_info,
+                        error_types,
+                        feature_requirements,
+                        is_safe,
+                        generic_params,
+                        trait_bounds,
+                        visibility,
+                        deprecated,
+                        content
+                    FROM embeddings
+                    WHERE item_path LIKE ?
+                    LIMIT 1
+                    """,
+                    (f"%::{item_path.split('::')[-1]}",),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    found_path = row[0]
+            
             if not row:
                 return {
                     "item_path": item_path,
                     "error": "Item not found",
+                    "searched_paths": search_paths,
                 }
 
             # Parse JSON fields
@@ -485,7 +557,8 @@ class TypeNavigationService:
             feature_requirements = json.loads(row[4]) if row[4] else []
 
             return {
-                "item_path": item_path,
+                "item_path": found_path or row[0],  # Return the actual found path
+                "requested_path": item_path,  # Keep original request for reference
                 "enhanced_signature": row[1],
                 "safety_info": safety_info,
                 "error_types": error_types,

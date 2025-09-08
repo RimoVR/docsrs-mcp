@@ -1,0 +1,292 @@
+This is a sound analysis. The stall is likely caused by a combination of premature worker exit and the scheduler not ensuring workers are active. The unparsed crate specs in bulk ingestion are also a clear bug.
+
+Here are the proposed minimal, targeted code changes to address these issues.
+
+First, I'll read the file `src/docsrs_mcp/popular_crates.py` to ensure the context for the changes is accurate.Excellent analysis. The identified root causes align with the symptoms of a stalled ingestion system. Here are the minimal, targeted code changes to resolve the issues, presented as diffs for clarity.
+
+I will apply the following fixes:
+1.  **Fix Worker Exit (A):** In `PreIngestionWorker._ingest_worker`, I'll change the loop to `continue` on a temporary empty queue, preventing workers from exiting prematurely.
+2.  **Strengthen Task Reference (B):** In `PreIngestionWorker.start`, I'll ensure the main `_run` task is strongly referenced to prevent garbage collection.
+3.  **Fix Scheduler Stall (C):** In `IngestionScheduler._schedule_ingestion`, I'll add logic to ensure workers are running before a scheduled job. This requires a new helper method `_spawn_workers` in `PreIngestionWorker`.
+4.  **Fix Bulk Ingestion Parsing (D):** In `PreIngestionWorker._ingest_single_crate`, I'll use the existing `parse_crate_spec` utility to correctly handle `crate@version` strings from bulk ingestion.
+5.  **Safer Semaphore Updates (E):** I'll make the semaphore update in `_monitor_memory` safer by using a lock.
+
+Here are the changes for `src/docsrs_mcp/popular_crates.py`:
+
+### 1. `PreIngestionWorker.__init__`
+I'll add `_runner_task` for the strong reference and `_semaphore_lock` for safer semaphore handling.
+
+```diff
+--- a/src/docsrs_mcp/popular_crates.py
++++ b/src/docsrs_mcp/popular_crates.py
+@@ -435,6 +435,7 @@
+         self.stats = {"success": 0, "failed": 0, "skipped": 0, "total": 0}
+         self._workers: list[asyncio.Task] = []
+         self._monitor_task: asyncio.Task | None = None
++        self._runner_task: asyncio.Task | None = None
+         self._start_time: datetime | None = None
+         self._processed_crates: set[str] = set()  # For duplicate detection
+         self._memory_monitor_task: asyncio.Task | None = None
+@@ -451,6 +452,7 @@
+         self._task_refs = (
+             set()
+         )  # Strong references to prevent GC  # Currently processing crate name
++        self._semaphore_lock = asyncio.Lock()
+ 
+     async def start(self):
+         """Start pre-ingestion in background (non-blocking)."""
+@@ -458,7 +460,12 @@
+         self._start_time = datetime.now()
+ 
+         # Create background task for the main runner
+-        asyncio.create_task(self._run())
++        if self._runner_task and not self._runner_task.done():
++            logger.warning("Pre-ingestion runner task already running.")
++            return
++        self._runner_task = asyncio.create_task(self._run())
++        self._task_refs.add(self._runner_task)
++        self._runner_task.add_done_callback(self._task_refs.discard)
+ 
+     async def pause(self) -> bool:
+         """Pause the worker."""
+
+```
+
+### 2. `PreIngestionWorker`: Add `_spawn_workers` helper
+This new method will centralize worker creation and be used by both the initial run and the scheduler.
+
+```diff
+--- a/src/docsrs_mcp/popular_crates.py
++++ b/src/docsrs_mcp/popular_crates.py
+@@ -493,6 +493,19 @@
+             return True
+         return False
+ 
++    def _spawn_workers(self):
++        """Spawn worker tasks."""
++        # Clear finished worker tasks
++        self._workers = [w for w in self._workers if not w.done()]
++
++        # Spawn new workers if needed
++        for i in range(len(self._workers), self._adaptive_concurrency):
++            worker = asyncio.create_task(self._ingest_worker(i))
++            self._workers.append(worker)
++            # Store strong reference to prevent GC
++            self._task_refs.add(worker)
++            worker.add_done_callback(self._task_refs.discard)
++
+     async def _run(self):
+         """Main runner that coordinates pre-ingestion with priority processing."""
+         try:
+@@ -523,12 +536,7 @@
+                 await self.queue.put((priority, crate.name))
+ 
+             # Start worker tasks with adaptive concurrency
+-            for i in range(self._adaptive_concurrency):
+-                worker = asyncio.create_task(self._ingest_worker(i))
+-                self._workers.append(worker)
+-                # Store strong reference to prevent GC
+-                self._task_refs.add(worker)
+-                worker.add_done_callback(self._task_refs.discard)
++            self._spawn_workers()
+ 
+             # Start progress monitor
+             self._monitor_task = asyncio.create_task(self._monitor_progress())
+
+```
+
+### 3. `PreIngestionWorker._ingest_worker`
+This is the core fix for the worker exit problem (A) and prepares for parsing crate specs (D).
+
+```diff
+--- a/src/docsrs_mcp/popular_crates.py
++++ b/src/docsrs_mcp/popular_crates.py
+@@ -568,28 +568,34 @@
+ 
+                 # Get next crate from priority queue (with timeout for graceful shutdown)
+                 try:
+-                    priority, crate_name = await asyncio.wait_for(
++                    priority, crate_spec = await asyncio.wait_for(
+                         self.queue.get(), timeout=1.0
+                     )
+                 except asyncio.TimeoutError:
+-                    # Check if queue is empty and we should exit
+-                    if self.queue.empty():
++                    # Do not exit if queue is temporarily empty.
++                    # The scheduler might add more items.
++                    if self._state == WorkerState.STOPPING:
+                         break
+                     continue
+ 
++                crate_name, _ = parse_crate_spec(crate_spec)
+                 # Skip if already processed (double-check for duplicates)
+                 if crate_name in self._processed_crates:
+                     logger.debug(f"Worker {worker_id}: skipping duplicate {crate_name}")
+                     self.stats["skipped"] += 1
+                     self.queue.task_done()
+                     continue
+ 
+                 # Mark as processed to prevent duplicates
+                 self._processed_crates.add(crate_name)
+ 
+                 # Process the crate with semaphore control
+-                async with self.semaphore:
+-                    await self._ingest_single_crate(crate_name)
++                # Safely get semaphore
++                async with self._semaphore_lock:
++                    semaphore = self.semaphore
++
++                async with semaphore:
++                    await self._ingest_single_crate(crate_spec)
+ 
+                 # Mark task as done
+                 self.queue.task_done()
+@@ -599,10 +605,11 @@
+             except Exception as e:
+                 logger.error(f"Worker {worker_id} error: {e}")
+                 # Still mark as done to avoid hanging
+-                self.queue.task_done()
+-
+-    async def _ingest_single_crate(self, crate_name: str):
++                if "crate_spec" in locals():
++                    self.queue.task_done()
++
++    async def _ingest_single_crate(self, crate_spec: str):
+         """Ingest a single crate with error handling and progress tracking."""
+         start_time = time.time()
+         self.current_crate = crate_name
+
+```
+
+### 4. `PreIngestionWorker._ingest_single_crate`
+Here I'll implement the parsing logic for `crate@version` strings (D).
+
+```diff
+--- a/src/docsrs_mcp/popular_crates.py
++++ b/src/docsrs_mcp/popular_crates.py
+@@ -608,20 +608,28 @@
+                 if "crate_spec" in locals():
+                     self.queue.task_done()
+ 
+-    async def _ingest_single_crate(self, crate_name: str):
++    async def _ingest_single_crate(self, crate_spec: str):
+         """Ingest a single crate with error handling and progress tracking."""
+         start_time = time.time()
+-        self.current_crate = crate_name
++
++        try:
++            crate_name, version_spec = parse_crate_spec(crate_spec)
++        except Exception as e:
++            logger.error(f"Invalid crate spec: {crate_spec}, error: {e}")
++            self.stats["failed"] += 1
++            return
++
++        self.current_crate = crate_name
+ 
+         # Initialize progress tracking for this crate
+         self.crate_progress[crate_name] = {
+             "status": "resolving",
+             "started": start_time,
+             "percent": 0,
+         }
+-
+-        try:
++        try:
++            version = version_spec if version_spec != "latest" else None
+             # Get the latest stable version (0-10% progress)
+-            version = await fetch_current_stable_version(crate_name)
++            if not version:
++                version = await fetch_current_stable_version(crate_name)
+             if not version:
+                 logger.debug(f"No stable version found for {crate_name}, skipping")
+                 self.stats["skipped"] += 1
+```
+
+### 5. `PreIngestionWorker._monitor_memory`
+This change makes semaphore updates safer (E).
+
+```diff
+--- a/src/docsrs_mcp/popular_crates.py
++++ b/src/docsrs_mcp/popular_crates.py
+@@ -712,29 +712,26 @@
+                 memory_info = process.memory_info()
+                 memory_mb = memory_info.rss / (1024 * 1024)
+ 
++                new_concurrency = self._adaptive_concurrency
+                 # Check if approaching 1GB limit
+                 if memory_mb > 900:  # 900MB threshold
+                     logger.warning(f"High memory usage: {memory_mb:.1f}MB")
+ 
+                     # Reduce concurrency if needed
+                     if self._adaptive_concurrency > 1:
+-                        self._adaptive_concurrency = max(
+-                            1, self._adaptive_concurrency - 1
+-                        )
+-                        logger.info(
+-                            f\"Reduced concurrency to {self._adaptive_concurrency}\"
+-                        )
+-
+-                        # Update semaphore
+-                        self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)
++                        new_concurrency = max(1, self._adaptive_concurrency - 1)
+ 
+                 elif (
+                     memory_mb < 600
+                     and self._adaptive_concurrency < config.PRE_INGEST_CONCURRENCY
+                 ):
+                     # Increase concurrency if memory allows
+-                    self._adaptive_concurrency = min(
++                    new_concurrency = min(
+                         config.PRE_INGEST_CONCURRENCY, self._adaptive_concurrency + 1
+                     )
+-                    logger.debug(
+-                        f\"Increased concurrency to {self._adaptive_concurrency}\"
+-                    )
+-                    self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)
++
++                if new_concurrency != self._adaptive_concurrency:
++                    logger.info(f"Adjusting concurrency from {self._adaptive_concurrency} to {new_concurrency}")
++                    async with self._semaphore_lock:
++                        self._adaptive_concurrency = new_concurrency
++                        self.semaphore = asyncio.Semaphore(self._adaptive_concurrency)
+ 
+             except asyncio.CancelledError:
+                 break
+
+```
+
+### 6. `IngestionScheduler._schedule_ingestion`
+Finally, I'll fix the scheduler stall by ensuring workers are active (C).
+
+```diff
+--- a/src/docsrs_mcp/popular_crates.py
++++ b/src/docsrs_mcp/popular_crates.py
+@@ -882,6 +882,12 @@
+         self._last_run = datetime.now()
+ 
+         try:
++            # Ensure workers are running for the scheduled job
++            if not self.worker._workers or all(t.done() for t in self.worker._workers):
++                logger.info(
++                    "Workers are not running. Spawning workers for scheduled run."
++                )
++                self.worker._spawn_workers()
+             # Check memory before scheduling
+             if not await self._should_schedule():
+                 logger.warning(
+@@ -907,7 +913,10 @@
+                     await self.worker.queue.put((priority, crate.name))
+ 
+             # Process the queue (reuse existing worker logic)
+-            await self.worker.queue.join()
++            if self.worker.queue.empty():
++                logger.info("Queue is empty, nothing to process for this scheduled run.")
++            else:
++                await self.worker.queue.join()
+ 
+             self._runs_completed += 1
+             logger.info(
+
+```
+
+These changes directly address the likely root causes of the stall and the bulk ingestion bug. The system should now be significantly more robust.

@@ -49,6 +49,12 @@ class EnhancedMethodExtractor:
         """Initialize the enhanced method extractor."""
         self.extracted_methods: List[MethodSignature] = []
         self.trait_default_methods: Dict[str, List[Dict]] = {}  # trait_path -> methods
+        self.index: Dict[str, Dict] = {}
+
+    def set_index(self, index: Dict[str, Dict]) -> None:
+        """Provide the rustdoc index (id -> item) for resolving item IDs."""
+        if isinstance(index, dict):
+            self.index = index
     
     def extract_inherent_methods(self, item_data: Dict[str, Any], item_id: str,
                                 crate_id: str, type_path: str) -> List[MethodSignature]:
@@ -238,9 +244,9 @@ class EnhancedMethodExtractor:
             
         return safety_info
     
-    def _extract_method_from_id(self, method_id: str, crate_id: str, 
-                               parent_type_path: str, method_kind: str,
-                               trait_source: Optional[str]) -> Optional[MethodSignature]:
+    def _extract_method_from_id(self, method_id: str, crate_id: str,
+                                parent_type_path: str, method_kind: str,
+                                trait_source: Optional[str]) -> Optional[MethodSignature]:
         """Extract method signature from method ID.
         
         Note: This is a simplified implementation. In practice, this would
@@ -256,12 +262,56 @@ class EnhancedMethodExtractor:
         Returns:
             Method signature or None
         """
-        # This is a placeholder that would need to be integrated
-        # with the full rustdoc parsing to resolve method_id to actual method data
-        
-        # For now, return None to indicate this needs full integration
-        logger.debug(f"Method extraction from ID {method_id} needs full integration")
-        return None
+        try:
+            item = self.index.get(method_id)
+            if not isinstance(item, dict):
+                logger.debug(f"Method id {method_id} not found in index")
+                return None
+
+            name = item.get("name") or ""
+            inner = item.get("inner", {})
+            decl = None
+            if isinstance(inner, dict):
+                # Method can be represented under different keys, look for Function-like decl
+                decl = inner.get("decl") or inner.get("function") or inner.get("fn")
+
+            # Build signature
+            signature = self._build_method_signature(name, {"decl": decl} if decl else {})
+
+            # Flags
+            is_async = False
+            is_const = False
+            is_unsafe = False
+            visibility = item.get("visibility", "pub")
+            receiver_type = None
+
+            if isinstance(decl, dict):
+                header = decl.get("header", {}) if isinstance(decl.get("header"), dict) else {}
+                is_async = header.get("asyncness", "sync") == "async"
+                is_const = header.get("constness", "not_const") == "const"
+                is_unsafe = header.get("unsafety", "safe") == "unsafe"
+
+                inputs = decl.get("inputs", [])
+                receiver_type = self._extract_receiver_type(inputs) if isinstance(inputs, list) else None
+
+            return MethodSignature(
+                parent_type_path=parent_type_path,
+                method_name=name,
+                full_signature=signature,
+                crate_id=crate_id,
+                item_id=method_id,
+                is_async=is_async,
+                is_const=is_const,
+                is_unsafe=is_unsafe,
+                visibility=visibility,
+                method_kind=method_kind,
+                trait_source=trait_source,
+                receiver_type=receiver_type,
+                stability_level="stable",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to resolve method id {method_id}: {e}")
+            return None
     
     def _create_default_method_signature(self, method_name: str, method_info: Dict,
                                         crate_id: str, parent_type_path: str,
